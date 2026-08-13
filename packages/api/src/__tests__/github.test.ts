@@ -132,6 +132,25 @@ describe("GitHub project routes", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects GitHub routes when GIT_PROVIDER is gitlab", async () => {
+    vi.stubEnv("GIT_PROVIDER", "gitlab");
+    resetEnvCache();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", githubRouter);
+
+    const response = await app.request("/projects/project-1/github", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repository: "owner/repo", tokenEnvVar: "GITHUB_TEST_TOKEN" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "feature_disabled" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("connects a repository and performs an idempotent empty sync", async () => {
     const fetchMock = vi
       .fn()

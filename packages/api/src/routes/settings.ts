@@ -94,6 +94,8 @@ export async function buildSettingsOverview() {
       warmupEnabled: env.AIF_WARMUP_ENABLED,
       qaPipelineEnabled: env.AIF_QA_PIPELINE_ENABLED,
       githubIssuePrEnabled: env.AIF_GITHUB_ISSUE_PR_ENABLED,
+      gitProvider: env.GIT_PROVIDER,
+      gitlabIssueMrEnabled: env.AIF_GITLAB_ISSUE_MR_ENABLED,
       runtimeReadiness: {
         availableRuntimeCount: registry.listRuntimes().length,
         runtimeProfileCount: runtimeProfiles.length,
@@ -118,6 +120,8 @@ export async function buildSettingsOverview() {
       warmupEnabled: env.AIF_WARMUP_ENABLED,
       qaPipelineEnabled: env.AIF_QA_PIPELINE_ENABLED,
       githubIssuePrEnabled: env.AIF_GITHUB_ISSUE_PR_ENABLED,
+      gitProvider: env.GIT_PROVIDER,
+      gitlabIssueMrEnabled: env.AIF_GITLAB_ISSUE_MR_ENABLED,
       runtimeReadiness: {
         availableRuntimeCount: 0,
         runtimeProfileCount: allProfiles.length,

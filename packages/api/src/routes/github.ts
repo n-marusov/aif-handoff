@@ -35,10 +35,10 @@ const REVIEW_MARKER = "<!-- aif-github-review -->";
 export const githubRouter = new Hono<ParticipantApiEnv>();
 
 githubRouter.use("*", async (c, next) => {
-  if (!getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
+  if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
     log.debug(
       { method: c.req.method, path: c.req.path },
-      "GitHub issue-to-PR route blocked by rollout flag",
+      "GitHub issue-to-PR route blocked by provider selector or rollout flag",
     );
     return c.json({ error: "GitHub issue-to-PR mode is disabled", code: "feature_disabled" }, 403);
   }

@@ -566,3 +566,42 @@ describe("settings overview — GitHub issue-to-PR flag", () => {
     expect((await buildSettingsOverview()).githubIssuePrEnabled).toBe(false);
   });
 });
+
+describe("settings overview — provider selector", () => {
+  const originalProvider = process.env.GIT_PROVIDER;
+  const originalGitLab = process.env.AIF_GITLAB_ISSUE_MR_ENABLED;
+
+  afterEach(() => {
+    if (originalProvider === undefined) {
+      delete process.env.GIT_PROVIDER;
+    } else {
+      process.env.GIT_PROVIDER = originalProvider;
+    }
+    if (originalGitLab === undefined) {
+      delete process.env.AIF_GITLAB_ISSUE_MR_ENABLED;
+    } else {
+      process.env.AIF_GITLAB_ISSUE_MR_ENABLED = originalGitLab;
+    }
+    resetEnvCache();
+  });
+
+  it("reports gitProvider from GIT_PROVIDER", async () => {
+    process.env.GIT_PROVIDER = "github";
+    resetEnvCache();
+    expect((await buildSettingsOverview()).gitProvider).toBe("github");
+
+    process.env.GIT_PROVIDER = "gitlab";
+    resetEnvCache();
+    expect((await buildSettingsOverview()).gitProvider).toBe("gitlab");
+  });
+
+  it("reports gitlabIssueMrEnabled from AIF_GITLAB_ISSUE_MR_ENABLED", async () => {
+    process.env.AIF_GITLAB_ISSUE_MR_ENABLED = "true";
+    resetEnvCache();
+    expect((await buildSettingsOverview()).gitlabIssueMrEnabled).toBe(true);
+
+    process.env.AIF_GITLAB_ISSUE_MR_ENABLED = "false";
+    resetEnvCache();
+    expect((await buildSettingsOverview()).gitlabIssueMrEnabled).toBe(false);
+  });
+});
