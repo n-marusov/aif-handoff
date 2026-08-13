@@ -63,4 +63,15 @@ describe("GitHub workflow synchronization", () => {
     expect(listRepositoriesMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("does not inspect repositories or call GitHub paths when GIT_PROVIDER is gitlab", async () => {
+    vi.stubEnv("GIT_PROVIDER", "gitlab");
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as typeof fetch;
+
+    await synchronizeGitHubProjects(Date.parse("2026-08-08T11:00:00.000Z"));
+
+    expect(listRepositoriesMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

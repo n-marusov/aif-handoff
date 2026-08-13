@@ -62,6 +62,7 @@ import { setActiveStageAbortController } from "./stageAbort.js";
 import { setCoordinatorId } from "./subagentQuery.js";
 import { ensureAutoQueueTaskCommit } from "./autoQueueCommit.js";
 import { publishGitHubTask, synchronizeGitHubProjects } from "./githubWorkflow.js";
+import { publishGitLabTask, synchronizeGitLabProjects } from "./gitlabWorkflow.js";
 import {
   getRandomBackoffMinutes,
   releaseDueBlockedTasks,
@@ -593,6 +594,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
 
     if (stage.label === "implementer") {
       await publishGitHubTask(task.id, project.rootPath);
+      await publishGitLabTask(task.id, project.rootPath);
       flushActivityQueue(task.id);
     }
 
@@ -622,6 +624,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
         projectRoot: task.worktreePath ?? project.rootPath,
       });
       await publishGitHubTask(task.id, project.rootPath);
+      await publishGitLabTask(task.id, project.rootPath);
       flushActivityQueue(task.id);
 
       if (outcome?.status === "manual_review_required") {
@@ -1059,6 +1062,7 @@ async function runPollCycle(): Promise<void> {
   recoverStaleInProgressTasks();
   processDueScheduledTasks();
   await synchronizeGitHubProjects();
+  await synchronizeGitLabProjects();
   processAutoQueueAdvance();
 
   const maxProjectLanes = env.COORDINATOR_MAX_CONCURRENT_PROJECTS;

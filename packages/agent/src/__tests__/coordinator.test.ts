@@ -27,6 +27,8 @@ const testDb = { current: createTestDb() };
 const blockTaskForRuntimeGateIfEligibleMock = vi.fn();
 const claimCoordinatorTaskIfEligibleMock = vi.fn();
 const executeSubagentQueryMock = vi.fn();
+const synchronizeGitLabProjectsMock = vi.fn();
+const publishGitLabTaskMock = vi.fn();
 
 function createGitRoot(prefix: string): string {
   return createGitTestRoot(prefix, { readme: "# auto queue\n" }).rootPath;
@@ -107,6 +109,11 @@ vi.mock("../autoReviewHandler.js", async (importOriginal) => {
     }),
   };
 });
+
+vi.mock("../gitlabWorkflow.js", () => ({
+  synchronizeGitLabProjects: (...args: unknown[]) => synchronizeGitLabProjectsMock(...args),
+  publishGitLabTask: (...args: unknown[]) => publishGitLabTaskMock(...args),
+}));
 
 const {
   pollAndProcess,
@@ -2512,6 +2519,44 @@ describe("coordinator", () => {
       }
     } finally {
       for (const release of releasePlanners) release();
+      await pollPromise;
+    }
+  });
+
+  it("should invoke GitLab synchronization in runPollCycle", async () => {
+    synchronizeGitLabProjectsMock.mockClear();
+    const db = testDb.current;
+    db.insert(projects).values({ id: "gl-poll-project", name: "GL", rootPath: "/tmp/gl" }).run();
+
+    const pollPromise = pollAndProcess();
+    try {
+      await vi.waitFor(() => expect(synchronizeGitLabProjectsMock).toHaveBeenCalled());
+    } finally {
+      await pollPromise;
+    }
+  });
+
+  it("should publish GitLab tasks in implementer and reviewer stages", async () => {
+    synchronizeGitLabProjectsMock.mockClear();
+    publishGitLabTaskMock.mockClear();
+    publishGitLabTaskMock.mockResolvedValue(true);
+    const db = testDb.current;
+    db.insert(projects).values({ id: "gl-pub-project", name: "GL", rootPath: "/tmp/gl-pub" }).run();
+    db.insert(tasks)
+      .values({
+        id: "gl-pub-task",
+        projectId: "gl-pub-project",
+        title: "GL task",
+        status: "implementing",
+      })
+      .run();
+
+    const pollPromise = pollAndProcess();
+    try {
+      await vi.waitFor(() =>
+        expect(publishGitLabTaskMock).toHaveBeenCalledWith("gl-pub-task", "/tmp/gl-pub"),
+      );
+    } finally {
       await pollPromise;
     }
   });

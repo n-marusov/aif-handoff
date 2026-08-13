@@ -1,43 +1,48 @@
 import { execFileSync } from "node:child_process";
 import {
   appendTaskActivityLog,
-  findGitHubIssueByTaskId,
+  findGitLabIssueByTaskId,
   findTaskById,
-  listEnabledGitHubRepositories,
+  listEnabledGitLabRepositories,
 } from "@aif/data";
 import { getEnv, logger } from "@aif/shared";
 import { ensureAutoQueueTaskCommit } from "./autoQueueCommit.js";
 import { internalApiHeaders } from "./notifier.js";
 import { StageManualBlockError } from "./stageErrorHandler.js";
 
-const log = logger("github-workflow");
+const log = logger("gitlab-workflow");
 const SYNC_INTERVAL_MS = 60_000;
 const lastSyncAttempts = new Map<string, number>();
 
-interface GitHubApiFailure {
+interface GitLabApiFailure {
   error?: string;
   code?: string;
   retryAt?: string | null;
 }
 
-async function readFailure(response: Response): Promise<GitHubApiFailure> {
+async function readFailure(response: Response): Promise<GitLabApiFailure> {
   try {
-    return (await response.json()) as GitHubApiFailure;
+    return (await response.json()) as GitLabApiFailure;
   } catch {
     return {};
   }
 }
 
-export async function synchronizeGitHubProjects(now = Date.now()): Promise<void> {
+function gitLabModeActive(): boolean {
   const env = getEnv();
-  if (env.GIT_PROVIDER !== "github" || !env.AIF_GITHUB_ISSUE_PR_ENABLED) {
+  return env.GIT_PROVIDER === "gitlab" && env.AIF_GITLAB_ISSUE_MR_ENABLED;
+}
+
+export async function synchronizeGitLabProjects(now = Date.now()): Promise<void> {
+  if (!gitLabModeActive()) {
     log.debug(
-      "GitHub synchronization skipped because provider selector or rollout flag is disabled",
+      { gitProvider: getEnv().GIT_PROVIDER, gitLabEnabled: getEnv().AIF_GITLAB_ISSUE_MR_ENABLED },
+      "GitLab synchronization skipped because provider selector or rollout flag is disabled",
     );
     return;
   }
-  const baseUrl = env.API_BASE_URL;
-  for (const connection of listEnabledGitHubRepositories()) {
+  const baseUrl = getEnv().API_BASE_URL;
+  for (const connection of listEnabledGitLabRepositories()) {
     const lastSync = connection.lastSyncedAt ? Date.parse(connection.lastSyncedAt) : 0;
     const lastAttempt = lastSyncAttempts.get(connection.projectId) ?? 0;
     if (
@@ -48,7 +53,7 @@ export async function synchronizeGitHubProjects(now = Date.now()): Promise<void>
     }
     lastSyncAttempts.set(connection.projectId, now);
 
-    const url = `${baseUrl}/projects/${connection.projectId}/github/sync`;
+    const url = `${baseUrl}/projects/${connection.projectId}/gitlab/sync`;
     try {
       const response = await fetch(url, {
         method: "POST",
@@ -62,14 +67,14 @@ export async function synchronizeGitHubProjects(now = Date.now()): Promise<void>
           {
             projectId: connection.projectId,
             status: response.status,
-            code: failure.code ?? "github_sync_failed",
+            code: failure.code ?? "gitlab_sync_failed",
             retryAt: failure.retryAt ?? null,
           },
-          "GitHub repository sync deferred",
+          "GitLab repository sync deferred",
         );
       }
     } catch (error) {
-      log.warn({ projectId: connection.projectId, error }, "GitHub repository sync unavailable");
+      log.warn({ projectId: connection.projectId, error }, "GitLab repository sync unavailable");
     }
   }
 }
@@ -81,20 +86,20 @@ function pushBranch(projectRoot: string, branch: string): void {
   });
 }
 
-export async function publishGitHubTask(taskId: string, projectRoot: string): Promise<boolean> {
-  if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
+export async function publishGitLabTask(taskId: string, projectRoot: string): Promise<boolean> {
+  if (!gitLabModeActive()) {
     log.debug(
-      { taskId },
-      "GitHub pull request publication skipped because provider selector or rollout flag is disabled",
+      { taskId, gitProvider: getEnv().GIT_PROVIDER },
+      "GitLab merge request publication skipped because provider selector or rollout flag is disabled",
     );
     return false;
   }
-  const issue = findGitHubIssueByTaskId(taskId);
+  const issue = findGitLabIssueByTaskId(taskId);
   if (!issue) return false;
 
   const task = findTaskById(taskId);
   if (!task?.branchName) {
-    throw new StageManualBlockError("GitHub pull request publication requires a task branch.");
+    throw new StageManualBlockError("GitLab merge request publication requires a task branch.");
   }
   const executionRoot = task.worktreePath ?? projectRoot;
   const commit = await ensureAutoQueueTaskCommit({ taskId, projectRoot: executionRoot });
@@ -102,14 +107,14 @@ export async function publishGitHubTask(taskId: string, projectRoot: string): Pr
   try {
     pushBranch(executionRoot, task.branchName);
   } catch (error) {
-    log.error({ taskId, branch: task.branchName, error }, "GitHub task branch push failed");
+    log.error({ taskId, branch: task.branchName, error }, "GitLab task branch push failed");
     throw new StageManualBlockError(
-      "GitHub branch push failed. Check repository access and Git credentials, then retry.",
+      "GitLab branch push failed. Check repository access and Git credentials, then retry.",
     );
   }
 
   const refreshed = findTaskById(taskId);
-  const url = `${getEnv().API_BASE_URL}/projects/${task.projectId}/github/tasks/${taskId}/publish`;
+  const url = `${getEnv().API_BASE_URL}/projects/${task.projectId}/gitlab/tasks/${taskId}/publish`;
   let response: Response;
   try {
     response = await fetch(url, {
@@ -124,9 +129,9 @@ export async function publishGitHubTask(taskId: string, projectRoot: string): Pr
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
-    log.error({ taskId, branch: task.branchName, error }, "GitHub pull request API unavailable");
+    log.error({ taskId, branch: task.branchName, error }, "GitLab merge request API unavailable");
     throw new StageManualBlockError(
-      "GitHub pull request publication is unavailable. Check the API service and retry.",
+      "GitLab merge request publication is unavailable. Check the API service and retry.",
     );
   }
   if (!response.ok) {
@@ -136,26 +141,26 @@ export async function publishGitHubTask(taskId: string, projectRoot: string): Pr
         taskId,
         branch: task.branchName,
         status: response.status,
-        code: failure.code ?? "github_publish_failed",
+        code: failure.code ?? "gitlab_publish_failed",
         retryAt: failure.retryAt ?? null,
       },
-      "GitHub pull request publication failed",
+      "GitLab merge request publication failed",
     );
     throw new StageManualBlockError(
       failure.retryAt
-        ? `GitHub rate limit reached until ${failure.retryAt}. Retry after that time.`
-        : "GitHub pull request publication failed. Check repository permissions and retry.",
+        ? `GitLab rate limit reached until ${failure.retryAt}. Retry after that time.`
+        : "GitLab merge request publication failed. Check repository permissions and retry.",
     );
   }
 
   const completedAt = new Date().toISOString();
   appendTaskActivityLog(
     taskId,
-    `[${completedAt}] [github] Published ${task.branchName} for issue #${issue.issueNumber}`,
+    `[${completedAt}] [gitlab] Published ${task.branchName} for issue #${issue.iid}`,
   );
   log.info(
-    { taskId, issueNumber: issue.issueNumber, branch: task.branchName },
-    "GitHub pull request synchronized",
+    { taskId, iid: issue.iid, branch: task.branchName },
+    "GitLab merge request synchronized",
   );
   return true;
 }
