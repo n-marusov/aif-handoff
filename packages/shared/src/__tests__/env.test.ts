@@ -77,6 +77,9 @@ describe("env validation", () => {
     expect(result.AIF_API_NODE_SERVER_V2_WEBSOCKET_ENABLED).toBe(false);
     expect(result.AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED).toBe(false);
     expect(result.AIF_GITHUB_ISSUE_PR_ENABLED).toBe(false);
+    expect(result.GIT_PROVIDER).toBe("github");
+    expect(result.AIF_GITLAB_ISSUE_MR_ENABLED).toBe(false);
+    expect(result.AIF_GITLAB_BASE_URL).toBe("https://gitlab.com/api/v4");
     expect(result.AIF_NOTIFICATIONS_PROJECT_NAMES_ENABLED).toBe(false);
     expect(result.PARTICIPANTS_MODE_ENABLED).toBe(false);
     expect(result.PARTICIPANT_SESSION_TTL_SECONDS).toBe(7 * 24 * 60 * 60);
@@ -258,5 +261,51 @@ describe("env validation", () => {
     const { getEnv } = await import("../env.js");
     expect(() => getEnv()).toThrow("Environment validation failed");
     vi.unstubAllEnvs();
+  });
+});
+
+describe("git provider selector env", () => {
+  it("defaults GIT_PROVIDER to github", () => {
+    const result = validateEnv({});
+    expect(result.GIT_PROVIDER).toBe("github");
+  });
+
+  it("accepts gitlab as GIT_PROVIDER", () => {
+    const result = validateEnv({ GIT_PROVIDER: "gitlab" });
+    expect(result.GIT_PROVIDER).toBe("gitlab");
+  });
+
+  it("rejects unknown GIT_PROVIDER values", () => {
+    expect(() => validateEnv({ GIT_PROVIDER: "bitbucket" })).toThrow();
+  });
+
+  it("defaults AIF_GITLAB_ISSUE_MR_ENABLED to false and accepts boolean values", () => {
+    expect(validateEnv({}).AIF_GITLAB_ISSUE_MR_ENABLED).toBe(false);
+    expect(validateEnv({ AIF_GITLAB_ISSUE_MR_ENABLED: "true" }).AIF_GITLAB_ISSUE_MR_ENABLED).toBe(
+      true,
+    );
+    expect(validateEnv({ AIF_GITLAB_ISSUE_MR_ENABLED: "1" }).AIF_GITLAB_ISSUE_MR_ENABLED).toBe(
+      true,
+    );
+    expect(validateEnv({ AIF_GITLAB_ISSUE_MR_ENABLED: "off" }).AIF_GITLAB_ISSUE_MR_ENABLED).toBe(
+      false,
+    );
+  });
+
+  it("defaults AIF_GITLAB_BASE_URL to the public GitLab v4 API", () => {
+    expect(validateEnv({}).AIF_GITLAB_BASE_URL).toBe("https://gitlab.com/api/v4");
+    const result = validateEnv({ AIF_GITLAB_BASE_URL: "https://gitlab.example.test/api/v4" });
+    expect(result.AIF_GITLAB_BASE_URL).toBe("https://gitlab.example.test/api/v4");
+  });
+
+  it("allows both providers to be configured but defaults the active selector to github", () => {
+    const result = validateEnv({
+      AIF_GITHUB_ISSUE_PR_ENABLED: "true",
+      AIF_GITLAB_ISSUE_MR_ENABLED: "true",
+      GIT_PROVIDER: "github",
+    });
+    expect(result.AIF_GITHUB_ISSUE_PR_ENABLED).toBe(true);
+    expect(result.AIF_GITLAB_ISSUE_MR_ENABLED).toBe(true);
+    expect(result.GIT_PROVIDER).toBe("github");
   });
 });

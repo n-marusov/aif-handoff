@@ -144,6 +144,67 @@ export interface GitHubIssueLink {
   updatedAt: string;
 }
 
+export interface GitLabEligibility {
+  labels: string[];
+  assignee: string | null;
+  milestone: string | null;
+}
+
+export interface GitLabRepositoryConnection {
+  projectId: string;
+  namespace: string;
+  name: string;
+  webUrl: string;
+  defaultBranch: string;
+  tokenEnvVar: string;
+  eligibility: GitLabEligibility;
+  enabled: boolean;
+  tokenConfigured: boolean;
+  lastSyncedAt: string | null;
+  syncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitLabIssueCommentSnapshot {
+  id: number;
+  author: string;
+  body: string;
+  webUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitLabIssueSnapshot {
+  title: string;
+  body: string;
+  author: string;
+  labels: string[];
+  assignees: string[];
+  milestone: string | null;
+  comments: GitLabIssueCommentSnapshot[];
+}
+
+export interface GitLabIssueLink {
+  projectId: string;
+  iid: number;
+  taskId: string | null;
+  globalId: string;
+  webUrl: string;
+  state: "open" | "closed";
+  metadata: GitLabIssueSnapshot;
+  sourceUpdatedAt: string;
+  lastSyncedAt: string;
+  syncError: string | null;
+  mrIid: number | null;
+  mrUrl: string | null;
+  mrState: "open" | "closed" | "merged" | null;
+  mrChecksStatus: "pending" | "success" | "failure" | null;
+  reviewState: "pending" | "approved" | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CreateProjectInput {
   name: string;
   rootPath: string;
@@ -379,6 +440,7 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   github?: GitHubIssueLink | null;
+  gitlab?: GitLabIssueLink | null;
 }
 
 export interface TaskListItem {

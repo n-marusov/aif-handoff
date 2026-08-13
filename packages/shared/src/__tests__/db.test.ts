@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 28;
+const CURRENT_SCHEMA_VERSION = 29;
 
 function removeSqliteArtifacts(dbPath: string): void {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -43,6 +43,38 @@ describe("db", () => {
 
       expect(tables.map((row) => row.name)).toEqual(["github_issues", "github_repositories"]);
       expect(userVersion).toBe(CURRENT_SCHEMA_VERSION);
+    } finally {
+      closeDb();
+      removeSqliteArtifacts(dbPath);
+    }
+  });
+
+  it("creates restart-safe GitLab linkage tables", () => {
+    closeDb();
+    const dbPath = join(tmpdir(), `aif-shared-gitlab-${Date.now()}-${Math.random()}.sqlite`);
+
+    try {
+      getDb(dbPath);
+      closeDb();
+      const sqlite = new Database(dbPath, { readonly: true });
+      const tables = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('gitlab_repositories', 'gitlab_issues') ORDER BY name",
+        )
+        .all() as Array<{ name: string }>;
+      const userVersion = sqlite.pragma("user_version", { simple: true }) as number;
+      const issueColumns = sqlite.prepare("PRAGMA table_info(gitlab_issues)").all() as Array<{
+        name: string;
+      }>;
+      sqlite.close();
+
+      expect(tables.map((row) => row.name)).toEqual(["gitlab_issues", "gitlab_repositories"]);
+      expect(userVersion).toBe(CURRENT_SCHEMA_VERSION);
+      const names = new Set(issueColumns.map((column) => column.name));
+      expect(names.has("global_id")).toBe(true);
+      expect(names.has("iid")).toBe(true);
+      expect(names.has("node_id")).toBe(false);
+      expect(names.has("base_url")).toBe(false);
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);

@@ -274,6 +274,9 @@ const envSchema = z.object({
     }, z.boolean())
     .default(false),
   AIF_GITHUB_ISSUE_PR_ENABLED: booleanEnvSchema.default(false),
+  GIT_PROVIDER: z.enum(["github", "gitlab"]).default("github"),
+  AIF_GITLAB_ISSUE_MR_ENABLED: booleanEnvSchema.default(false),
+  AIF_GITLAB_BASE_URL: z.string().default("https://gitlab.com/api/v4"),
   AIF_RUNTIME_SESSION_FORK_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {

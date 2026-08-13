@@ -1084,6 +1084,47 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 29,
+    description: "Add restart-safe GitLab repository, issue, and merge-request linkage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS gitlab_repositories (
+        project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        namespace TEXT NOT NULL,
+        name TEXT NOT NULL,
+        web_url TEXT NOT NULL,
+        default_branch TEXT NOT NULL,
+        token_env_var TEXT NOT NULL DEFAULT 'GITLAB_TOKEN',
+        eligibility_json TEXT NOT NULL DEFAULT '{}',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_synced_at TEXT,
+        sync_error TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      CREATE TABLE IF NOT EXISTS gitlab_issues (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        iid INTEGER NOT NULL,
+        task_id TEXT UNIQUE REFERENCES tasks(id) ON DELETE SET NULL,
+        global_id TEXT NOT NULL,
+        web_url TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('open', 'closed')),
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        source_updated_at TEXT NOT NULL,
+        last_synced_at TEXT NOT NULL,
+        sync_error TEXT,
+        mr_iid INTEGER,
+        mr_url TEXT,
+        mr_state TEXT CHECK (mr_state IS NULL OR mr_state IN ('open', 'closed', 'merged')),
+        mr_checks_status TEXT CHECK (mr_checks_status IS NULL OR mr_checks_status IN ('pending', 'success', 'failure')),
+        review_state TEXT CHECK (review_state IS NULL OR review_state IN ('pending', 'approved')),
+        review_fingerprint TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        PRIMARY KEY (project_id, iid)
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

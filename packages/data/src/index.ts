@@ -96,6 +96,7 @@ import { createAuditEventValues } from "./audit.js";
 
 export * from "./normalizeBacklogPositions.js";
 export * from "./github.js";
+export * from "./gitlab.js";
 export {
   appendAuditEvent,
   listAuditEvents,

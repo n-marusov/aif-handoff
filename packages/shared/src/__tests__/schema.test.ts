@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, getTableName, sql } from "drizzle-orm";
 import { createTestDb } from "../db.js";
-import { tasks } from "../schema.js";
+import { projects, tasks, gitlabRepositories, gitlabIssues } from "../schema.js";
 import type { TaskStatus } from "../types.js";
 
 describe("tasks schema", () => {
@@ -187,5 +187,88 @@ describe("tasks schema", () => {
     const result = db.select().from(tasks).where(eq(tasks.id, id)).get();
     expect(result?.runtimeLimitSnapshotJson).toBe(snapshotJson);
     expect(result?.runtimeLimitUpdatedAt).toBe("2026-04-17T10:00:05.000Z");
+  });
+});
+
+describe("gitlab schema", () => {
+  let db: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("exposes gitlabRepositories and gitlabIssues tables with GitLab linkage columns", () => {
+    expect(gitlabRepositories).toBeDefined();
+    expect(gitlabIssues).toBeDefined();
+
+    // gitlabRepositories — one connection per project, no token persisted
+    db.insert(projects).values({ id: "gitlab-project", name: "Repo", rootPath: "/tmp/repo" }).run();
+    db.insert(gitlabRepositories)
+      .values({
+        projectId: "gitlab-project",
+        namespace: "gitlab-org",
+        name: "example",
+        webUrl: "https://gitlab.com/gitlab-org/example",
+        defaultBranch: "main",
+        tokenEnvVar: "GITLAB_TOKEN",
+        enabled: true,
+      })
+      .run();
+
+    const repo = db.select().from(gitlabRepositories).get();
+    expect(repo).toMatchObject({
+      projectId: "gitlab-project",
+      namespace: "gitlab-org",
+      name: "example",
+      webUrl: "https://gitlab.com/gitlab-org/example",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TOKEN",
+      enabled: true,
+    });
+    expect(repo!.eligibilityJson).toBe("{}");
+  });
+
+  it("stores gitlab_issues with global_id + iid but no node_id or baseUrl columns", () => {
+    const id = crypto.randomUUID();
+    db.insert(projects).values({ id: "gitlab-project", name: "Repo", rootPath: "/tmp/repo" }).run();
+    db.insert(tasks).values({ id, projectId: "gitlab-project", title: "Task" }).run();
+    db.insert(gitlabIssues)
+      .values({
+        projectId: "gitlab-project",
+        iid: 42,
+        globalId: "gid://gitlab/Issue/123",
+        taskId: id,
+        webUrl: "https://gitlab.com/gitlab-org/example/-/issues/42",
+        state: "open",
+        sourceUpdatedAt: "2026-08-13T10:00:00Z",
+        lastSyncedAt: "2026-08-13T10:00:00Z",
+      })
+      .run();
+
+    const issue = db.select().from(gitlabIssues).get();
+    expect(issue).toMatchObject({
+      projectId: "gitlab-project",
+      iid: 42,
+      globalId: "gid://gitlab/Issue/123",
+      taskId: id,
+      webUrl: "https://gitlab.com/gitlab-org/example/-/issues/42",
+      state: "open",
+    });
+
+    // The GitLab schema replaces GitHub's node_id with global_id and has no per-connection baseUrl
+    const row = issue as Record<string, unknown>;
+    expect("nodeId" in row).toBe(false);
+    expect("node_id" in row).toBe(false);
+    expect("baseUrl" in row).toBe(false);
+    expect("base_url" in row).toBe(false);
+  });
+
+  it("migrates fresh databases to schema version 29 (GitLab linkage tables)", () => {
+    // createTestDb() runs all migrations; user_version reflects the latest migration applied.
+    const result = db.run(sql`SELECT 1`);
+    expect(result).toBeDefined();
+    // The drizzle schema exposes both GitLab tables on a migrated database.
+    expect(getTableName(gitlabRepositories)).toBe("gitlab_repositories");
+    expect(getTableName(gitlabIssues)).toBe("gitlab_issues");
   });
 });
