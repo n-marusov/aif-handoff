@@ -347,6 +347,56 @@ describe("TaskDetailHeader", () => {
     expect(screen.queryByText("Request changes")).toBeNull();
   });
 
+  it("leaves the final decision on a GitLab merge request", () => {
+    render(
+      <TaskDetailHeader
+        task={{
+          ...baseTask,
+          status: "done",
+          gitlab: {
+            projectId: "proj-1",
+            iid: 154,
+            taskId: baseTask.id,
+            globalId: "gid://gitlab/Issue/154",
+            webUrl: "https://gitlab.com/lee-to/aif-handoff/-/issues/154",
+            state: "open",
+            metadata: {
+              title: "GitLab mode",
+              body: "",
+              author: "lee-to",
+              labels: [],
+              assignees: [],
+              milestone: null,
+              comments: [],
+            },
+            sourceUpdatedAt: "2026-08-13T00:00:00.000Z",
+            lastSyncedAt: "2026-08-13T00:00:00.000Z",
+            syncError: null,
+            mrIid: 200,
+            mrUrl: "https://gitlab.com/lee-to/aif-handoff/-/merge_requests/200",
+            mrState: "open",
+            mrChecksStatus: "success",
+            reviewState: "pending",
+            createdAt: "2026-08-13T00:00:00.000Z",
+            updatedAt: "2026-08-13T00:00:00.000Z",
+          },
+        }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("GITLAB #154")).toBeDefined();
+    expect(screen.queryByText("Approve")).toBeNull();
+    expect(screen.queryByText("Request changes")).toBeNull();
+  });
+
   it("should render Resume button and PAUSED badge when task is paused", () => {
     const pausedTask = { ...baseTask, paused: true };
     render(

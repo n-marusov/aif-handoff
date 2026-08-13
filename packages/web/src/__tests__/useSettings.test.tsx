@@ -57,6 +57,23 @@ describe("useSettings", () => {
     });
     expect(mockGetSettings).toHaveBeenCalledTimes(1);
   });
+
+  it("surfaces gitProvider and gitlabIssueMrEnabled from the settings response", async () => {
+    mockGetSettings.mockResolvedValue({
+      useSubagents: true,
+      maxReviewIterations: 3,
+      autoReviewStrategy: "full_re_review",
+      gitProvider: "gitlab",
+      gitlabIssueMrEnabled: true,
+    });
+
+    const { result } = renderHook(() => useSettings(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data?.gitProvider).toBe("gitlab");
+    expect(result.current.data?.gitlabIssueMrEnabled).toBe(true);
+  });
 });
 
 describe("useProjectDefaults", () => {

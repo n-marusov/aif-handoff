@@ -82,7 +82,7 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                   <Section title="Description">
                     <TaskDescription
                       description={task.description}
-                      readOnly={Boolean(task.github)}
+                      readOnly={Boolean(task.github) || Boolean(task.gitlab)}
                       onSave={(description) =>
                         actions.updateTask.mutate({ id: task.id, input: { description } })
                       }
@@ -129,6 +129,53 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                           {task.github.reviewState && (
                             <Badge variant="outline" size="sm">
                               review: {task.github.reviewState}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </Section>
+                  )}
+
+                  {task.gitlab && (
+                    <Section title="GitLab">
+                      <div className="space-y-2 text-sm">
+                        <a
+                          href={task.gitlab.webUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-primary underline underline-offset-2"
+                        >
+                          Issue #{task.gitlab.iid}
+                        </a>
+                        {task.gitlab.mrUrl && (
+                          <div>
+                            <a
+                              href={task.gitlab.mrUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary underline underline-offset-2"
+                            >
+                              Merge request #{task.gitlab.mrIid}
+                            </a>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant="outline" size="sm">
+                            issue: {task.gitlab.state}
+                          </Badge>
+                          {task.gitlab.mrState && (
+                            <Badge variant="outline" size="sm">
+                              MR: {task.gitlab.mrState}
+                            </Badge>
+                          )}
+                          {task.gitlab.mrChecksStatus && (
+                            <Badge variant="outline" size="sm">
+                              checks: {task.gitlab.mrChecksStatus}
+                            </Badge>
+                          )}
+                          {task.gitlab.reviewState && (
+                            <Badge variant="outline" size="sm">
+                              review: {task.gitlab.reviewState}
                             </Badge>
                           )}
                         </div>

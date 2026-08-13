@@ -11,8 +11,13 @@ const mutateUpdateOrganization = vi.fn();
 const mutateConnectGitHub = vi.fn();
 const mutateDisconnectGitHub = vi.fn();
 const mutateSyncGitHub = vi.fn();
+const mutateConnectGitLab = vi.fn();
+const mutateDisconnectGitLab = vi.fn();
+const mutateSyncGitLab = vi.fn();
 const mockToast = vi.fn();
 let mockGitHubIssuePrEnabled = true;
+let mockGitProvider = "github";
+let mockGitLabIssueMrEnabled = false;
 let mockProjects = [
   {
     id: "p-1",
@@ -61,6 +66,10 @@ vi.mock("@/hooks/useProjects", () => ({
   useConnectProjectGitHub: () => ({ mutate: mutateConnectGitHub, isPending: false }),
   useDisconnectProjectGitHub: () => ({ mutate: mutateDisconnectGitHub, isPending: false }),
   useSyncProjectGitHub: () => ({ mutate: mutateSyncGitHub, isPending: false }),
+  useProjectGitLab: () => ({ data: { connection: null, issues: [] }, isLoading: false }),
+  useConnectProjectGitLab: () => ({ mutate: mutateConnectGitLab, isPending: false }),
+  useDisconnectProjectGitLab: () => ({ mutate: mutateDisconnectGitLab, isPending: false }),
+  useSyncProjectGitLab: () => ({ mutate: mutateSyncGitLab, isPending: false }),
 }));
 
 vi.mock("@/components/ui/toast", () => ({
@@ -69,7 +78,13 @@ vi.mock("@/components/ui/toast", () => ({
 }));
 
 vi.mock("@/hooks/useSettings", () => ({
-  useSettings: () => ({ data: { githubIssuePrEnabled: mockGitHubIssuePrEnabled } }),
+  useSettings: () => ({
+    data: {
+      githubIssuePrEnabled: mockGitHubIssuePrEnabled,
+      gitProvider: mockGitProvider,
+      gitlabIssueMrEnabled: mockGitLabIssueMrEnabled,
+    },
+  }),
 }));
 
 const { ProjectSelector } = await import("@/components/project/ProjectSelector");
@@ -85,8 +100,13 @@ describe("ProjectSelector", () => {
     mutateConnectGitHub.mockReset();
     mutateDisconnectGitHub.mockReset();
     mutateSyncGitHub.mockReset();
+    mutateConnectGitLab.mockReset();
+    mutateDisconnectGitLab.mockReset();
+    mutateSyncGitLab.mockReset();
     mockToast.mockReset();
     mockGitHubIssuePrEnabled = true;
+    mockGitProvider = "github";
+    mockGitLabIssueMrEnabled = false;
     mockProjects = [
       {
         id: "p-1",
@@ -566,6 +586,44 @@ describe("ProjectSelector", () => {
     fireEvent.click(screen.getByTitle("Edit"));
 
     expect(screen.queryByText("GitHub Issue-to-PR")).toBeNull();
+  });
+
+  it("hides GitLab project controls while gitlabIssueMrEnabled is disabled", () => {
+    mockGitProvider = "gitlab";
+    mockGitLabIssueMrEnabled = false;
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
+
+    render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    expect(screen.queryByText("GitLab Issue-to-MR")).toBeNull();
+  });
+
+  it("shows the GitLab block only when gitProvider is gitlab", () => {
+    mockGitProvider = "gitlab";
+    mockGitLabIssueMrEnabled = true;
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
+
+    render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    expect(screen.getByText("GitLab Issue-to-MR")).toBeDefined();
+  });
+
+  it("hides the GitHub block when gitProvider is gitlab", () => {
+    mockGitHubIssuePrEnabled = true;
+    mockGitProvider = "gitlab";
+    mockGitLabIssueMrEnabled = true;
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
+
+    render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    expect(screen.queryByText("GitHub Issue-to-PR")).toBeNull();
+    expect(screen.getByText("GitLab Issue-to-MR")).toBeDefined();
   });
 
   describe("auto-queue toggle", () => {

@@ -752,6 +752,81 @@ rate-limit recovery. Trusted agent calls to sync/publish may use
 
 ---
 
+## GitLab Issue-to-MR
+
+All endpoints in this section return `403` with `code: "feature_disabled"` unless
+`GIT_PROVIDER=gitlab` **and** `AIF_GITLAB_ISSUE_MR_ENABLED=true`. This mirrors the GitHub
+mode with `namespace/project` identifiers, issue IIDs, and merge requests (MRs).
+
+GitLab endpoints use the project connection's token environment variable (`GITLAB_*`
+prefix, default `GITLAB_TOKEN`). Token values are never accepted in request bodies or
+returned in responses. The API base URL comes from the global `AIF_GITLAB_BASE_URL`
+environment variable (default `https://gitlab.com/api/v4`) for self-hosted support.
+
+### Get GitLab State
+
+`GET /projects/:id/gitlab` returns `{ connection, issues }`. The connection includes
+`tokenConfigured` but never the token. Each issue contains its task link and current MR,
+checks, and review state.
+
+### Connect or Disconnect
+
+`PUT /projects/:id/gitlab` validates repository access via
+`GET /projects/:url_encoded_path` and stores the connection.
+
+```json
+{
+  "repository": "namespace/project",
+  "tokenEnvVar": "GITLAB_TOKEN",
+  "enabled": true,
+  "eligibility": {
+    "labels": ["aif"],
+    "assignee": null,
+    "milestone": null
+  }
+}
+```
+
+`DELETE /projects/:id/gitlab` removes the connection but preserves already imported tasks
+and issue linkage.
+
+### Synchronize Issues and Merge Requests
+
+`POST /projects/:id/gitlab/sync` with `{}` imports eligible open issues, refreshes linked
+issues/comments, and reconciles MR approval/check state. Repeated calls update the same
+task. For a newly imported issue, sync also detects an open MR whose description contains
+a same-repository `Closes`, `Fixes`, or `Resolves #<iid>` reference and creates the linked
+task directly in `done`. Review state is approvals-only: `approved` when
+`GET /merge_requests/:iid/approvals` reports `approved=true`, otherwise `pending` — there
+is no automatic `changes_requested` transition in v1. A closed issue pauses its task; a
+closed unmerged MR also pauses it. A merged MR advances a MR-ready `done` task to
+`verified`; the coordinator never merges an MR itself.
+
+### Publish a Task Merge Request
+
+`POST /projects/:id/gitlab/tasks/:taskId/publish` is used by the agent after pushing the
+persisted task branch:
+
+```json
+{
+  "branch": "feature/gitlab-issue-154",
+  "commitSha": "0123456789abcdef",
+  "implementationLog": "Implemented and tested the requested change.",
+  "reviewComments": "Automated review passed."
+}
+```
+
+The endpoint creates or updates one MR containing `Closes #<iid>`, implementation and
+test evidence, and a no-auto-merge notice. Automated review feedback uses one marker note
+(`<!-- aif-gitlab-review -->`) updated only when its fingerprint changes. The response
+carries the current approvals-derived review state (`approved`/`pending`) refreshed at
+publication time. HTTP failures use
+structured `code`, status, and optional `retryAt` fields for authentication, access,
+validation, and rate-limit recovery. Trusted agent calls to sync/publish may use
+`INTERNAL_BROADCAST_TOKEN`; browser calls use normal participant auth and CSRF rules.
+
+---
+
 ## Runtime Profiles
 
 Runtime profiles carry non-secret transport/model config plus the latest persisted runtime-limit snapshot used by API, agent, and UI surfaces.

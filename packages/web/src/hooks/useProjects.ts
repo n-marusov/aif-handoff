@@ -7,6 +7,7 @@ import type {
 } from "@aif/shared/browser";
 import { api, ApiError } from "../lib/api.js";
 import type { GitHubEligibility } from "@aif/shared/browser";
+import type { GitLabEligibility } from "@aif/shared/browser";
 import { invalidateProjectWarmupQueries } from "./useProjectWarmup.js";
 
 const MAX_PROJECTS_RETRIES = 8;
@@ -159,6 +160,56 @@ export function useSyncProjectGitHub() {
     mutationFn: (id: string) => api.syncProjectGitHub(id),
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ["projectGitHub", id] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+}
+
+export function useProjectGitLab(projectId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["projectGitLab", projectId],
+    queryFn: () => api.getProjectGitLab(projectId!),
+    enabled: enabled && Boolean(projectId),
+  });
+}
+
+export function useConnectProjectGitLab() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: {
+        repository: string;
+        tokenEnvVar: string;
+        enabled: boolean;
+        eligibility: GitLabEligibility;
+      };
+    }) => api.connectProjectGitLab(id, input),
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["projectGitLab", id] });
+    },
+  });
+}
+
+export function useDisconnectProjectGitLab() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.disconnectProjectGitLab(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["projectGitLab", id] });
+    },
+  });
+}
+
+export function useSyncProjectGitLab() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.syncProjectGitLab(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["projectGitLab", id] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });

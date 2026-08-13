@@ -33,6 +33,9 @@ import type {
   GitHubEligibility,
   GitHubIssueLink,
   GitHubRepositoryConnection,
+  GitLabEligibility,
+  GitLabIssueLink,
+  GitLabRepositoryConnection,
 } from "@aif/shared/browser";
 
 export class ApiError extends Error {
@@ -190,6 +193,8 @@ export interface SettingsResponse {
   warmupEnabled: boolean;
   qaPipelineEnabled?: boolean;
   githubIssuePrEnabled?: boolean;
+  gitProvider?: "github" | "gitlab";
+  gitlabIssueMrEnabled?: boolean;
   runtimeReadiness: {
     availableRuntimeCount: number;
     runtimeProfileCount: number;
@@ -264,6 +269,11 @@ export interface ClearProjectWarmupResponse {
 export interface GitHubProjectState {
   connection: GitHubRepositoryConnection | null;
   issues: GitHubIssueLink[];
+}
+
+export interface GitLabProjectState {
+  connection: GitLabRepositoryConnection | null;
+  issues: GitLabIssueLink[];
 }
 
 export interface SendChatMessageResponse {
@@ -601,6 +611,41 @@ export const api = {
     issues: GitHubIssueLink[];
   }> {
     return request(`/projects/${encodeURIComponent(id)}/github/sync`, {
+      method: "POST",
+      body: "{}",
+    });
+  },
+
+  getProjectGitLab(id: string): Promise<GitLabProjectState> {
+    return request(`/projects/${encodeURIComponent(id)}/gitlab`);
+  },
+
+  connectProjectGitLab(
+    id: string,
+    input: {
+      repository: string;
+      tokenEnvVar: string;
+      enabled: boolean;
+      eligibility: GitLabEligibility;
+    },
+  ): Promise<GitLabRepositoryConnection> {
+    return request(`/projects/${encodeURIComponent(id)}/gitlab`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+
+  disconnectProjectGitLab(id: string): Promise<void> {
+    return request(`/projects/${encodeURIComponent(id)}/gitlab`, { method: "DELETE" });
+  },
+
+  syncProjectGitLab(id: string): Promise<{
+    imported: number;
+    updated: number;
+    skipped: number;
+    issues: GitLabIssueLink[];
+  }> {
+    return request(`/projects/${encodeURIComponent(id)}/gitlab/sync`, {
       method: "POST",
       body: "{}",
     });

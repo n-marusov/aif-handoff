@@ -45,6 +45,10 @@ import {
   useConnectProjectGitHub,
   useDisconnectProjectGitHub,
   useSyncProjectGitHub,
+  useProjectGitLab,
+  useConnectProjectGitLab,
+  useDisconnectProjectGitLab,
+  useSyncProjectGitLab,
 } from "@/hooks/useProjects";
 import { useToast } from "@/components/ui/toast";
 import { useSettings } from "@/hooks/useSettings";
@@ -71,9 +75,14 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const connectGitHub = useConnectProjectGitHub();
   const disconnectGitHub = useDisconnectProjectGitHub();
   const syncGitHub = useSyncProjectGitHub();
+  const connectGitLab = useConnectProjectGitLab();
+  const disconnectGitLab = useDisconnectProjectGitLab();
+  const syncGitLab = useSyncProjectGitLab();
   const { toast } = useToast();
   const { data: settings } = useSettings();
   const githubIssuePrEnabled = settings?.githubIssuePrEnabled ?? false;
+  const gitProvider = settings?.gitProvider ?? "github";
+  const gitlabIssueMrEnabled = settings?.gitlabIssueMrEnabled ?? false;
 
   const showMutationError = (error: unknown, fallback: string) => {
     toast(error instanceof Error ? error.message : fallback, "error", 8000);
@@ -99,6 +108,11 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const [githubLabels, setGitHubLabels] = useState("");
   const [githubAssignee, setGitHubAssignee] = useState("");
   const [githubMilestone, setGitHubMilestone] = useState("");
+  const [gitlabRepository, setGitLabRepository] = useState("");
+  const [gitlabTokenEnvVar, setGitLabTokenEnvVar] = useState("GITLAB_TOKEN");
+  const [gitlabLabels, setGitLabLabels] = useState("");
+  const [gitlabAssignee, setGitLabAssignee] = useState("");
+  const [gitlabMilestone, setGitLabMilestone] = useState("");
   const selectorRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -178,6 +192,10 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     editingId,
     isEditDialogOpen && githubIssuePrEnabled,
   );
+  const { data: gitlabData, isLoading: isGitLabLoading } = useProjectGitLab(
+    editingId,
+    isEditDialogOpen && gitlabIssueMrEnabled && gitProvider === "gitlab",
+  );
   const { data: mcpData, isLoading: isMcpLoading } = useQuery({
     queryKey: ["project-mcp", editingId],
     queryFn: () => api.getProjectMcp(editingId!),
@@ -186,6 +204,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   });
   const mcpServers = mcpData?.mcpServers ? Object.keys(mcpData.mcpServers) : [];
   const githubConnection = githubData?.connection ?? null;
+  const gitlabConnection = gitlabData?.connection ?? null;
 
   useEffect(() => {
     if (!isEditDialogOpen || !githubData) return;
@@ -199,6 +218,19 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [githubData, isEditDialogOpen]);
+
+  useEffect(() => {
+    if (!isEditDialogOpen || !gitlabData) return;
+    const connection = gitlabData.connection;
+    const timeout = window.setTimeout(() => {
+      setGitLabRepository(connection ? `${connection.namespace}/${connection.name}` : "");
+      setGitLabTokenEnvVar(connection?.tokenEnvVar ?? "GITLAB_TOKEN");
+      setGitLabLabels(connection?.eligibility.labels.join(", ") ?? "");
+      setGitLabAssignee(connection?.eligibility.assignee ?? "");
+      setGitLabMilestone(connection?.eligibility.milestone ?? "");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [gitlabData, isEditDialogOpen]);
 
   const openCreate = () => {
     if (!canManage) return;
@@ -218,6 +250,11 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     setGitHubLabels("");
     setGitHubAssignee("");
     setGitHubMilestone("");
+    setGitLabRepository("");
+    setGitLabTokenEnvVar("GITLAB_TOKEN");
+    setGitLabLabels("");
+    setGitLabAssignee("");
+    setGitLabMilestone("");
     setDropdownOpen(false);
     setProjectQuery("");
     setActiveProjectId(null);
@@ -249,6 +286,11 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     setGitHubLabels("");
     setGitHubAssignee("");
     setGitHubMilestone("");
+    setGitLabRepository("");
+    setGitLabTokenEnvVar("GITLAB_TOKEN");
+    setGitLabLabels("");
+    setGitLabAssignee("");
+    setGitLabMilestone("");
     setDropdownOpen(false);
     setProjectQuery("");
     setActiveProjectId(null);
@@ -309,6 +351,52 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     disconnectGitHub.mutate(editingId, {
       onSuccess: () => toast("GitHub repository disconnected", "success"),
       onError: (error) => showMutationError(error, "Failed to disconnect GitHub repository"),
+    });
+  };
+
+  const handleConnectGitLab = () => {
+    if (!editingId || !gitlabRepository.trim() || !gitlabTokenEnvVar.trim()) return;
+    connectGitLab.mutate(
+      {
+        id: editingId,
+        input: {
+          repository: gitlabRepository.trim(),
+          tokenEnvVar: gitlabTokenEnvVar.trim(),
+          enabled: true,
+          eligibility: {
+            labels: gitlabLabels
+              .split(",")
+              .map((label) => label.trim())
+              .filter(Boolean),
+            assignee: gitlabAssignee.trim() || null,
+            milestone: gitlabMilestone.trim() || null,
+          },
+        },
+      },
+      {
+        onSuccess: () => toast("GitLab repository connected", "success"),
+        onError: (error) => showMutationError(error, "Failed to connect GitLab repository"),
+      },
+    );
+  };
+
+  const handleSyncGitLab = () => {
+    if (!editingId) return;
+    syncGitLab.mutate(editingId, {
+      onSuccess: (result) =>
+        toast(
+          `GitLab sync complete: ${result.imported} imported, ${result.updated} updated`,
+          "success",
+        ),
+      onError: (error) => showMutationError(error, "Failed to synchronize GitLab repository"),
+    });
+  };
+
+  const handleDisconnectGitLab = () => {
+    if (!editingId) return;
+    disconnectGitLab.mutate(editingId, {
+      onSuccess: () => toast("GitLab repository disconnected", "success"),
+      onError: (error) => showMutationError(error, "Failed to disconnect GitLab repository"),
     });
   };
 
@@ -692,7 +780,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                 PROJECTS_MOUNT; host paths under PROJECTS_DIR use the same mount.
               </p>
             </div>
-            {dialogMode === "edit" && githubIssuePrEnabled && (
+            {dialogMode === "edit" && gitProvider === "github" && githubIssuePrEnabled && (
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <label className="flex items-center gap-1.5 text-sm font-medium">
@@ -784,6 +872,109 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                               variant="ghost"
                               onClick={handleDisconnectGitHub}
                               disabled={disconnectGitHub.isPending}
+                            >
+                              Disconnect
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+            {dialogMode === "edit" && gitProvider === "gitlab" && gitlabIssueMrEnabled && (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="flex items-center gap-1.5 text-sm font-medium">
+                    <GitPullRequest className="h-3.5 w-3.5" />
+                    GitLab Issue-to-MR
+                  </label>
+                  {gitlabConnection && (
+                    <Badge variant="outline" size="sm">
+                      {gitlabConnection.tokenConfigured ? "Connected" : "Token missing"}
+                    </Badge>
+                  )}
+                </div>
+                <div className="space-y-2 border border-border bg-card/50 p-3">
+                  {isGitLabLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading GitLab settings...</p>
+                  ) : (
+                    <>
+                      <Input
+                        placeholder="namespace/repository"
+                        aria-label="GitLab repository"
+                        value={gitlabRepository}
+                        onChange={(event) => setGitLabRepository(event.target.value)}
+                      />
+                      <Input
+                        placeholder="GITLAB_TOKEN"
+                        aria-label="GitLab token environment variable"
+                        className="font-mono text-sm"
+                        value={gitlabTokenEnvVar}
+                        onChange={(event) => setGitLabTokenEnvVar(event.target.value)}
+                      />
+                      <Input
+                        placeholder="Required labels, comma-separated"
+                        aria-label="GitLab issue labels"
+                        value={gitlabLabels}
+                        onChange={(event) => setGitLabLabels(event.target.value)}
+                      />
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input
+                          placeholder="Assignee (optional)"
+                          aria-label="GitLab issue assignee"
+                          value={gitlabAssignee}
+                          onChange={(event) => setGitLabAssignee(event.target.value)}
+                        />
+                        <Input
+                          placeholder="Milestone (optional)"
+                          aria-label="GitLab issue milestone"
+                          value={gitlabMilestone}
+                          onChange={(event) => setGitLabMilestone(event.target.value)}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        The server reads the token from this environment variable; the token is
+                        never stored in the database.
+                      </p>
+                      {gitlabConnection?.syncError && (
+                        <p className="text-xs text-destructive">{gitlabConnection.syncError}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleConnectGitLab}
+                          disabled={
+                            connectGitLab.isPending ||
+                            !gitlabRepository.trim() ||
+                            !gitlabTokenEnvVar.trim()
+                          }
+                        >
+                          {connectGitLab.isPending
+                            ? "Connecting..."
+                            : gitlabConnection
+                              ? "Update connection"
+                              : "Connect"}
+                        </Button>
+                        {gitlabConnection && (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={handleSyncGitLab}
+                              disabled={syncGitLab.isPending}
+                            >
+                              {syncGitLab.isPending ? "Syncing..." : "Sync now"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={handleDisconnectGitLab}
+                              disabled={disconnectGitLab.isPending}
                             >
                               Disconnect
                             </Button>

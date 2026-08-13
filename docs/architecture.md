@@ -170,6 +170,42 @@ after a later changes-requested review. Authentication/access failures, rate lim
 failures, closed issues, closed unmerged PRs, and unavailable API services are surfaced or
 paused without creating a second task or PR.
 
+### GitLab Issue-to-MR Workflow
+
+The GitLab mode mirrors the GitHub workflow with `namespace/project` identifiers, issue IIDs,
+and merge requests. It is active only when `GIT_PROVIDER=gitlab` **and**
+`AIF_GITLAB_ISSUE_MR_ENABLED=true`; the default `GIT_PROVIDER=github` preserves the existing
+GitHub behavior unchanged, and only one provider is active per deployment.
+
+One optional GitLab repository connection belongs to a project. The API periodically reads
+eligible issues and atomically maps `(project_id, iid)` to one full-mode task using the
+GitLab global issue id (`global_id`). Issue title, body, labels, assignees, milestone,
+comments, state, and source timestamps remain a refreshable snapshot; the task description
+is read-only in the UI.
+
+```text
+GitLab issue → sync/dedupe → task → isolated worktree/branch → commit + push
+      ↑                                                          │
+      └── approval pending ← same task/MR ← automated review ← MR publish/update
+                                                                 │
+                                       human merge → Done → Verified
+```
+
+GitLab tasks use the same persisted per-task worktree and commit-gate machinery as GitHub
+tasks. The agent never embeds a token in Git commands: push uses configured Git credentials,
+while MR operations go through the authenticated internal API. MR creation tolerates
+restart races by looking up the branch after GitLab's duplicate-validation response, and
+review notes carry a `<!-- aif-gitlab-review -->` marker updated only when the fingerprint
+changes.
+
+`Done` is the terminal **MR ready for human decision** state in this mode. The coordinator
+never merges and the web UI does not offer local approve/request-change actions for these
+tasks. Review state is approvals-only: `approved` when the MR approvals endpoint reports
+`approved=true`, otherwise `pending` — there is no automatic `changes_requested` transition
+in v1. A merged MR advances a MR-ready `Done` task to `Verified`; a closed unmerged MR
+pauses its task. Authentication/access failures, rate limits, push failures, closed issues,
+and unavailable API services are surfaced or paused without creating a second task or MR.
+
 ### Reliability Guards
 
 The pipeline includes four reliability layers for long-running autonomous execution:
@@ -500,6 +536,8 @@ Key tables:
 - **tasks** — task data, status, plan/logs, heartbeat metadata, runtime override fields (`runtime_profile_id`, `model_override`, `runtime_options_json`), runtime session id (`session_id`), internal stage-scoped runtime retry pin (`active_runtime_status`, `active_runtime_selection_json`), auto-review convergence state (`manual_review_required`, `auto_review_state_json`), and task-level runtime-limit copy (`runtime_limit_snapshot_json`, `runtime_limit_updated_at`). The active runtime fields are distinct from `session_id` and `runtime_limit_snapshot_json`; they store the runtime/profile/model/options selected for same-status retries and are cleared on stage or human transitions except `retry_from_blocked`.
 - **github_repositories** — one non-secret repository connection and eligibility policy per project
 - **github_issues** — idempotent project/issue-to-task mapping plus PR, checks, and review state
+- **gitlab_repositories** — one non-secret GitLab repository connection and eligibility policy per project
+- **gitlab_issues** — idempotent project/iid-to-task mapping plus MR, checks, and approvals-only review state
 - **runtime_profiles** — project-scoped or global runtime/provider profiles with non-secret transport/model config plus authoritative runtime-limit state (`runtime_limit_snapshot_json`, `runtime_limit_updated_at`)
 - **projects** — project metadata plus default runtime profile ids for tasks and chat
 - **chat_sessions / chat_messages** — persisted chat state with runtime profile/session linkage

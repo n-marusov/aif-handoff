@@ -125,7 +125,7 @@ export function TaskDetailHeader({
         )
   ).filter(
     (action) =>
-      !task.github ||
+      (!task.github && !task.gitlab) ||
       (action.event !== "approve_done" && action.actionType !== "open_request_changes"),
   );
   const canManageOwnership = Boolean(
@@ -172,6 +172,11 @@ export function TaskDetailHeader({
           {task.github && (
             <Badge variant="outline" size="sm">
               GITHUB #{task.github.issueNumber}
+            </Badge>
+          )}
+          {task.gitlab && (
+            <Badge variant="outline" size="sm">
+              GITLAB #{task.gitlab.iid}
             </Badge>
           )}
           {task.paused && (
