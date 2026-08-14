@@ -122,15 +122,16 @@ data/                    # SQLite database files (gitignored)
 
 ## Documentation
 
-| Document        | Path                    | Description                               |
-| --------------- | ----------------------- | ----------------------------------------- |
-| README          | README.md               | Project landing page                      |
-| Getting Started | docs/getting-started.md | Installation, setup, first steps          |
-| Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow  |
-| API Reference   | docs/api.md             | REST endpoints, WebSocket events          |
-| Configuration   | docs/configuration.md   | Environment variables, logging, auth      |
-| Providers       | docs/providers.md       | Runtime profiles and adapter capabilities |
-| MCP Sync        | docs/mcp-sync.md        | MCP tools, transports, and authentication |
+| Document        | Path                    | Description                                    |
+| --------------- | ----------------------- | ---------------------------------------------- |
+| README          | README.md               | Project landing page                           |
+| Getting Started | docs/getting-started.md | Installation, setup, first steps               |
+| Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow       |
+| API Reference   | docs/api.md             | REST endpoints, WebSocket events               |
+| Configuration   | docs/configuration.md   | Environment variables, logging, auth           |
+| Providers       | docs/providers.md       | Runtime profiles and adapter capabilities      |
+| MCP Sync        | docs/mcp-sync.md        | MCP tools, transports, and authentication      |
+| GitLab Demo     | docs/gitlab-demo.md     | End-to-end GitLab.com + router.ai demo runbook |
 
 ## AI Context Files
 

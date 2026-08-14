@@ -63,7 +63,7 @@ Returns frontend-visible defaults and runtime readiness metadata.
   "maxReviewIterations": 3,
   "autoReviewStrategy": "full_re_review",
   "runtimeReadiness": {
-    "availableRuntimeCount": 3,
+    "availableRuntimeCount": 4,
     "runtimeProfileCount": 6,
     "enabledRuntimeProfileCount": 5
   },
