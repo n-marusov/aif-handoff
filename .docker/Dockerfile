@@ -103,7 +103,13 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     https_proxy=${HTTPS_PROXY} \
     all_proxy=${ALL_PROXY} \
     no_proxy=${NO_PROXY}
-RUN apk add --no-cache gettext
+# Resilient apk wrapper — retries on transient Alpine CDN failures
+# (dl-cdn.alpinelinux.org sporadically returns temporary errors, and apk then
+# reports "no such package" because the repo index never loaded). See script
+# header for details.
+COPY .docker/apk-install.sh /usr/local/bin/apk-install
+RUN chmod +x /usr/local/bin/apk-install \
+    && apk-install gettext
 COPY --from=build /app/packages/web/dist /usr/share/angie/html
 COPY .docker/angie.conf /etc/angie/http.d/default.conf
 COPY .docker/angie.production.conf /etc/angie/http.d/production.conf.template
