@@ -277,6 +277,19 @@ const envSchema = z.object({
   GIT_PROVIDER: z.enum(["github", "gitlab"]).default("github"),
   AIF_GITLAB_ISSUE_MR_ENABLED: booleanEnvSchema.default(false),
   AIF_GITLAB_BASE_URL: z.string().default("https://gitlab.com/api/v4"),
+  // Runtime-profile bootstrap: auto-provision a global runtime profile (and
+  // optionally app-wide defaults) from env at API startup. Off by default so
+  // existing installs (e.g. Codex OAuth login) keep their behavior.
+  AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED: booleanEnvSchema.default(false),
+  AIF_BOOTSTRAP_RUNTIME_PROFILE_NAME: z.string().min(1).max(200).default("Bootstrap (Codex CLI)"),
+  AIF_BOOTSTRAP_RUNTIME_ID: z.string().min(1).max(100).default("codex"),
+  AIF_BOOTSTRAP_PROVIDER_ID: z.string().min(1).max(100).default("openai"),
+  AIF_BOOTSTRAP_TRANSPORT: z.string().min(1).max(100).default("cli"),
+  AIF_BOOTSTRAP_BASE_URL: z.string().max(1000).optional(),
+  AIF_BOOTSTRAP_API_KEY_ENV_VAR: z.string().min(1).max(100).default("OPENAI_API_KEY"),
+  AIF_BOOTSTRAP_DEFAULT_MODEL: z.string().max(200).optional(),
+  AIF_BOOTSTRAP_SET_DEFAULTS: booleanEnvSchema.default(true),
+  AIF_BOOTSTRAP_FORCE_UPDATE: booleanEnvSchema.default(false),
   AIF_RUNTIME_SESSION_FORK_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {

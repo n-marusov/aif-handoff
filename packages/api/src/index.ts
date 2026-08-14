@@ -16,6 +16,7 @@ import { requestLogger } from "./middleware/logger.js";
 import { trackApiLoad } from "./middleware/apiLoad.js";
 import { startServer } from "./serverBootstrap.js";
 import { createCodexIndexService } from "./services/codexIndex.js";
+import { seedBootstrapRuntimeProfile } from "./services/profileBootstrap.js";
 import { createGracefulShutdownHandler } from "./shutdown.js";
 import { participantAuth, type ParticipantApiEnv } from "./middleware/participantAuth.js";
 import { participantCsrf } from "./middleware/csrf.js";
@@ -116,6 +117,14 @@ listProjects();
 const recoveredQaRuns = resetStaleQaRuns();
 if (recoveredQaRuns > 0) {
   log.warn({ recoveredQaRuns }, "Reset stale running QA runs to error after restart");
+}
+
+// Auto-provision a global runtime profile (and app-wide defaults) from env at
+// startup — gitlab-demo.md steps 3.1+3.3. No-op unless
+// AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true. See services/profileBootstrap.ts.
+const bootstrapResult = seedBootstrapRuntimeProfile();
+if (bootstrapResult.action !== "disabled") {
+  log.info({ ...bootstrapResult }, "Runtime profile bootstrap result");
 }
 const codexIndexService = createCodexIndexService();
 
