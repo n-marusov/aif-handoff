@@ -80,6 +80,9 @@ let _runtimeRegistry: RuntimeRegistry | null = null;
 export function setRuntimeRegistry(registry: RuntimeRegistry): void {
   _runtimeRegistry = registry;
 }
+export function getRuntimeRegistrySync(): RuntimeRegistry | null {
+  return _runtimeRegistry;
+}
 setCoordinatorId(COORDINATOR_ID);
 
 const runtimeCounters = {

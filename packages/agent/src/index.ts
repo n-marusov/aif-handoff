@@ -8,6 +8,7 @@ import { notifyProjectRuntimeLimitBroadcast } from "./notifier.js";
 import { connectWakeChannel, closeWakeChannel, waitForApiReady } from "./wakeChannel.js";
 import { abortAllActiveStages } from "./stageAbort.js";
 import { startPollScheduler } from "./pollScheduler.js";
+import { startInternalApi, type InternalApiServer } from "./internalApi.js";
 import { startLoginBroker, type BrokerServer } from "./codex/loginBroker.js";
 
 const log = logger("agent");
@@ -138,6 +139,19 @@ if (env.AIF_ENABLE_CODEX_LOGIN_PROXY) {
 log.info("Agent coordinator is running. Press Ctrl+C to stop.");
 
 // ---------------------------------------------------------------------------
+// Always-on internal API: lets the API trigger GitLab git-prepare (and any
+// future agent-side operations) synchronously. Not gated by the codex broker
+// flag — production needs it for Connect/Sync git-prepare.
+// ---------------------------------------------------------------------------
+let internalApiServer: InternalApiServer | null = null;
+try {
+  internalApiServer = startInternalApi();
+  log.info({ port: internalApiServer.port }, "Agent internal API started");
+} catch (err) {
+  log.error({ err }, "Failed to start agent internal API; GitLab git-prepare will be unavailable");
+}
+
+// ---------------------------------------------------------------------------
 // Graceful shutdown: flush buffered activity logs before exit
 // ---------------------------------------------------------------------------
 function onShutdown(signal: string): void {
@@ -150,6 +164,10 @@ function onShutdown(signal: string): void {
     abortAllActiveStages();
     closeWakeChannel();
     flushAllActivityQueues();
+    if (internalApiServer) {
+      void internalApiServer.close();
+      internalApiServer = null;
+    }
     if (codexLoginBroker) {
       const active = codexLoginBroker.runtime.getCurrentSession();
       if (active && !active.child.killed) {
