@@ -393,17 +393,26 @@ describe("GitLab project routes", () => {
   });
 
   it("connects a repository and performs an idempotent empty sync", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
+    const fetchMock = vi.fn().mockImplementation((url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (href.includes("/gitlab/prepare")) {
+        return Promise.resolve(
+          jsonResponse({ ok: true, gitPreparedAt: "2026-08-15T00:00:00.000Z" }),
+        );
+      }
+      if (href.includes("/issues")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      // connect validation: GET /projects/namespace%2Frepo
+      return Promise.resolve(
         jsonResponse({
           id: 1,
           path_with_namespace: "namespace/repo",
           web_url: "https://gitlab.com/namespace/repo",
           default_branch: "main",
         }),
-      )
-      .mockResolvedValueOnce(jsonResponse([]));
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     const app = new Hono();
     app.route("/projects", gitlabRouter);
@@ -435,17 +444,25 @@ describe("GitLab project routes", () => {
   });
 
   it("connects a repository in a nested subgroup and syncs using the full namespace path", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
+    const fetchMock = vi.fn().mockImplementation((url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (href.includes("/gitlab/prepare")) {
+        return Promise.resolve(
+          jsonResponse({ ok: true, gitPreparedAt: "2026-08-15T00:00:00.000Z" }),
+        );
+      }
+      if (href.includes("/issues")) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(
         jsonResponse({
           id: 2,
           path_with_namespace: "group/subgroup/repo",
           web_url: "https://gitlab.com/group/subgroup/repo",
           default_branch: "main",
         }),
-      )
-      .mockResolvedValueOnce(jsonResponse([]));
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     const app = new Hono();
     app.route("/projects", gitlabRouter);
@@ -474,7 +491,99 @@ describe("GitLab project routes", () => {
       body: "{}",
     });
     expect(synced.status).toBe(200);
-    expect(fetchMock.mock.calls[1]![0]).toContain("group%2Fsubgroup%2Frepo");
+    const issuesCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/issues"));
+    expect(String(issuesCall?.[0])).toContain("group%2Fsubgroup%2Frepo");
+  });
+
+  it("triggers agent git-prepare on connect and aborts sync when it fails strictly", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (href.includes("/gitlab/prepare")) {
+        return Promise.resolve(
+          jsonResponse(
+            { error: "git fetch origin failed", code: "gitlab_prepare_fetch_failed" },
+            { status: 422 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse({
+          id: 1,
+          path_with_namespace: "namespace/repo",
+          web_url: "https://gitlab.com/namespace/repo",
+          default_branch: "main",
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+
+    // Connect saves the connection (best-effort prepare warning is not fatal).
+    const connected = await app.request("/projects/project-1/gitlab", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repository: "namespace/repo",
+        tokenEnvVar: "GITLAB_TEST_TOKEN",
+        enabled: true,
+        eligibility: { labels: [], assignee: null, milestone: null },
+      }),
+    });
+    expect(connected.status).toBe(200);
+
+    // First sync is strict: prepare failure aborts the import with the error.
+    const synced = await app.request("/projects/project-1/gitlab/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(synced.status).toBe(502);
+    expect(await synced.json()).toMatchObject({
+      code: "gitlab_prepare_fetch_failed",
+    });
+  });
+
+  it("returns 502 gitlab_prepare_unavailable when the agent is unreachable", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string | URL | Request) => {
+      const href = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (href.includes("/gitlab/prepare")) {
+        return Promise.reject(new TypeError("fetch failed: connect ECONNREFUSED"));
+      }
+      return Promise.resolve(
+        jsonResponse({
+          id: 1,
+          path_with_namespace: "namespace/repo",
+          web_url: "https://gitlab.com/namespace/repo",
+          default_branch: "main",
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+
+    // Seed an unprepared connection so the first sync triggers strict prepare.
+    upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "namespace",
+      name: "repo",
+      webUrl: "https://gitlab.com/namespace/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+    });
+
+    const synced = await app.request("/projects/project-1/gitlab/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(synced.status).toBe(502);
+    expect(await synced.json()).toMatchObject({
+      code: "gitlab_prepare_unavailable",
+    });
   });
 
   it("rejects a connection when its credential environment variable is absent", async () => {
@@ -505,6 +614,7 @@ describe("GitLab project routes", () => {
         tokenEnvVar: "GITLAB_TEST_TOKEN",
         eligibility: { labels: [], assignee: null, milestone: null },
         enabled: true,
+        gitPreparedAt: "2026-08-15T00:00:00.000Z",
       });
       const mergeRequest = {
         iid: 200,
@@ -574,6 +684,7 @@ describe("GitLab project routes", () => {
       tokenEnvVar: "GITLAB_TEST_TOKEN",
       eligibility: { labels: [], assignee: null, milestone: null },
       enabled: true,
+      gitPreparedAt: "2026-08-15T00:00:00.000Z",
     });
     const closed = importGitLabIssueTask({
       projectId: "project-1",
@@ -753,6 +864,7 @@ describe("GitLab project routes", () => {
       tokenEnvVar: "GITLAB_TEST_TOKEN",
       eligibility: { labels: [], assignee: null, milestone: null },
       enabled: true,
+      gitPreparedAt: "2026-08-15T00:00:00.000Z",
     });
     const imported = importGitLabIssueTask({
       projectId: "project-1",

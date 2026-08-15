@@ -18,6 +18,7 @@ import {
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { gitlabConnectSchema, gitlabPublishSchema, gitlabSyncSchema } from "../schemas.js";
+import { callAgentGitPrepare } from "../services/gitlabPrepareBridge.js";
 import {
   GitLabApiError,
   GitLabClient,
@@ -136,6 +137,16 @@ gitlabRouter.put("/:id/gitlab", jsonValidator(gitlabConnectSchema), async (c) =>
       eligibility: body.eligibility,
       enabled: body.enabled,
     });
+    // Best-effort git-prepare on connect: the agent extracts the default branch
+    // and initializes AI Factory files. Failures are logged (not fatal) — the
+    // next Sync now re-runs prepare strictly.
+    const prepare = await callAgentGitPrepare(projectId, { strict: false });
+    if (!prepare.ok) {
+      log.warn(
+        { projectId, errorCode: prepare.errorCode, error: prepare.error },
+        "GitLab git-prepare deferred on connect; Sync now will re-run it strictly",
+      );
+    }
     return c.json(connection);
   } catch (error) {
     return gitlabErrorResponse(c, error);
@@ -154,6 +165,26 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
   if (!connection) return c.json({ error: "GitLab connection not found" }, 404);
   if (!connection.enabled)
     return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitLabIssues(projectId) });
+
+  // First sync (or reconnect) also runs strict git-prepare: extract the default
+  // branch + init AI Factory files. On failure, surface the error immediately
+  // (task stays blocked) instead of importing issues into a broken repo.
+  if (!connection.gitPreparedAt) {
+    const prepare = await callAgentGitPrepare(projectId, { strict: true });
+    if (!prepare.ok) {
+      log.warn(
+        { projectId, errorCode: prepare.errorCode, error: prepare.error },
+        "GitLab git-prepare failed on sync; aborting import",
+      );
+      return c.json(
+        {
+          error: prepare.error ?? "GitLab git-prepare failed",
+          code: prepare.errorCode ?? "gitlab_prepare_failed",
+        },
+        502,
+      );
+    }
+  }
 
   try {
     const client = clientFor(connection);
