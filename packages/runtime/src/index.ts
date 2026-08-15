@@ -206,6 +206,12 @@ export {
   resolveCodexSubagentStrategy,
   type CodexSubagentStrategy,
 } from "./adapters/codex/subagentStrategy.js";
+export {
+  codexHome,
+  ensureCodexProviderConfig,
+  providerNameFromBaseUrl,
+  type EnsureCodexProviderConfigInput,
+} from "./adapters/codex/config.js";
 
 export {
   buildCodexAuthFingerprint,

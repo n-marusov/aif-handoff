@@ -9,6 +9,7 @@ import {
   withProcessTimeouts,
 } from "../../timeouts.js";
 import { classifyCodexRuntimeError } from "./errors.js";
+import { ensureCodexProviderConfig } from "./config.js";
 import { getCodexSessionLimitSnapshot } from "./sessions.js";
 import { assertSafeWindowsShellExecutablePath } from "../../shellSafety.js";
 import {
@@ -1000,6 +1001,28 @@ export async function runCodexCli(
   const explicitApiKey = readString(options.apiKey);
   const allowApiKey = Boolean(explicitApiKeyEnvVar) || Boolean(explicitApiKey);
   const apiKeyEnvVar = explicitApiKeyEnvVar ?? "OPENAI_API_KEY";
+
+  // For a custom base URL (OpenAI-compatible gateway like router.ai), the Codex
+  // CLI reads the endpoint from ~/.codex/config.toml (it ignores OPENAI_BASE_URL
+  // / CODEX_BASE_URL env vars). Ensure the provider block exists before spawn so
+  // the CLI reaches the configured gateway instead of api.openai.com.
+  const baseUrl =
+    readString(options.baseUrl) ??
+    readString(options.agentApiBaseUrl) ??
+    readString(process.env.CODEX_BASE_URL) ??
+    null;
+  if (baseUrl) {
+    const ensured = ensureCodexProviderConfig({
+      baseUrl,
+      apiKeyEnvVar,
+      model: readString(input.model) ?? null,
+    });
+    logger?.info?.(
+      { providerName: ensured.providerName, configPath: ensured.configPath, baseUrl },
+      "Ensured Codex CLI provider config",
+    );
+  }
+
   const curatedEnv = buildCuratedEnv(apiKeyEnvVar, { allowApiKey });
   const env = curatedEnv.env;
   // An explicitly configured literal apiKey is injected directly (it is never
