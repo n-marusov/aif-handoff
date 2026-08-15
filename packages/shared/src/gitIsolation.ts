@@ -862,3 +862,35 @@ export function restorePersistedBranch(input: RestorePersistedBranchInput): void
     "Restored persisted feature branch",
   );
 }
+
+/**
+ * Apply a bot git identity (user.name / user.email) as the global git config
+ * so commits made by subagents are attributed to the bot account. No-op when
+ * either value is missing. Failures are non-fatal — the caller logs them.
+ */
+export function applyGitIdentity(input: {
+  botName?: string | null;
+  botEmail?: string | null;
+  logger?: { warn(message: string): void };
+}): void {
+  const { botName, botEmail } = input;
+  const name = botName?.trim();
+  const email = botEmail?.trim();
+  if (!name || !email) return;
+
+  const run = (args: string[]): void => {
+    execFileSync("git", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+  };
+  try {
+    run(["config", "--global", "user.name", name]);
+    run(["config", "--global", "user.email", email]);
+    log.info({ botName: name, botEmail: email }, "Applied bot git identity globally");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    input.logger?.warn?.(`Failed to apply bot git identity: ${message}`);
+    log.warn({ botName: name, err: message }, "Failed to apply bot git identity");
+  }
+}

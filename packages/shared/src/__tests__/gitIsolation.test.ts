@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assertCurrentBranch,
   assertWorkingTreeClean,
+  applyGitIdentity,
   BranchIsolationError,
   branchExists,
   buildBranchName,
@@ -522,4 +523,34 @@ describe("gitIsolation", () => {
     },
     GIT_TEST_TIMEOUT_MS,
   );
+
+  it("applies bot git identity as global config when both values are set", () => {
+    const globalConfig = join(mkdtempSync(join(tmpdir(), "aif-git-config-")), "gitconfig");
+    const originalGlobal = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    try {
+      applyGitIdentity({ botName: "AIF Bot", botEmail: "bot@example.com" });
+      expect(git(projectRoot, ["config", "--global", "user.name"])).toBe("AIF Bot");
+      expect(git(projectRoot, ["config", "--global", "user.email"])).toBe("bot@example.com");
+    } finally {
+      if (originalGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = originalGlobal;
+    }
+  });
+
+  it("is a no-op when name or email is missing", () => {
+    const configDir = mkdtempSync(join(tmpdir(), "aif-git-config-"));
+    const globalConfig = join(configDir, "gitconfig");
+    const originalGlobal = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    try {
+      applyGitIdentity({ botName: "AIF Bot", botEmail: "" });
+      applyGitIdentity({ botName: "", botEmail: "bot@example.com" });
+      // Nothing should have been written to the global config file.
+      expect(existsSync(globalConfig)).toBe(false);
+    } finally {
+      if (originalGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = originalGlobal;
+    }
+  });
 });

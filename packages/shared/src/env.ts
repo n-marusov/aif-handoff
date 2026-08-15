@@ -290,6 +290,11 @@ const envSchema = z.object({
   AIF_BOOTSTRAP_DEFAULT_MODEL: z.string().max(200).optional(),
   AIF_BOOTSTRAP_SET_DEFAULTS: booleanEnvSchema.default(true),
   AIF_BOOTSTRAP_FORCE_UPDATE: booleanEnvSchema.default(false),
+  // Git identity for commits made by the agent (bot attribution). When both
+  // are set, the agent applies them as the global git user.name/user.email so
+  // subagent commits are attributed to the bot account.
+  AIF_GIT_BOT_NAME: z.string().min(1).max(200).optional(),
+  AIF_GIT_BOT_EMAIL: z.string().min(1).max(320).optional(),
   AIF_RUNTIME_SESSION_FORK_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {

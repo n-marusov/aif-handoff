@@ -228,6 +228,7 @@ export { validateProjectRootPath } from "./pathValidation.js";
 // Git/worktree isolation utilities (Node-only)
 export {
   BranchIsolationError,
+  applyGitIdentity,
   assertCurrentBranch,
   assertWorkingTreeClean,
   branchExists,

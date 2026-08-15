@@ -95,6 +95,16 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     AIF_ENABLE_CODEX_LOGIN_PROXY: false,
     AIF_CODEX_LOGIN_BROKER_PORT: 3010,
     AGENT_INTERNAL_URL: "http://agent:3010",
+    AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED: false,
+    AIF_BOOTSTRAP_RUNTIME_PROFILE_NAME: "Bootstrap (Codex CLI)",
+    AIF_BOOTSTRAP_RUNTIME_ID: "codex",
+    AIF_BOOTSTRAP_PROVIDER_ID: "openai",
+    AIF_BOOTSTRAP_TRANSPORT: "cli",
+    AIF_BOOTSTRAP_BASE_URL: undefined,
+    AIF_BOOTSTRAP_API_KEY_ENV_VAR: "OPENAI_API_KEY",
+    AIF_BOOTSTRAP_DEFAULT_MODEL: undefined,
+    AIF_BOOTSTRAP_SET_DEFAULTS: true,
+    AIF_BOOTSTRAP_FORCE_UPDATE: false,
     ...overrides,
   };
 }

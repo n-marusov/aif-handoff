@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { createDbUsageSink, listProjects } from "@aif/data";
-import { getEnv, logger } from "@aif/shared";
+import { applyGitIdentity, getEnv, logger } from "@aif/shared";
 import { bootstrapRuntimeRegistry } from "@aif/runtime";
 import { pollAndProcess, setRuntimeRegistry } from "./coordinator.js";
 import { flushAllActivityQueues } from "./hooks.js";
@@ -37,6 +37,12 @@ probeAiFactory();
 
 // Validate env
 const env = getEnv();
+
+// Attribute subagent commits to a bot account when configured.
+applyGitIdentity({
+  botName: env.AIF_GIT_BOT_NAME,
+  botEmail: env.AIF_GIT_BOT_EMAIL,
+});
 
 // Ensure DB is ready
 listProjects();
