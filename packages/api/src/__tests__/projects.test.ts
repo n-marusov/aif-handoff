@@ -680,6 +680,89 @@ describe("projects API", () => {
     expect(body.rootPath).toBe("/tmp/demo-project");
   });
 
+  it("generates a container root path from the name when rootPath is omitted", async () => {
+    vi.stubEnv("PROJECTS_MOUNT", "/home/www");
+
+    const res = await app.request("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "My Project" }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.name).toBe("My Project");
+    expect(body.rootPath).toBe("/home/www/my-project");
+  });
+
+  it("rejects a duplicate project name (case-insensitive) on create", async () => {
+    testDb.current
+      .insert(projects)
+      .values({ id: "existing", name: "Demo", rootPath: "/tmp/demo" })
+      .run();
+
+    const res = await app.request("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "demo" }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("already exists");
+  });
+
+  it("resolves a slug collision with a numeric suffix on create", async () => {
+    vi.stubEnv("PROJECTS_MOUNT", "/home/www");
+    testDb.current
+      .insert(projects)
+      .values({ id: "existing", name: "Other", rootPath: "/home/www/my-project" })
+      .run();
+
+    const res = await app.request("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "My Project" }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.rootPath).toBe("/home/www/my-project-2");
+  });
+
+  it("preserves the existing root path when updating without rootPath", async () => {
+    testDb.current
+      .insert(projects)
+      .values({ id: "upd-proj", name: "Old", rootPath: "/tmp/original" })
+      .run();
+
+    const res = await app.request("/projects/upd-proj", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Renamed" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe("Renamed");
+    expect(body.rootPath).toBe("/tmp/original");
+  });
+
+  it("rejects a duplicate name on update when it collides with another project", async () => {
+    testDb.current.insert(projects).values({ id: "a", name: "Alpha", rootPath: "/tmp/a" }).run();
+    testDb.current.insert(projects).values({ id: "b", name: "Beta", rootPath: "/tmp/b" }).run();
+
+    const res = await app.request("/projects/a", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "beta" }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("already exists");
+  });
+
   it("rejects foreign project-owned runtime profile defaults on create", async () => {
     testDb.current
       .insert(runtimeProfiles)

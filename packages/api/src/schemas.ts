@@ -77,7 +77,7 @@ const taskAttachmentSchema = z.object({
 
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
-  rootPath: z.string().min(1, "Root path is required"),
+  rootPath: z.string().min(1).optional(),
   plannerMaxBudgetUsd: z.number().positive().optional(),
   planCheckerMaxBudgetUsd: z.number().positive().optional(),
   implementerMaxBudgetUsd: z.number().positive().optional(),

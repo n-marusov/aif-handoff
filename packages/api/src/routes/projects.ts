@@ -223,7 +223,11 @@ projectsRouter.post("/", jsonValidator(createProjectSchema), async (c) => {
     log.warn({ fieldErrors: runtimeValidation.fieldErrors }, "Rejected invalid project defaults");
     return c.json(runtimeValidation, 400);
   }
-  const { project: created, pathError, initError } = await createProject(body);
+  const { project: created, pathError, initError, nameError } = await createProject(body);
+  if (nameError) {
+    log.warn({ name: body.name }, "Rejected duplicate project name");
+    return c.json({ error: nameError }, 400);
+  }
   if (pathError) return c.json({ error: pathError }, 400);
   if (initError) return c.json({ error: initError }, 500);
   if (!created) return c.json({ error: "Failed to create project" }, 500);
@@ -261,7 +265,7 @@ projectsRouter.put("/:id", jsonValidator(createProjectSchema), async (c) => {
   }
 
   const unsupportedParallelAutoQueue = rejectsParallelAutoQueueWithBranches({
-    rootPath: body.rootPath,
+    rootPath: existing.rootPath,
     parallelEnabled: body.parallelEnabled ?? existing.parallelEnabled,
     autoQueueMode: existing.autoQueueMode,
   });
@@ -269,7 +273,11 @@ projectsRouter.put("/:id", jsonValidator(createProjectSchema), async (c) => {
     return c.json({ error: unsupportedParallelAutoQueue }, 400);
   }
 
-  const { project: updated, pathError } = updateProject(id, body);
+  const { project: updated, pathError, nameError } = updateProject(id, body);
+  if (nameError) {
+    log.warn({ projectId: id, name: body.name }, "Rejected duplicate project name");
+    return c.json({ error: nameError }, 400);
+  }
   if (pathError) return c.json({ error: pathError }, 400);
 
   log.debug({ projectId: id }, "Project updated");

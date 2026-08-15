@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 import { initProject } from "@aif/runtime";
-import { validateProjectRootPath, logger } from "@aif/shared";
+import { slugify, validateProjectRootPath, logger } from "@aif/shared";
 import type { UpdateProjectOrganizationInput } from "@aif/shared";
 import { getApiRuntimeRegistry } from "../services/runtime.js";
 import {
@@ -89,9 +89,35 @@ function mapProjectPathToContainer(rootPath: string): string {
   return posix.join(containerProjectsMount, normalizedRootPath.slice(1));
 }
 
+function normalizeProjectName(name: string): string {
+  return name.trim().normalize("NFC").toLowerCase();
+}
+
+function findDuplicateProjectName(name: string, excludeId: string | null): ProjectRow | undefined {
+  const normalized = normalizeProjectName(name);
+  if (!normalized) return undefined;
+  return listProjects().find(
+    (project) => project.id !== excludeId && normalizeProjectName(project.name) === normalized,
+  );
+}
+
+function resolveGeneratedProjectRootPath(name: string): string {
+  const base = readContainerProjectsMount();
+  const slug = slugify(name);
+  const taken = new Set(listProjects().map((project) => project.rootPath.toLowerCase()));
+
+  let candidate = posix.join(base, slug);
+  let suffix = 2;
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = posix.join(base, `${slug}-${suffix}`);
+    suffix += 1;
+  }
+  return candidate;
+}
+
 export async function createProject(input: {
   name: string;
-  rootPath: string;
+  rootPath?: string;
   plannerMaxBudgetUsd?: number | null;
   planCheckerMaxBudgetUsd?: number | null;
   implementerMaxBudgetUsd?: number | null;
@@ -101,11 +127,23 @@ export async function createProject(input: {
   defaultPlanRuntimeProfileId?: string | null;
   defaultReviewRuntimeProfileId?: string | null;
   defaultChatRuntimeProfileId?: string | null;
-}): Promise<{ project: ProjectRow | undefined; pathError?: string; initError?: string }> {
-  const normalizedInput = { ...input, rootPath: mapProjectPathToContainer(input.rootPath) };
-  const pathError = validateProjectRootPath(normalizedInput.rootPath);
+}): Promise<{ project?: ProjectRow; nameError?: string; pathError?: string; initError?: string }> {
+  const duplicate = findDuplicateProjectName(input.name, null);
+  if (duplicate) {
+    return {
+      project: undefined,
+      nameError: `A project named "${input.name.trim()}" already exists`,
+    };
+  }
+
+  const rootPath = input.rootPath
+    ? mapProjectPathToContainer(input.rootPath)
+    : resolveGeneratedProjectRootPath(input.name);
+
+  const pathError = validateProjectRootPath(rootPath);
   if (pathError) return { project: undefined, pathError };
 
+  const normalizedInput = { ...input, rootPath };
   const project = createProjectRecord(normalizedInput);
 
   try {
@@ -142,7 +180,7 @@ export function updateProject(
   id: string,
   input: {
     name: string;
-    rootPath: string;
+    rootPath?: string;
     plannerMaxBudgetUsd?: number | null;
     planCheckerMaxBudgetUsd?: number | null;
     implementerMaxBudgetUsd?: number | null;
@@ -153,12 +191,24 @@ export function updateProject(
     defaultReviewRuntimeProfileId?: string | null;
     defaultChatRuntimeProfileId?: string | null;
   },
-): { project: ProjectRow | undefined; pathError?: string } {
-  const normalizedInput = { ...input, rootPath: mapProjectPathToContainer(input.rootPath) };
-  const pathError = validateProjectRootPath(normalizedInput.rootPath);
+): { project?: ProjectRow; nameError?: string; pathError?: string } {
+  const existing = findProjectById(id);
+  if (!existing) return { project: undefined };
+
+  const duplicate = findDuplicateProjectName(input.name, id);
+  if (duplicate) {
+    return {
+      project: undefined,
+      nameError: `A project named "${input.name.trim()}" already exists`,
+    };
+  }
+
+  const rootPath = input.rootPath ? mapProjectPathToContainer(input.rootPath) : existing.rootPath;
+
+  const pathError = validateProjectRootPath(rootPath);
   if (pathError) return { project: undefined, pathError };
 
-  return { project: updateProjectRecord(id, normalizedInput) };
+  return { project: updateProjectRecord(id, { ...input, rootPath }) };
 }
 
 export function deleteProject(id: string): void {

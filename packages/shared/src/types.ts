@@ -208,7 +208,7 @@ export interface GitLabIssueLink {
 
 export interface CreateProjectInput {
   name: string;
-  rootPath: string;
+  rootPath?: string;
   plannerMaxBudgetUsd?: number;
   planCheckerMaxBudgetUsd?: number;
   implementerMaxBudgetUsd?: number;
