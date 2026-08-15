@@ -9,3 +9,5 @@ logs
 .env.local
 .git
 .devcontainer
+# Demo project clones/worktrees — contain node_modules + symlinks that break the build context
+projects
