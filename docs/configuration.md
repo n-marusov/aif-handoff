@@ -143,6 +143,7 @@ Configure a repository from **Edit Project → GitLab Issue-to-MR**. The connect
 `namespace/project`, eligibility filters, and an environment-variable name; it never stores
 the token. `GITLAB_TOKEN` is the default variable and is inherited by Docker services
 through the existing `.env` file. Custom names must use the uppercase `GITLAB_*` prefix so
+this integration cannot forward unrelated application secrets to GitLab.
 
 **Auto git-prepare (Connect / Sync now):** when a repository is connected (or the first
 `Sync now` runs), the agent automatically prepares the local git repo: adds the `origin`
@@ -153,7 +154,12 @@ AI Factory files (`.ai-factory/` etc.) via `initProject()` if missing, committin
 mirroring steps. On `Sync now`, a prepare failure aborts the import immediately and leaves
 the task `blocked`. The agent exposes this via its always-on internal API
 (`POST /gitlab/prepare` on `AGENT_INTERNAL_URL`).
-this integration cannot forward unrelated application secrets to GitLab.
+
+**Codex provider auto-config (OpenAI-compatible gateways):** for Codex `cli` transport
+against a custom base URL (e.g. router.ai), the adapter writes `~/.codex/config.toml`
+(`model_providers.<host>` with `base_url`, `env_key`, `wire_api = "responses"`) on every
+CLI run — the CLI ignores `OPENAI_BASE_URL`/`CODEX_BASE_URL` env vars and requires the
+**Responses API** (`/v1/responses`). See `docs/providers.md` § Codex (CLI transport).
 
 Nested groups are fully supported: enter the full path, for example `group/subgroup/project`.
 The connection stores `group/subgroup` as the namespace and `project` as the name; every
