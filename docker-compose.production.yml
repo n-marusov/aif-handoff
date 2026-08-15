@@ -27,6 +27,9 @@ services:
       - codex-auth:/home/node/.codex
     restart: always
     read_only: true
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
     security_opt:
@@ -134,6 +137,9 @@ services:
       api:
         condition: service_healthy
     restart: always
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     security_opt:
       - no-new-privileges:true
     deploy:

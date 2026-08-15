@@ -27,6 +27,9 @@ services:
       - claude-auth:/home/node/.claude
       - codex-auth:/home/node/.codex
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
   web:
     build:
@@ -77,6 +80,9 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
   mcp:
     build:
