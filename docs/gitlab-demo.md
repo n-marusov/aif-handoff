@@ -1,4 +1,4 @@
-[← MCP Sync](mcp-sync.md) · [Back to README](../README.md)
+[← MCP Sync](mcp-sync.md) · [Back to README](../README.md) · [Dev GUI Demo →](dev-gui-demo.md)
 
 # Демонстрационный сценарий: GitLab.com + router.ai (полный цикл «Issue → MR»)
 
@@ -74,30 +74,31 @@ CODEX_BASE_URL=<router.ai base URL>
 # ── Режим работы ────────────────────────────────────────
 AGENT_USE_SUBAGENTS=false
 
-# ── Автоматизация шагов 3.1+3.3 (env-bootstrap профиля) ──
-# Если включить флаг ниже, профиль и дефолты создадутся сами при старте API,
-# и ручные curl-шаги 3.1/3.3 можно пропустить (3.2 — validate — всё равно нужен).
-# AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true
+# ── Автоматический посев runtime-профиля (шаги 3.1+3.3) ──
+# Профиль router.ai и app-wide дефолты создадутся сами при старте API
+# (см. шаг 3.1). Шаг 3.2 (validate) всё равно нужен — это стоп-кран.
+AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true
 ```
 
 **Смысл.**
 
-| Переменная                         | Что делает                                                                                                                                                                                                |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GIT_PROVIDER=gitlab`              | Селектор провайдера репозитория. Режим GitLab активен **только** когда `GIT_PROVIDER=gitlab` **и** `AIF_GITLAB_ISSUE_MR_ENABLED=true`. По умолчанию `github` — без этой строки GitLab-режим не включится. |
-| `AIF_GITLAB_ISSUE_MR_ENABLED=true` | Ролл-аут-флаг GitLab Issue→MR. Без него роуты GitLab отдают `403 feature_disabled`, и агент ничего не синхронизирует.                                                                                     |
-| `AIF_GITLAB_BASE_URL`              | Базовый URL REST API v4 (переопределяется только для self-hosted инстансов).                                                                                                                              |
-| `GITLAB_TOKEN`                     | PAT; читается из окружения контейнера (передаётся через `env_file`), используется и REST-клиентом, и credential-helper для git push.                                                                      |
-| `OPENAI_API_KEY`                   | Ключ router.ai. Codex-адаптер берёт его по имени переменной, указанному в профиле (`apiKeyEnvVar=OPENAI_API_KEY`).                                                                                        |
-| `OPENAI_MODEL`                     | Модель по умолчанию для Codex.                                                                                                                                                                            |
-| `CODEX_BASE_URL`                   | Base URL для локальных транспортов Codex (SDK/CLI/App Server). В профиле мы укажем `baseUrl` — он имеет приоритет над этой переменной.                                                                    |
-| `AGENT_USE_SUBAGENTS=false`        | Skills-режим: у Codex нет нативных agent definitions, поэтому запускаем саб-агентов как навыки.                                                                                                           |
+| Переменная                                   | Что делает                                                                                                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GIT_PROVIDER=gitlab`                        | Селектор провайдера репозитория. Режим GitLab активен **только** когда `GIT_PROVIDER=gitlab` **и** `AIF_GITLAB_ISSUE_MR_ENABLED=true`. По умолчанию `github` — без этой строки GitLab-режим не включится. |
+| `AIF_GITLAB_ISSUE_MR_ENABLED=true`           | Ролл-аут-флаг GitLab Issue→MR. Без него роуты GitLab отдают `403 feature_disabled`, и агент ничего не синхронизирует.                                                                                     |
+| `AIF_GITLAB_BASE_URL`                        | Базовый URL REST API v4 (переопределяется только для self-hosted инстансов).                                                                                                                              |
+| `GITLAB_TOKEN`                               | PAT; читается из окружения контейнера (передаётся через `env_file`), используется и REST-клиентом, и credential-helper для git push.                                                                      |
+| `OPENAI_API_KEY`                             | Ключ router.ai. Codex-адаптер берёт его по имени переменной, указанному в профиле (`apiKeyEnvVar=OPENAI_API_KEY`).                                                                                        |
+| `OPENAI_MODEL`                               | Модель по умолчанию для Codex (используется и при авто-посеве профиля).                                                                                                                                   |
+| `CODEX_BASE_URL`                             | Base URL для локальных транспортов Codex (SDK/CLI/App Server). При авто-посеве становится `baseUrl` профиля.                                                                                              |
+| `AGENT_USE_SUBAGENTS=false`                  | Skills-режим: у Codex нет нативных agent definitions, поэтому запускаем саб-агентов как навыки.                                                                                                           |
+| `AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true` | Включает авто-посев глобального профиля при старте API. Подробности — в шаге 3.1.                                                                                                                         |
 
 **Проверяемый результат.** Контейнеры ещё не запущены (они поднимутся на шаге 2), поэтому проверяем сам файл `.env` на хосте:
 
 ```bash
-grep -E '^(GIT_PROVIDER|AIF_GITLAB_ISSUE_MR_ENABLED|GITLAB_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|CODEX_BASE_URL|AGENT_USE_SUBAGENTS)=' .env
-# → все 7 строк присутствуют и непустые
+grep -E '^(GIT_PROVIDER|AIF_GITLAB_ISSUE_MR_ENABLED|GITLAB_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|CODEX_BASE_URL|AGENT_USE_SUBAGENTS|AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED)=' .env
+# → все 8 строк присутствуют и непустые
 ```
 
 > Проверка внутри контейнера — на шаге 2, после запуска стека:
@@ -140,14 +141,16 @@ Health-проверки (у каждого сервиса свой порт):
 ```bash
 curl -s http://localhost:3009/health   # API (Hono) → JSON-ответ об успехе
 curl -s http://localhost:3100/health   # MCP HTTP → JSON-ответ об успехе
-curl -s http://localhost/health        # Web (Angie :80) → 301 (редирект на HTTPS)
+curl -s http://localhost/health        # Web (Angie :80) → SPA (index.html, HTTP 200)
 ```
 
-> ⚠️ Web на `:80` отвечает `301 Moved Permanently` → HTTPS. Это **норма** — Angie в
-> прод-конфиге форсирует HTTPS (`return 301 https://$host$request_uri`), а контейнерный
-> healthcheck web проверяет именно `HTTP/1.1 301` (netcat-проба по `127.0.0.1:80`,
-> см. патч `2026-08-14-web-healthcheck-ipv6.md`). Не ждите JSON от web на `:80`:
-> `curl -L` уведёт на HTTPS-версию (там отдаётся SPA), без `-L` вы увидите сам 301.
+> ⚠️ **Web на `:80` отдаёт SPA напрямую для localhost/127.0.0.1** — это сделано
+> специально: для `DOMAIN=localhost` Let's Encrypt не выдаёт сертификат, поэтому
+> HTTPS на `:443` локально недоступен, и редирект `:80 → https` увёл бы в тупик.
+> Открывайте Web UI по адресу `http://localhost/` (порт 80).
+> Для реального домена (`DOMAIN=example.com`) Angie форсирует HTTPS:
+> `:80` → `301 https://$host$request_uri`, а контейнерный healthcheck проверяет
+> `HTTP/1.1 200` на `127.0.0.1:80` (netcat-проба, см. патч `2026-08-14-web-healthcheck-ipv6.md`).
 
 Порт `:80` — Web UI. Дополнительно задеплоен HTTPS `:443`.
 
@@ -155,36 +158,44 @@ curl -s http://localhost/health        # Web (Angie :80) → 301 (редирек
 
 ## Шаг 3 — Профиль рантайма для router.ai + проверка связи
 
-### 3.1. Создать runtime-профиль
+### 3.1. Создать runtime-профиль (авто-посев при старте API)
 
-**Действие.**
+**Действие.** Профиль уже создан — при старте API (шаг 2) сработал env-bootstrap:
 
 ```bash
-curl -s -X POST http://localhost:3009/runtime-profiles \
-  -H "Content-Type: application/json" \
-  -d '{ "name":"router.ai (Codex CLI)", "runtimeId":"codex", "providerId":"openai", "transport":"cli", "baseUrl":"<router.ai base URL>", "apiKeyEnvVar":"OPENAI_API_KEY", "defaultModel":"<router.ai model id>", "enabled":true }'
+# Профиль создаётся сам при старте API; проверяем, что он на месте:
+curl -s http://localhost:3009/runtime-profiles | grep -o '"name":"Bootstrap (Codex CLI)"'
+# → "name":"Bootstrap (Codex CLI)"
+
+# ID профиля — из настроек (он же назначен дефолтом для всех стадий):
+curl -s http://localhost:3009/settings | grep -o '"resolvedDefaultTaskRuntimeProfileId":"[^"]*"'
+# → "resolvedDefaultTaskRuntimeProfileId":"<profile-id>"
 ```
 
-**Смысл.** Регистрирует глобальный профиль запуска. Ключевые поля:
+Запомните `<profile-id>` (используется ниже только для справки — дефолты уже назначены).
+
+**Смысл.** Если в `.env` задан `AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true` (Шаг 1), API при
+старте вызывает `seedBootstrapRuntimeProfile()` (`packages/api/src/services/profileBootstrap.ts`)
+и автоматически:
+
+- создаёт **глобальный** профиль `Bootstrap (Codex CLI)` (`runtimeId=codex`, `providerId=openai`, `transport=cli`, `apiKeyEnvVar=OPENAI_API_KEY`);
+- `baseUrl` профиля наследуется из `AIF_BOOTSTRAP_BASE_URL` → `CODEX_BASE_URL`, модель — из `AIF_BOOTSTRAP_DEFAULT_MODEL` → `OPENAI_MODEL`;
+- назначает профиль app-wide дефолтом для task/plan/review/chat (это заменяет ручной шаг 3.3);
+- повторные старты идемпотентны: профиль с тем же именем не дублируется; `AIF_BOOTSTRAP_FORCE_UPDATE=true` включает upsert из env;
+- в БД хранится только **имя** env-переменной ключа, не само значение.
+
+Ключевые поля профиля (важно понимать независимо от способа создания):
 
 - `runtimeId: "codex"` — адаптер Codex;
 - `transport: "cli"` — локальный агентный транспорт. ⚠️ НЕ `api`: API-транспорт Codex — это разовый вызов `/chat/completions` без tool-calling и не может вести пайплайн «планирование → реализация → ревью»;
 - `baseUrl` — endpoint router.ai (в профиле имеет приоритет над `CODEX_BASE_URL`);
 - `apiKeyEnvVar: "OPENAI_API_KEY"` — имя переменной, из которой берётся ключ.
 
-**Проверяемый результат.** HTTP `201`, в JSON-ответе — созданный профиль с полем `id`.
-Запомните его как `<profile-id>`.
+**Проверяемый результат.** Профиль присутствует в `GET /runtime-profiles`,
+`resolvedDefaultTaskRuntimeProfileId` в `GET /settings` непустой.
 
-> ℹ️ **Автоматизация (реализована).** Создание профиля и назначение дефолтов (шаги 3.1 + 3.3)
-> можно полностью автоматизировать через env-bootstrap при старте API:
-> `AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true` в `.env` (см. Шаг 1). Профиль (имя по
-> умолчанию `Bootstrap (Codex CLI)`, `runtimeId=codex`, `providerId=openai`, `transport=cli`,
-> `apiKeyEnvVar=OPENAI_API_KEY`, `baseUrl`/модель наследуются из `CODEX_BASE_URL`/`OPENAI_MODEL`)
-> и app-wide дефолты создаются при старте API; повторный старт идемпотентен
-> (`AIF_BOOTSTRAP_FORCE_UPDATE=true` — upsert). Тогда ручные шаги 3.1 и 3.3 пропускаются,
-> а `<profile-id>` читается из `GET /settings` → `runtimeDefaults.app.resolvedDefaultTaskRuntimeProfileId`.
-> Дизайн и детали — в `.ai-factory/RESEARCH.md`, раздел Active Summary.
-> Если флаг не задан — ручные шаги ниже остаются рабочим путём.
+> 💡 **Без авто-посева (флаг выключен)** — создать профиль вручную:
+> `POST /runtime-profiles` с телом `{ "name":"router.ai (Codex CLI)", "runtimeId":"codex", "providerId":"openai", "transport":"cli", "baseUrl":"<router.ai base URL>", "apiKeyEnvVar":"OPENAI_API_KEY", "defaultModel":"<router.ai model id>", "enabled":true }` → HTTP `201` с полем `id`. Тогда ручной шаг 3.3 тоже остаётся обязательным.
 
 ### 3.2. Проверить связь с router.ai
 
@@ -208,20 +219,26 @@ curl -s -X POST http://localhost:3009/runtime-profiles/validate \
 Если `ok: false` — router.ai недоступен, несовместим с Codex-протоколом или ключ неверный.
 **Демо останавливается здесь** — дальше идти не нужно, пока связь не поднимется.
 
-### 3.3. Назначить профиль по умолчанию
+### 3.3. Назначить профиль по умолчанию (автоматически при авто-посеве)
 
-**Действие.**
+**Действие.** Дефолты уже назначены авто-посевом — проверяем:
 
 ```bash
-curl -s -X PUT http://localhost:3009/settings/runtime-defaults \
-  -H "Content-Type: application/json" \
-  -d '{ "defaultTaskRuntimeProfileId":"<profile-id>", "defaultPlanRuntimeProfileId":"<profile-id>", "defaultReviewRuntimeProfileId":"<profile-id>", "defaultChatRuntimeProfileId":"<profile-id>" }'
+curl -s http://localhost:3009/settings/runtime-defaults
+# → "resolvedDefaultTaskRuntimeProfileId": "<profile-id>",
+#    "resolvedDefaultPlanRuntimeProfileId": "<profile-id>",
+#    "resolvedDefaultReviewRuntimeProfileId": "<profile-id>",
+#    "resolvedDefaultChatRuntimeProfileId": "<profile-id>"
 ```
 
-**Смысл.** Все стадии пайплайна (планирование, реализация, ревью) и чат будут
-автоматически использовать router.ai без указания профиля в каждой задаче.
+**Смысл.** При `AIF_BOOTSTRAP_SET_DEFAULTS=true` (по умолчанию) авто-посев сам
+назначает созданный профиль дефолтом для всех стадий пайплайна (планирование,
+реализация, ревью) и чата — отдельный ручной шаг не нужен.
 
-**Проверяемый результат.** HTTP `200`; в ответе все `resolvedDefault*RuntimeProfileId` = `<profile-id>`.
+**Проверяемый результат.** Все `resolvedDefault*RuntimeProfileId` = `<profile-id>`.
+
+> 💡 **Без авто-посева** — назначить вручную:
+> `PUT /settings/runtime-defaults` с телом `{ "defaultTaskRuntimeProfileId":"<profile-id>", "defaultPlanRuntimeProfileId":"<profile-id>", "defaultReviewRuntimeProfileId":"<profile-id>", "defaultChatRuntimeProfileId":"<profile-id>" }` → HTTP `200`, в ответе все `resolvedDefault*RuntimeProfileId` = `<profile-id>`.
 
 ### 3.4. Готовность системы
 
@@ -353,7 +370,7 @@ curl -s -X PUT http://localhost:3009/projects/<project-id>/gitlab \
 
 **Смысл.** Сохраняет связку «локальный проект ↔ репозиторий gitlab.com». При этом:
 
-- вызывается GitLab API (`GET /projects/<ns>/<project>`) — токен из `GITLAB_TOKEN` должен быть валиден и иметь скоуп `api`; иначе ответ `400` с кодом `gitlab_authentication`;
+- вызывается GitLab API (`GET /projects/<ns>/<project>`) — токен из `GITLAB_TOKEN` должен быть валиден и иметь скоуп `api`; иначе `400 gitlab_authentication` (нет/неверен токен) или `403 gitlab_forbidden` (недостаточно скоупов/прав, GitLab: `insufficient_granular_scope`);
 - фиксируются `namespace`, `name`, `defaultBranch`, `webUrl`;
 - `eligibility` — фильтр входящих Issues (пустой = берутся все открытые);
 - без включённого флага (шаг 1) и `GIT_PROVIDER=gitlab` роут отдал бы `403 feature_disabled`.
@@ -492,33 +509,33 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 
 ## Шаг 10 — Приёмка (контрольный список)
 
-| #   | Проверка                                    | Ожидание                                                              |
-| --- | ------------------------------------------- | --------------------------------------------------------------------- |
-| 1   | `curl -s http://localhost:3009/health`      | сервис жив                                                            |
-| 2   | `POST /runtime-profiles/validate` (шаг 3.2) | `{ "ok": true }` — router.ai совместим и поддерживает tool use        |
-| 3   | `GET /settings` → `runtimeReadiness`        | `availableRuntimeCount ≥ 1`, `enabledRuntimeProfileCount = 1`         |
-| 4   | Повторный `POST /projects/:id/gitlab/sync`  | `imported: 0` — импорт идемпотентен, дубликатов нет                   |
-| 5   | Задача в Web UI                             | прошла `backlog → ... → done` без ручного старта                      |
-| 6   | MR на gitlab.com                            | в `main`, описание начинается с `Closes #<iid>`                       |
-| 7   | После Approve + Merge                       | задача → `verified`                                                   |
-| 8   | Логи агента                                 | нет `StageManualBlockError`, `gitlab_*` ошибок, ошибок аутентификации |
+| #   | Проверка                                    | Ожидание                                                                                                                          |
+| --- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `curl -s http://localhost:3009/health`      | сервис жив                                                                                                                        |
+| 2   | `POST /runtime-profiles/validate` (шаг 3.2) | `{ "ok": true }` — router.ai совместим и поддерживает tool use                                                                    |
+| 3   | `GET /settings` → `runtimeReadiness`        | `availableRuntimeCount ≥ 1`, `enabledRuntimeProfileCount = 1`; `runtimeDefaults.app.resolvedDefaultTaskRuntimeProfileId` непустой |
+| 4   | Повторный `POST /projects/:id/gitlab/sync`  | `imported: 0` — импорт идемпотентен, дубликатов нет                                                                               |
+| 5   | Задача в Web UI                             | прошла `backlog → ... → done` без ручного старта                                                                                  |
+| 6   | MR на gitlab.com                            | в `main`, описание начинается с `Closes #<iid>`                                                                                   |
+| 7   | После Approve + Merge                       | задача → `verified`                                                                                                               |
+| 8   | Логи агента                                 | нет `StageManualBlockError`, `gitlab_*` ошибок, ошибок аутентификации                                                             |
 
 ---
 
 ## Сводная таблица «Действие → Смысл → Результат»
 
-| Шаг | Действие                                                         | Смысл                                            | Проверяемый результат                                               |
-| --- | ---------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------- |
-| 1   | Заполнить `.env`                                                 | Включить GitLab-режим + router.ai + skills-режим | `printenv GIT_PROVIDER` → `gitlab`                                  |
-| 2   | `docker compose -f docker-compose.production.yml build && up -d` | Поднять прод-стек                                | `ps` → все `Up`, health-проверки проходят                           |
-| 3   | Создать профиль, validate, назначить дефолты                     | Подключить router.ai как LLM                     | `validate` → `{ok:true}`; дефолты в `/settings`                     |
-| 4   | POST `/projects`, remote add, credential helper                  | Рабочий репозиторий + origin                     | `remote -v` показывает gitlab.com; `git log` — ваш main (после 4.4) |
-| 5   | PUT `/projects/:id/gitlab`                                       | Связать проект с репозиторием                    | `GET /projects/:id/gitlab` → `connection` с `defaultBranch: main`   |
-| 6   | PATCH `/projects/:id/auto-queue-mode`                            | Разрешить авто-продвижение задач                 | `{ enabled: true }`                                                 |
-| 7   | Создать Issue + `POST .../gitlab/sync`                           | Импортировать Issue как задачу                   | `imported: 1`; карточка `GITLAB #<iid>` в `backlog`                 |
-| 8   | Наблюдать `logs -f agent`                                        | Пайплайн планирования/реализации/ревью           | Задача прошла до `done`; MR `Closes #<iid>` в gitlab.com            |
-| 9   | Approve + Merge на gitlab.com                                    | Человек принимает решение                        | Задача `verified`                                                   |
-| 10  | Контрольный список                                               | Приёмка                                          | все пункты зелёные                                                  |
+| Шаг | Действие                                                         | Смысл                                            | Проверяемый результат                                                                                      |
+| --- | ---------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| 1   | Заполнить `.env`                                                 | Включить GitLab-режим + router.ai + skills-режим | `printenv GIT_PROVIDER` → `gitlab`                                                                         |
+| 2   | `docker compose -f docker-compose.production.yml build && up -d` | Поднять прод-стек                                | `ps` → все `Up`, health-проверки проходят                                                                  |
+| 3   | Авто-посев профиля (`.env` + старт API), validate                | Подключить router.ai как LLM                     | `validate` → `{ok:true}`; профиль `Bootstrap (Codex CLI)` в `GET /runtime-profiles`; дефолты в `/settings` |
+| 4   | POST `/projects`, remote add, credential helper                  | Рабочий репозиторий + origin                     | `remote -v` показывает gitlab.com; `git log` — ваш main (после 4.4)                                        |
+| 5   | PUT `/projects/:id/gitlab`                                       | Связать проект с репозиторием                    | `GET /projects/:id/gitlab` → `connection` с `defaultBranch: main`                                          |
+| 6   | PATCH `/projects/:id/auto-queue-mode`                            | Разрешить авто-продвижение задач                 | `{ enabled: true }`                                                                                        |
+| 7   | Создать Issue + `POST .../gitlab/sync`                           | Импортировать Issue как задачу                   | `imported: 1`; карточка `GITLAB #<iid>` в `backlog`                                                        |
+| 8   | Наблюдать `logs -f agent`                                        | Пайплайн планирования/реализации/ревью           | Задача прошла до `done`; MR `Closes #<iid>` в gitlab.com                                                   |
+| 9   | Approve + Merge на gitlab.com                                    | Человек принимает решение                        | Задача `verified`                                                                                          |
+| 10  | Контрольный список                                               | Приёмка                                          | все пункты зелёные                                                                                         |
 
 ---
 
@@ -567,18 +584,20 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 
 ## Приложение Б — Траблшутинг
 
-| Симптом                                                  | Причина / что смотреть                                                                                                                 |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `curl :3009` не отвечает                                 | Контейнер `api` не поднялся; `docker compose ... logs api`.                                                                            |
-| GitLab-роуты отдают `403 feature_disabled`               | `GIT_PROVIDER` ≠ `gitlab` или `AIF_GITLAB_ISSUE_MR_ENABLED=false` (шаг 1), либо контейнер не перезапущен после правки `.env`.          |
-| `PUT /projects/:id/gitlab` → `400 gitlab_authentication` | `GITLAB_TOKEN` не задан/неверен; у PAT нет скоупа `api`.                                                                               |
-| `validate` → `ok: false`                                 | router.ai недоступен/несовместим с Codex-протоколом; неверный ключ; модель без tool use.                                               |
-| Задача застряла в `backlog`                              | Не включена авто-очередь (шаг 6).                                                                                                      |
-| `git push` в логах агента падает                         | Нет credential-helper (шаг 4.3); у PAT нет `write_repository`; роль ниже Developer.                                                    |
-| Ветка задачи не появляется на gitlab.com                 | Смотрите `logs -f agent`: ошибка будет `StageManualBlockError("GitLab branch push failed...")`.                                        |
-| MR не создаётся                                          | Проверьте, что ветка запушена, а `defaultBranch` репозитория — `main` (иначе укажите свой в `GET /projects/:id/gitlab`).               |
-| MR создан, но diff огромный                              | Локальный репозиторий не зеркалирован с gitlab.com (шаг 4.4).                                                                          |
-| Задача не переходит в `verified` после merge             | Дождитесь синхронизации (≤ 60 с) или вызовите `POST .../gitlab/sync` вручную; проверьте, что MR действительно `merged`, а не `closed`. |
+| Симптом                                                  | Причина / что смотреть                                                                                                                                                                                    |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `curl :3009` не отвечает                                 | Контейнер `api` не поднялся; `docker compose ... logs api`.                                                                                                                                               |
+| GitLab-роуты отдают `403 feature_disabled`               | `GIT_PROVIDER` ≠ `gitlab` или `AIF_GITLAB_ISSUE_MR_ENABLED=false` (шаг 1), либо контейнер не перезапущен после правки `.env`.                                                                             |
+| `PUT /projects/:id/gitlab` → `400 gitlab_authentication` | `GITLAB_TOKEN` не задан/неверен; у PAT нет скоупа `api`.                                                                                                                                                  |
+| `PUT /projects/:id/gitlab` → `403 gitlab_forbidden`      | Токен валиден, но GitLab вернул `insufficient_granular_scope` — у PAT нет скоупа `api` (или роли Developer) на целевом проекте. Проверьте скоупы токена и доступ к `NAMESPACE/PROJECT`.                   |
+| `PUT /projects/:id/gitlab` → `502 gitlab_upstream`       | Неожиданный сетевой сбой при вызове GitLab API: чаще всего транзиентный DNS (`getaddrinfo EAI_AGAIN gitlab.com`) — повторите запрос; если повторяется, проверьте сеть/DNS хоста (VPN, корпоративный DNS). |
+| `validate` → `ok: false`                                 | router.ai недоступен/несовместим с Codex-протоколом; неверный ключ; модель без tool use.                                                                                                                  |
+| Задача застряла в `backlog`                              | Не включена авто-очередь (шаг 6).                                                                                                                                                                         |
+| `git push` в логах агента падает                         | Нет credential-helper (шаг 4.3); у PAT нет `write_repository`; роль ниже Developer.                                                                                                                       |
+| Ветка задачи не появляется на gitlab.com                 | Смотрите `logs -f agent`: ошибка будет `StageManualBlockError("GitLab branch push failed...")`.                                                                                                           |
+| MR не создаётся                                          | Проверьте, что ветка запушена, а `defaultBranch` репозитория — `main` (иначе укажите свой в `GET /projects/:id/gitlab`).                                                                                  |
+| MR создан, но diff огромный                              | Локальный репозиторий не зеркалирован с gitlab.com (шаг 4.4).                                                                                                                                             |
+| Задача не переходит в `verified` после merge             | Дождитесь синхронизации (≤ 60 с) или вызовите `POST .../gitlab/sync` вручную; проверьте, что MR действительно `merged`, а не `closed`.                                                                    |
 
 ---
 

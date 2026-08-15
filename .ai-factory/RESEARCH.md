@@ -1,46 +1,56 @@
 # Research
 
-Updated: 2026-08-14
+Updated: 2026-08-15
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: Automate runtime-profile creation for the router.ai demo (docs/gitlab-demo.md step 3.1)
+Topic: GitLab — auto git-prepare on connect/sync (extract default branch + AI Factory init)
 
-Goal: Remove the manual curl steps 3.1 (create profile) + 3.3 (set runtime defaults) from the demo runbook. On API startup, auto-provision a global Codex CLI runtime profile pointing at router.ai and set app-wide defaults — driven purely by .env (single extra line).
+Goal: When a GitLab repo is connected via the Web UI (Edit Project → Connect / Sync now), the agent automatically prepares the local git repo: extract the default branch (whatever it is named) and initialize it with AI Factory files if missing. Removes the manual demo steps 4.2–4.4 (remote add, credential helper, mirroring) and fixes the blocked tasks (dirty_worktree / base_branch_unavailable / dubious ownership).
 
-Why a profile is functionally required (verified in code):
-- resolution.ts L277-280: for local Codex transports (cli/sdk/app-server) with no explicit profile apiKeyEnvVar, apiKeyEnvVar resolves to null → OAuth (codex login) path.
-- cli.ts buildCuratedEnv: BLOCKED_ENV_KEYS = {OPENAI_API_KEY, OPENAI_BASE_URL}; ambient key is NOT forwarded when allowApiKey=false (L283-285). Only an explicit profile apiKeyEnvVar flips allowApiKey=true (L271-274).
-- Conclusion: profile with apiKeyEnvVar:"OPENAI_API_KEY" is the required opt-in for API-key auth. Demo .env also lacks AIF_DEFAULT_RUNTIME_ID=codex (default "claude"), so step 3.3 defaults are needed too. Env-only fallback cannot express the apiKey opt-in.
+Scope: NO MR mirroring. Only: default-branch extraction + AI Factory scaffold init.
 
-Chosen approach: Option B — startup seed in packages/api/src/index.ts (after listProjects()/resetStaleQaRuns(), before startServer()):
-- New service seedBootstrapRuntimeProfile() (proposed: packages/api/src/services/profileBootstrap.ts).
-- Uses @aif/data: createRuntimeProfile({projectId:null → global}) + updateAppSettings({default{Task,Plan,Review,Chat}RuntimeProfileId:id}).
-- Idempotent: skip when a global profile with the same name exists (listRuntimeProfiles({includeGlobal:true})). Default leaves existing profile untouched; AIF_BOOTSTRAP_FORCE_UPDATE=true enables upsert.
+Triggers (both sync, option B):
+- Connect: PUT /projects/:id/gitlab
+- Sync now (Edit Project dialog): POST /projects/:id/gitlab/sync
+- API calls agent synchronously via internal HTTP; on error → immediate response to client + task status=blocked.
 
-New env vars (packages/shared/src/env.ts):
-- AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED (bool, default false) — master gate; false = zero behavior change (OAuth codex login installs untouched).
-- AIF_BOOTSTRAP_RUNTIME_PROFILE_NAME (default "Bootstrap (Codex CLI)")
-- AIF_BOOTSTRAP_RUNTIME_ID (default "codex") / AIF_BOOTSTRAP_PROVIDER_ID (default "openai")
-- AIF_BOOTSTRAP_TRANSPORT (default "cli")
-- AIF_BOOTSTRAP_BASE_URL (fallback: CODEX_BASE_URL) / AIF_BOOTSTRAP_API_KEY_ENV_VAR (default "OPENAI_API_KEY") / AIF_BOOTSTRAP_DEFAULT_MODEL (fallback: OPENAI_MODEL)
-- AIF_BOOTSTRAP_SET_DEFAULTS (bool, default true) — auto-applies step 3.3.
-- (optional) AIF_BOOTSTRAP_RUNTIME_VALIDATE — fail-fast boot-time validation; default off (step 3.2 stays an interactive stop-crane in the runbook).
+Algorithm prepareGitLabRepository(root, connection) in agent:
+1. git remote add origin <webUrl>.git (if origin missing)
+2. git config credential.helper (token from $GITLAB_TOKEN in agent container)
+3. git config --global --add safe.directory <root> (idempotent)
+4. git fetch origin
+5. git checkout -B <defaultBranch> origin/<defaultBranch> — name from connection.defaultBranch (GitLab reports real name: main/master/develop/2.x); fallback origin/HEAD
+6. initProject(root, registry) — AFTER checkout; REUSE existing idempotent initProject (runtime/src/projectInit.ts): skips if .ai-factory/ exists, else runs ai-factory init --agents ...
+7. git add -A && git commit "chore: ai-factory scaffold" (if files appeared)
 
-Demo impact: single line in .env — AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED=true. BaseUrl/model inherit from existing CODEX_BASE_URL/OPENAI_MODEL. docker-compose.production.yml already passes env via `env_file: .env` to api — no Docker changes.
+Empty repo handling (decision a):
+- If origin/<defaultBranch> doesn't exist: skip checkout, stay on local branch (git branch -M <defaultBranch> if needed), initProject creates scaffold, commit, then git push -u origin <defaultBranch> (scaffold becomes the initial default-branch content).
+
+Why this fixes prior blockers:
+- base_branch_unavailable → default branch extracted by the name GitLab reports (not hardcoded main)
+- dirty_worktree (375 staged scaffold files) → scaffold committed into the default branch
+- dubious ownership → safe.directory set automatically
+- manual demo steps 4.2–4.4 → all automatic in the agent container
+
+Files to change:
+- packages/agent/src/gitlabWorkflow.ts — prepareGitLabRepository() + calls
+- packages/agent/src/index.ts — internal HTTP endpoint (e.g. POST /gitlab/prepare)
+- packages/api/src/routes/gitlab.ts — Connect/Sync → call agent (option B)
+- packages/runtime/src/projectInit.ts — REUSE initProject as-is (no change)
+- (optional) packages/data/src/gitlab.ts — gitPreparedAt flag
 
 Constraints:
-- DB only via @aif/data (createRuntimeProfile L3375, updateAppSettings L1631, listRuntimeProfiles L3315 already exported).
-- Priority verified: system_default profile beats env fallback (resolveEffectiveRuntimeProfile L3760-3798) → no need to touch AIF_DEFAULT_RUNTIME_ID.
-- No profile fields persist secrets (only env var names) — matches existing design.
-- Tests: new profileBootstrap.test.ts (flag off → no-op; on → creates profile + defaults; 2nd run → idempotent; FORCE_UPDATE upsert).
-- Every package >=70% coverage; finish with `npm run ai:validate`.
+- Standard git behavior only (no hacks).
+- Token owner: bot in prod, current user now — credentials from $GITLAB_TOKEN in agent container.
+- Error → immediate + task blocked (no silent per-cycle retries; retry only via explicit user sync).
+- Every package >=70% coverage; finish with npm run ai:validate.
 
 Success signals:
-- Fresh .env + docker compose up → profile exists, defaults set, GET /settings shows runtimeReadiness with 1 enabled profile.
-- Restart → no duplicate profiles, no clobber of manual edits.
-- Runbook step 3 shrinks to readiness check + interactive validate.
+- Connect a GitLab repo in GUI → agent auto-extracts default branch + commits AI Factory scaffold; no manual 4.2–4.4.
+- Imported task runs planning→… without dirty_worktree/base_branch_unavailable/dubious ownership blocks.
+- Sync now re-runs preparation; on failure task → blocked with clear gitlab_* reason.
 
 Next step: /aif-plan full to convert this design into implementation tasks.
 <!-- aif:active-summary:end -->
@@ -318,5 +328,19 @@ Links (paths):
 - packages/api/src/routes/runtimeProfiles.ts (POST /runtime-profiles)
 - packages/api/src/routes/settings.ts (PUT /settings/runtime-defaults)
 - docker-compose.production.yml (api service uses env_file: .env)
+
+### 2026-08-15 — GitLab auto git-prepare on connect/sync (UC final)
+What changed:
+- User: manual git steps (remote add / credential helper / mirroring / scaffold commit) are inconvenient; they must run automatically in the agent container when connecting a repo via GUI and syncing.
+- Investigated current code: api routes/gitlab.ts (PUT connect validates via REST + saves connection with defaultBranch/webUrl/tokenEnvVar; POST sync does REST-only), agent gitlabWorkflow.ts (synchronizeGitLabProjects polls every 60s → POST /sync; publishGitLabTask does git push assuming origin+credentials ready). No auto git-prep exists in GitHub or GitLab agent workflows.
+- Scoped UC down: NO MR mirroring. Only: extract default branch (whatever it is named — from connection.defaultBranch, fallback origin/HEAD) + init AI Factory files if missing (REUSE existing idempotent initProject in runtime/src/projectInit.ts).
+- Decisions: option B (API calls agent synchronously via internal HTTP; error → immediate + task blocked, no silent retries); empty repo → push scaffold as initial default branch (decision a); initProject AFTER checkout (decision 2); standard git behavior only; token owner = bot (prod) / current user now.
+- Triggers: Connect (PUT /projects/:id/gitlab) + Sync now (POST /projects/:id/gitlab/sync) from Edit Project dialog.
+Links (paths):
+- packages/agent/src/gitlabWorkflow.ts (synchronizeGitLabProjects, publishGitLabTask)
+- packages/api/src/routes/gitlab.ts (PUT /:id/gitlab, POST /:id/gitlab/sync)
+- packages/runtime/src/projectInit.ts (initProject — idempotent, reuse)
+- packages/data/src/gitlab.ts (listEnabledGitLabRepositories; connection fields webUrl/defaultBranch/tokenEnvVar)
+- docs/gitlab-demo.md (manual steps 4.2–4.4 to be automated)
 
 <!-- aif:sessions:end -->

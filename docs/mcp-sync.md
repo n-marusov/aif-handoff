@@ -1,6 +1,6 @@
 # MCP Sync Server
 
-[← Providers](providers.md) · [Back to README](../README.md)
+[← Providers](providers.md) · [Back to README](../README.md) · [GitLab Demo →](gitlab-demo.md)
 
 The Handoff MCP server enables bidirectional synchronization between the Handoff task management system and AI Factory (AIF) tooling via the [Model Context Protocol](https://modelcontextprotocol.io).
 

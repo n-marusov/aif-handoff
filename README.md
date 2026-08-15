@@ -382,6 +382,7 @@ AGENT_BYPASS_PERMISSIONS=true
 | [Providers](docs/providers.md)             | Runtime profiles, adapters, capability matrix  |
 | [MCP Sync](docs/mcp-sync.md)               | MCP tools, transports, and authentication      |
 | [GitLab Demo](docs/gitlab-demo.md)         | End-to-end GitLab.com + router.ai demo runbook |
+| [Dev GUI Demo](docs/dev-gui-demo.md)       | Local dev + Web UI GitLab/router.ai runbook    |
 
 ![ui-light](https://github.com/lee-to/aif-handoff/blob/main/art/ui-light.png)
 ![ui-dark](https://github.com/lee-to/aif-handoff/blob/main/art/ui-dark.png)
