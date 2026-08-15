@@ -96,7 +96,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const [projectSort, setProjectSort] = useState<ProjectSort>("name");
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [rootPath, setRootPath] = useState("");
   const [groupName, setGroupName] = useState("");
   const [plannerMaxBudgetUsd, setPlannerMaxBudgetUsd] = useState("");
   const [planCheckerMaxBudgetUsd, setPlanCheckerMaxBudgetUsd] = useState("");
@@ -236,7 +235,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     setDialogMode("create");
     setEditingId(null);
     setName("");
-    setRootPath("");
     setGroupName("");
     setPlannerMaxBudgetUsd("");
     setPlanCheckerMaxBudgetUsd("");
@@ -265,7 +263,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     setDialogMode("edit");
     setEditingId(p.id);
     setName(p.name);
-    setRootPath(p.rootPath);
     setGroupName(p.groupName ?? "");
     setPlannerMaxBudgetUsd(p.plannerMaxBudgetUsd == null ? "" : String(p.plannerMaxBudgetUsd));
     setPlanCheckerMaxBudgetUsd(
@@ -379,7 +376,10 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
       },
       {
         onSuccess: () => toast("GitLab repository connected", "success"),
-        onError: (error) => showMutationError(error, "Failed to connect GitLab repository"),
+        onError: (error) => {
+          console.error("[FIX] GitLab connect failed", { projectId: editingId, error });
+          showMutationError(error, "Failed to connect GitLab repository");
+        },
       },
     );
   };
@@ -392,7 +392,10 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
           `GitLab sync complete: ${result.imported} imported, ${result.updated} updated`,
           "success",
         ),
-      onError: (error) => showMutationError(error, "Failed to synchronize GitLab repository"),
+      onError: (error) => {
+        console.error("[FIX] GitLab sync failed", { projectId: editingId, error });
+        showMutationError(error, "Failed to synchronize GitLab repository");
+      },
     });
   };
 
@@ -417,7 +420,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !rootPath.trim()) return;
+    if (!name.trim()) return;
     const parsedPlannerBudget = plannerMaxBudgetUsd.trim()
       ? Number(plannerMaxBudgetUsd)
       : undefined;
@@ -445,7 +448,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
       createProject.mutate(
         {
           name: name.trim(),
-          rootPath: rootPath.trim(),
           plannerMaxBudgetUsd: parsedPlannerBudget,
           planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
           implementerMaxBudgetUsd: parsedImplementerBudget,
@@ -480,7 +482,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
           id: editingId,
           input: {
             name: name.trim(),
-            rootPath: rootPath.trim(),
             plannerMaxBudgetUsd: parsedPlannerBudget,
             planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
             implementerMaxBudgetUsd: parsedImplementerBudget,
@@ -770,19 +771,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                 onChange={(e) => setName(e.target.value)}
                 autoFocus
               />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Root Path</label>
-              <Input
-                placeholder="/Users/me/projects/my-project"
-                value={rootPath}
-                onChange={(e) => setRootPath(e.target.value)}
-                className="font-mono text-sm"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Absolute path where agents will create files. In Docker, paths are stored under
-                PROJECTS_MOUNT; host paths under PROJECTS_DIR use the same mount.
-              </p>
             </div>
             {dialogMode === "edit" && gitProvider === "github" && githubIssuePrEnabled && (
               <div>
@@ -1099,7 +1087,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
               type="submit"
               disabled={
                 !name.trim() ||
-                !rootPath.trim() ||
                 (plannerMaxBudgetUsd.trim() !== "" &&
                   (!Number.isFinite(Number(plannerMaxBudgetUsd)) ||
                     Number(plannerMaxBudgetUsd) <= 0)) ||

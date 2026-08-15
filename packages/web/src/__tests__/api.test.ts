@@ -128,6 +128,65 @@ describe("api client", () => {
     debugSpy.mockRestore();
   });
 
+  it("waits longer than the default request timeout for GitLab connect", async () => {
+    await api.getAuthSession();
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockReset();
+      let resolveFetch: (value: Response) => void = () => {};
+      fetchMock.mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+
+      const pending = api.connectProjectGitLab("project-1", {
+        repository: "group/repo",
+        tokenEnvVar: "GITLAB_TOKEN",
+        enabled: true,
+        eligibility: { labels: [], assignee: null, milestone: null },
+      });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      const [, init] = fetchMock.mock.calls[0];
+      expect((init?.signal as AbortSignal).aborted).toBe(false);
+
+      resolveFetch(jsonResponse({}));
+      await expect(pending).resolves.toEqual({});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits longer than the default request timeout for GitLab sync", async () => {
+    await api.getAuthSession();
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockReset();
+      let resolveFetch: (value: Response) => void = () => {};
+      fetchMock.mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+
+      const pending = api.syncProjectGitLab("project-1");
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      const [, init] = fetchMock.mock.calls[0];
+      expect((init?.signal as AbortSignal).aborted).toBe(false);
+
+      resolveFetch(jsonResponse({ imported: 0, updated: 0, skipped: 0, issues: [] }));
+      await expect(pending).resolves.toEqual({ imported: 0, updated: 0, skipped: 0, issues: [] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("changes a password with the authenticated CSRF token without logging secrets", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(jsonResponse(authenticatedSession));

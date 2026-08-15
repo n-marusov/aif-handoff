@@ -110,6 +110,12 @@ const REQUEST_TIMEOUT_MS = 15_000;
 export const PLAN_FAST_FIX_TIMEOUT_MS = 200_000;
 const CHAT_TIMEOUT_MS = 300_000;
 const IMPORT_ROADMAP_TIMEOUT_MS = 300_000;
+// GitLab connect/sync runs a synchronous git-prepare on the agent (clone/fetch/
+// checkout/commit) that can take well over the default 15s request timeout. The
+// agent bridge allows up to 120s for prepare; connect adds a GitLab API check on
+// top, and sync adds paginated issue/MR API calls, so give both a generous budget.
+const GITLAB_CONNECT_TIMEOUT_MS = 180_000;
+const GITLAB_SYNC_TIMEOUT_MS = 300_000;
 const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const AUTH_SESSION_PATH = "/auth/session";
 const AUTH_LOGIN_PATH = "/auth/login";
@@ -629,10 +635,14 @@ export const api = {
       eligibility: GitLabEligibility;
     },
   ): Promise<GitLabRepositoryConnection> {
-    return request(`/projects/${encodeURIComponent(id)}/gitlab`, {
-      method: "PUT",
-      body: JSON.stringify(input),
-    });
+    return request(
+      `/projects/${encodeURIComponent(id)}/gitlab`,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      },
+      GITLAB_CONNECT_TIMEOUT_MS,
+    );
   },
 
   disconnectProjectGitLab(id: string): Promise<void> {
@@ -645,10 +655,14 @@ export const api = {
     skipped: number;
     issues: GitLabIssueLink[];
   }> {
-    return request(`/projects/${encodeURIComponent(id)}/gitlab/sync`, {
-      method: "POST",
-      body: "{}",
-    });
+    return request(
+      `/projects/${encodeURIComponent(id)}/gitlab/sync`,
+      {
+        method: "POST",
+        body: "{}",
+      },
+      GITLAB_SYNC_TIMEOUT_MS,
+    );
   },
 
   getProjectWarmup(id: string): Promise<ProjectWarmupResponse> {
