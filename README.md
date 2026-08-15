@@ -99,14 +99,15 @@ Development starts three services by default. If `MCP_PORT` is set to a valid in
 
 #### Project paths (host ↔ container)
 
-When you create a project in the UI, the **Root Path** field accepts an absolute
-path such as `/Users/me/projects/my-project`. The dev compose mounts the host
-directory `PROJECTS_DIR` at `PROJECTS_MOUNT` (default `/home/www`) in every
-container. With `PROJECTS_DIR=/Users/me/projects`, the example path is persisted
-as `/home/www/my-project`.
+When you create a project in the UI, its folder path inside the container is
+generated automatically from the project name (for example `My Project` becomes
+`/home/www/my-project`). The dev compose mounts the host directory `PROJECTS_DIR`
+at `PROJECTS_MOUNT` (default `/home/www`) in every container, so the generated
+path is persisted below that mount. Project names are unique (case-insensitive).
 
-Other POSIX absolute paths are resolved below `PROJECTS_MOUNT` instead of the
-container filesystem root.
+An explicit `rootPath` is still accepted by the API for advanced/scripted setups;
+otherwise it is derived from the name. Other POSIX absolute paths are resolved
+below `PROJECTS_MOUNT` instead of the container filesystem root.
 
 The default `PROJECTS_DIR` is `${PWD}/projects` (relative to the compose
 file). To use a different host directory:

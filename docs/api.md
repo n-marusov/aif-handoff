@@ -284,8 +284,8 @@ POST /projects
 **Body:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Project name (1-200 chars) |
-| `rootPath` | string | yes | Absolute path to project root, for example `/Users/me/projects/my-project`. With Docker, paths outside `PROJECTS_MOUNT` are resolved below that mount |
+| `name` | string | yes | Project name (1-200 chars). Must be unique, case-insensitive |
+| `rootPath` | string | no | Absolute path to project root. When omitted, it is generated from `name` under `PROJECTS_MOUNT` |
 | `plannerMaxBudgetUsd` | number | no | Budget for planner agent. If omitted, unlimited |
 | `planCheckerMaxBudgetUsd` | number | no | Budget for plan-checker agent. If omitted, unlimited |
 | `implementerMaxBudgetUsd` | number | no | Budget for implementer agent. If omitted, unlimited |

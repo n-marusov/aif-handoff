@@ -1,58 +1,44 @@
 # Research
 
-Updated: 2026-08-15
+Updated: 2026-08-16
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: GitLab — auto git-prepare on connect/sync (extract default branch + AI Factory init)
+Topic: Remove Root Path field from project create/edit dialogs; auto-generate the container project folder path from the name; enforce unique project names
 
-Goal: When a GitLab repo is connected via the Web UI (Edit Project → Connect / Sync now), the agent automatically prepares the local git repo: extract the default branch (whatever it is named) and initialize it with AI Factory files if missing. Removes the manual demo steps 4.2–4.4 (remote add, credential helper, mirroring) and fixes the blocked tasks (dirty_worktree / base_branch_unavailable / dubious ownership).
+Goal: Drop the editable "Root Path" field from the Create/Edit Project dialogs. The container project folder path is derived automatically from the project name (slugified under PROJECTS_MOUNT). Project names must be unique (case-insensitive, trimmed). Keep the persisted `rootPath` column and every downstream consumer unchanged.
 
-Scope: NO MR mirroring. Only: default-branch extraction + AI Factory scaffold init.
+Scope: UI field removal + backend auto-generation + name uniqueness. `rootPath` stays persisted and displayed/searchable, but is no longer editable. The API keeps `rootPath` optional for backward compatibility (existing curl runbooks).
 
-Triggers (both sync, option B):
-- Connect: PUT /projects/:id/gitlab
-- Sync now (Edit Project dialog): POST /projects/:id/gitlab/sync
-- API calls agent synchronously via internal HTTP; on error → immediate response to client + task status=blocked.
-
-Algorithm prepareGitLabRepository(root, connection) in agent:
-1. git remote add origin <webUrl>.git (if origin missing)
-2. git config credential.helper (token from $GITLAB_TOKEN in agent container)
-3. git config --global --add safe.directory <root> (idempotent)
-4. git fetch origin
-5. git checkout -B <defaultBranch> origin/<defaultBranch> — name from connection.defaultBranch (GitLab reports real name: main/master/develop/2.x); fallback origin/HEAD
-6. initProject(root, registry) — AFTER checkout; REUSE existing idempotent initProject (runtime/src/projectInit.ts): skips if .ai-factory/ exists, else runs ai-factory init --agents ...
-7. git add -A && git commit "chore: ai-factory scaffold" (if files appeared)
-
-Empty repo handling (decision a):
-- If origin/<defaultBranch> doesn't exist: skip checkout, stay on local branch (git branch -M <defaultBranch> if needed), initProject creates scaffold, commit, then git push -u origin <defaultBranch> (scaffold becomes the initial default-branch content).
-
-Why this fixes prior blockers:
-- base_branch_unavailable → default branch extracted by the name GitLab reports (not hardcoded main)
-- dirty_worktree (375 staged scaffold files) → scaffold committed into the default branch
-- dubious ownership → safe.directory set automatically
-- manual demo steps 4.2–4.4 → all automatic in the agent container
+Key decisions:
+- Generate rootPath = posix.join(PROJECTS_MOUNT, slugify(name)) on create only. Reuse `slugify` from @aif/shared (planPath.ts) — transliterates Cyrillic→Latin, lowercase kebab, 60 chars.
+- rootPath immutable on rename: editing a project changes only its display name, never moves the on-disk git repo/worktrees.
+- Name uniqueness: trimmed + case-insensitive (NFC) on create and update (excluding self on update).
+- Also guard generated folder/slug uniqueness — distinct names can slugify identically ("Hello World" vs "Hello-World" → hello-world); on collision append -2, -3, ….
+- PROJECTS_MOUNT default /home/www (container); matches current persisted rootPath semantics.
 
 Files to change:
-- packages/agent/src/gitlabWorkflow.ts — prepareGitLabRepository() + calls
-- packages/agent/src/index.ts — internal HTTP endpoint (e.g. POST /gitlab/prepare)
-- packages/api/src/routes/gitlab.ts — Connect/Sync → call agent (option B)
-- packages/runtime/src/projectInit.ts — REUSE initProject as-is (no change)
-- (optional) packages/data/src/gitlab.ts — gitPreparedAt flag
+- packages/web/src/components/project/ProjectSelector.tsx — remove rootPath state/input/submit/guard
+- packages/shared/src/types.ts — CreateProjectInput.rootPath optional
+- packages/api/src/schemas.ts — createProjectSchema.rootPath optional
+- packages/api/src/repositories/projects.ts — generate rootPath + uniqueness checks; update PUT parallel/auto-queue check to use existing.rootPath
+- packages/data/src/index.ts — add findProjectByName (case-insensitive)
+- Tests (TDD): ProjectSelector.test.tsx, api projects.test.ts, + new unit tests for slug generation and name uniqueness
+- Docs: README.md, docs/api.md, docs/getting-started.md, docs/gitlab-demo.md, docs/dev-gui-demo.md
 
 Constraints:
-- Standard git behavior only (no hacks).
-- Token owner: bot in prod, current user now — credentials from $GITLAB_TOKEN in agent container.
-- Error → immediate + task blocked (no silent per-cycle retries; retry only via explicit user sync).
+- TDD: write failing tests first, then implement.
 - Every package >=70% coverage; finish with npm run ai:validate.
+- DB access only via @aif/data; API stays thin.
 
 Success signals:
-- Connect a GitLab repo in GUI → agent auto-extracts default branch + commits AI Factory scaffold; no manual 4.2–4.4.
-- Imported task runs planning→… without dirty_worktree/base_branch_unavailable/dubious ownership blocks.
-- Sync now re-runs preparation; on failure task → blocked with clear gitlab_* reason.
+- Create/Edit Project dialogs have no Root Path field; folder auto-created under PROJECTS_MOUNT/<slug>.
+- Renaming a project does not move its folder.
+- Creating a duplicate name (case-insensitive) is rejected with a clear error.
+- Existing curl runbooks with explicit rootPath still work (backward compatible).
 
-Next step: /aif-plan full to convert this design into implementation tasks.
+Next step: /aif-implement (TDD)
 <!-- aif:active-summary:end -->
 
 ## Sessions
@@ -184,6 +170,22 @@ Key notes:
 - Issue import → task autoMode=true, executionOwner=ai, status=backlog; auto-queue advances backlog→planning.
 - MR merged → verified; MR closed → paused; the human owns the merge.
 - Precondition: router.ai must be Codex-CLI-protocol-compatible and the model must support tool use.
+
+### 2026-08-16 12:00 — Remove Root Path field; auto-generate project folder path
+What changed:
+- Explored the project create/edit Root Path flow across web, API, data, shared, and agent.
+- Decided to remove the editable Root Path field and derive the container folder path from the project name.
+Key notes:
+- `rootPath` column/type stays (downstream: git, worktrees, chat, MCP, roadmap).
+- Existing `slugify` (shared/planPath.ts) is reusable for folder-name generation.
+- Name uniqueness: trimmed + case-insensitive; plus slug/rootPath collision suffix.
+- rootPath immutable on rename to avoid moving live git repos.
+Links (paths):
+- packages/web/src/components/project/ProjectSelector.tsx
+- packages/api/src/repositories/projects.ts
+- packages/api/src/schemas.ts
+- packages/shared/src/types.ts, planPath.ts, schema.ts
+- packages/data/src/index.ts
 
 ## Runbook (final)
 

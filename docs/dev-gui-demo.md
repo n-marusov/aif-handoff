@@ -42,7 +42,7 @@
 | Runtime-профиль router.ai                   | авто-посев из `.env` (`AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED`), просмотр в GUI |
 | Проверка связи с LLM                        | GUI: кнопка **Validate** у профиля                                             |
 | Дефолты стадий (plan/implement/review/chat) | авто-посев из `.env`; проверка в **Global Settings**                           |
-| Создать проект + Root Path                  | GUI: **проект → New project**                                                  |
+| Создать проект (путь генерируется из имени) | GUI: **проект → New project**                                                  |
 | GitLab-репозиторий + eligibility            | GUI: **Edit Project → GitLab Issue-to-MR → Connect**                           |
 | Авто-очередь (auto-queue)                   | GUI: **Create/Edit Project → Auto-Queue Mode**                                 |
 | `origin` и git-credentials локального repo  | автоматически: агент при **Connect / Sync now** (шаг 4.2–4.4)                  |
@@ -277,12 +277,11 @@ OpenCode, OpenRouter) и `"gitProvider": "gitlab"`, `"gitlabIssueMrEnabled": tru
 1. В левом верхнем углу откройте селектор проектов → **New project**.
 2. Заполните:
 
-| Поле                            | Значение                         |
-| ------------------------------- | -------------------------------- |
-| Name                            | `demo`                           |
-| Root Path                       | `<LOCAL_ROOT>` (абсолютный путь) |
-| Auto-Queue Mode                 | вкл (или включите на шаге 6)     |
-| Остальные поля (бюджеты и т.п.) | оставьте пустыми                 |
+| Поле                            | Значение                     |
+| ------------------------------- | ---------------------------- |
+| Name                            | `demo`                       |
+| Auto-Queue Mode                 | вкл (или включите на шаге 6) |
+| Остальные поля (бюджеты и т.п.) | оставьте пустыми             |
 
 3. Нажмите **Create**.
 
