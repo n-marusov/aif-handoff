@@ -110,26 +110,92 @@ export class GitLabClient {
     private readonly baseUrl: string,
   ) {}
 
+  /**
+   * Network-level failure codes worth retrying (undici wraps DNS/connect/
+   * timeout failures in a TypeError with a `cause.code`). Docker Desktop's
+   * embedded DNS is known to intermittently return EAI_AGAIN; a single retry
+   * usually succeeds once the resolver recovers.
+   */
+  private static readonly RETRYABLE_NETWORK_CODES = new Set([
+    "EAI_AGAIN",
+    "ENOTFOUND",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "EAI_NODATA",
+    "EAI_NONAME",
+  ]);
+
+  private static readonly MAX_NETWORK_RETRIES = 2;
+
+  private isRetryableNetworkError(error: unknown): boolean {
+    if (!(error instanceof TypeError)) return false;
+    const cause = (error as { cause?: { code?: string } }).cause;
+    const code = cause?.code;
+    if (code && GitLabClient.RETRYABLE_NETWORK_CODES.has(code)) return true;
+    // Timeout from AbortSignal.timeout(30_000) surfaces as a DOMException
+    // named "TimeoutError" (undici wraps it into the fetch TypeError cause).
+    return code === "TimeoutError" || error.name === "TimeoutError";
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const method = init.method ?? "GET";
     log.debug({ method, path, baseUrl: this.baseUrl }, "GitLab API request started");
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      signal: init.signal ?? AbortSignal.timeout(30_000),
-      headers: {
-        "PRIVATE-TOKEN": this.token,
-        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...init.headers,
-      },
-    });
+
+    const attempt = async (): Promise<Response> => {
+      return fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        signal: init.signal ?? AbortSignal.timeout(30_000),
+        headers: {
+          "PRIVATE-TOKEN": this.token,
+          ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...init.headers,
+        },
+      });
+    };
+
+    let response: Response;
+    let lastNetworkError: unknown;
+    for (let attemptIndex = 0; ; attemptIndex += 1) {
+      try {
+        response = await attempt();
+        break;
+      } catch (error) {
+        lastNetworkError = error;
+        if (attemptIndex >= GitLabClient.MAX_NETWORK_RETRIES) throw error;
+        if (!this.isRetryableNetworkError(error)) throw error;
+        const delayMs = 500 * (attemptIndex + 1);
+        log.warn(
+          {
+            method,
+            path,
+            retry: attemptIndex + 1,
+            delayMs,
+            networkCode: (error as { cause?: { code?: string } }).cause?.code ?? null,
+          },
+          "GitLab API network error, retrying",
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { message?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        message?: unknown;
+        error?: unknown;
+        error_description?: unknown;
+      } | null;
       const code = classifyHttpError(response.status);
       const message =
         (typeof payload?.message === "string" && payload.message) ||
         (typeof payload?.message === "object" && payload.message !== null
           ? JSON.stringify(payload.message)
-          : response.statusText);
+          : // GitLab error responses often carry `error` + `error_description`
+            // (e.g. fine-grained PAT scope denials) — surface those instead of
+            // the generic status text so operators see the actionable cause.
+            payload?.error_description
+            ? `${String(payload.error)}: ${String(payload.error_description)}`
+            : (typeof payload?.error === "string" && payload.error) || response.statusText);
       log.warn(
         { method, path, status: response.status, adapterCode: code },
         "GitLab API request failed",
@@ -141,6 +207,7 @@ export class GitLabClient {
         code === "rate_limited" ? retryAtFromHeaders(response.headers) : null,
       );
     }
+    void lastNetworkError;
     log.debug({ method, path, status: response.status }, "GitLab API request completed");
     return (await response.json()) as T;
   }

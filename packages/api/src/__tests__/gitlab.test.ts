@@ -74,6 +74,70 @@ describe("GitLab client", () => {
     });
   });
 
+  it("retries transient DNS/network failures then succeeds", async () => {
+    const eaiAgain = new TypeError("fetch failed");
+    (eaiAgain as { cause?: { code?: string } }).cause = { code: "EAI_AGAIN" };
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(eaiAgain)
+      .mockRejectedValueOnce(eaiAgain)
+      .mockResolvedValue(
+        jsonResponse({
+          id: 1,
+          path_with_namespace: "owner/repo",
+          web_url: "https://gitlab.com/owner/repo",
+          default_branch: "main",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const repo = await new GitLabClient("secret", "https://gitlab.com/api/v4").getRepository(
+      "owner/repo",
+    );
+
+    expect(repo.path_with_namespace).toBe("owner/repo");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    vi.unstubAllGlobals();
+  });
+
+  it("gives up after retries when the network error persists", async () => {
+    const eaiAgain = new TypeError("fetch failed");
+    (eaiAgain as { cause?: { code?: string } }).cause = { code: "EAI_AGAIN" };
+    const fetchMock = vi.fn().mockRejectedValue(eaiAgain);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new GitLabClient("secret", "https://gitlab.com/api/v4").getRepository("owner/repo"),
+    ).rejects.toMatchObject({ message: "fetch failed" });
+    expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces GitLab error_description for scope denials", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: "insufficient_granular_scope",
+            error_description: "Access denied: requires fine-grained PAT with [User: Read]",
+          },
+          { status: 403 },
+        ),
+      ),
+    );
+
+    await expect(
+      new GitLabClient("secret", "https://gitlab.com/api/v4").getRepository("owner/repo"),
+    ).rejects.toMatchObject({
+      httpStatus: 403,
+      adapterCode: "forbidden",
+      message:
+        "GitLab API 403: insufficient_granular_scope: Access denied: requires fine-grained PAT with [User: Read]",
+    });
+    vi.unstubAllGlobals();
+  });
+
   it("applies label, assignee, and milestone eligibility", () => {
     expect(
       issueIsEligible(
@@ -289,6 +353,43 @@ describe("GitLab project routes", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ code: "feature_disabled" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes GitLab routes when both routers are mounted and GIT_PROVIDER is gitlab", async () => {
+    // Regression: with GIT_PROVIDER=gitlab and GitHub mounted BEFORE GitLab
+    // (as in src/index.ts), the GitHub gate must NOT intercept GitLab paths.
+    const { githubRouter } = await import("../routes/github.js");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: 1,
+        path_with_namespace: "namespace/repo",
+        web_url: "https://gitlab.com/namespace/repo",
+        default_branch: "main",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", githubRouter);
+    app.route("/projects", gitlabRouter);
+
+    // GitLab connect must reach the GitLab route (not be blocked by GitHub gate).
+    const response = await app.request("/projects/project-1/gitlab", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repository: "namespace/repo", tokenEnvVar: "GITLAB_TEST_TOKEN" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ namespace: "namespace", name: "repo" });
+
+    // GitHub paths must still be blocked when the provider is gitlab.
+    const githubResponse = await app.request("/projects/project-1/github", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repository: "owner/repo", tokenEnvVar: "GITHUB_TEST_TOKEN" }),
+    });
+    expect(githubResponse.status).toBe(403);
+    expect(await githubResponse.json()).toMatchObject({ code: "feature_disabled" });
   });
 
   it("connects a repository and performs an idempotent empty sync", async () => {

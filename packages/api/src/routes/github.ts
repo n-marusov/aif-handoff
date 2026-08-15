@@ -34,7 +34,22 @@ const REVIEW_MARKER = "<!-- aif-github-review -->";
 
 export const githubRouter = new Hono<ParticipantApiEnv>();
 
-githubRouter.use("*", async (c, next) => {
+// Gate only GitHub-specific paths (/:id/github + /:id/github/*). The router is
+// mounted at /projects alongside the GitLab router; a bare use("*") here would
+// intercept GitLab requests first and block them whenever GIT_PROVIDER is not
+// github. Two patterns are required: Hono's `github*` wildcard does not match
+// the bare `/github` path, only its sub-paths.
+githubRouter.use("/:id/github", async (c, next) => {
+  if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
+    log.debug(
+      { method: c.req.method, path: c.req.path },
+      "GitHub issue-to-PR route blocked by provider selector or rollout flag",
+    );
+    return c.json({ error: "GitHub issue-to-PR mode is disabled", code: "feature_disabled" }, 403);
+  }
+  await next();
+});
+githubRouter.use("/:id/github/*", async (c, next) => {
   if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
     log.debug(
       { method: c.req.method, path: c.req.path },
