@@ -217,8 +217,7 @@ export function prepareGitLabRepository(input: PrepareInput): { gitPreparedAt: s
   }
 
   // 6. AI Factory init (idempotent) — after checkout, only if .ai-factory missing
-  const needsCommit = !existsSync(join(projectRoot, ".ai-factory"));
-  if (needsCommit) {
+  if (!existsSync(join(projectRoot, ".ai-factory"))) {
     const registry = getRuntimeRegistrySync();
     if (!registry) {
       throw new GitLabPrepareError(
@@ -240,29 +239,31 @@ export function prepareGitLabRepository(input: PrepareInput): { gitPreparedAt: s
     log.debug({ projectId: connection.projectId }, "AI Factory scaffold already present");
   }
 
-  // 7. commit scaffold if files appeared (fresh init path). Only commit when
-  // there are actually staged changes — a clean tree is not an error.
-  if (needsCommit) {
-    const dirty = execFileSync("git", ["status", "--porcelain"], {
-      cwd: projectRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
-    if (dirty.length > 0) {
-      try {
-        runGit(projectRoot, ["add", "-A"]);
-        runGit(projectRoot, ["commit", "-m", "chore: ai-factory scaffold", "--no-verify"]);
-        log.info({ projectId: connection.projectId }, "Committed AI Factory scaffold");
-      } catch (err) {
-        throw new GitLabPrepareError(
-          "commit_failed",
-          `git commit scaffold failed: ${err instanceof Error ? err.message : String(err)}`,
-          connection.projectId,
-        );
-      }
-    } else {
-      log.debug({ projectId: connection.projectId }, "No scaffold files to commit");
+  // 7. commit scaffold — commit ANY untracked/modified files (fresh init or
+  // leftover from a partial run) so the default branch is clean before the
+  // repo is marked prepared. A clean tree is not an error.
+  const dirty = execFileSync("git", ["status", "--porcelain"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  if (dirty.length > 0) {
+    try {
+      runGit(projectRoot, ["add", "-A"]);
+      runGit(projectRoot, ["commit", "-m", "chore: ai-factory scaffold", "--no-verify"]);
+      log.info(
+        { projectId: connection.projectId, fileCount: dirty.split("\n").length },
+        "Committed AI Factory scaffold",
+      );
+    } catch (err) {
+      throw new GitLabPrepareError(
+        "commit_failed",
+        `git commit scaffold failed: ${err instanceof Error ? err.message : String(err)}`,
+        connection.projectId,
+      );
     }
+  } else {
+    log.debug({ projectId: connection.projectId }, "No scaffold files to commit");
   }
 
   // 8. empty-origin path: push scaffold as initial default branch (only when

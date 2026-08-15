@@ -176,6 +176,24 @@ describe("prepareGitLabRepository", () => {
     expect(log).toContain("chore: ai-factory scaffold");
   });
 
+  it("commits scaffold files even when .ai-factory already existed", () => {
+    initLocalRepo("master");
+    // .ai-factory already present (no init needed) but scaffold files are
+    // untracked (e.g. leftover from a partial run) — they must be committed.
+    mkdirSync(join(root, ".ai-factory"), { recursive: true });
+    writeFileSync(join(root, ".ai-factory", "config.yaml"), "language:\n  ui: en\n");
+    gitQuiet(root, ["add", ".ai-factory"]);
+    gitQuiet(root, ["commit", "-m", "scaffold", "--no-verify"]);
+    mkdirSync(join(root, ".claude", "agents"), { recursive: true });
+    writeFileSync(join(root, ".claude", "agents", "x.md"), "# x\n");
+    const connection = makeConnection(origin);
+
+    prepareGitLabRepository({ projectRoot: root, connection });
+
+    const log = git(root, ["log", "--oneline", "-1"]);
+    expect(log).toContain("chore: ai-factory scaffold");
+  });
+
   it("extracts the remote default branch (not hardcoded main)", () => {
     initLocalRepo("main");
     gitQuiet(root, ["commit", "--allow-empty", "-m", "local init", "--no-verify"]);

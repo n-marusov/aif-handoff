@@ -36,7 +36,9 @@ export async function callAgentGitPrepare(
   const env = getEnv();
   const baseUrl = env.AGENT_INTERNAL_URL.replace(/\/$/, "");
   const url = `${baseUrl}/gitlab/prepare`;
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  // Prepare runs real git (fetch/checkout/commit of the AI Factory scaffold) and
+  // can take well over 30s on first connect — allow up to 2 minutes.
+  const timeoutMs = options.timeoutMs ?? 120_000;
 
   log.info(
     { projectId, agentUrl: baseUrl, strict: options.strict ?? false },

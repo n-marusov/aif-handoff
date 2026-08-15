@@ -5,13 +5,23 @@ import { GitLabPrepareError, prepareGitLabRepositoryForProject } from "./gitlabP
 
 const log = logger("agent-internal-api");
 
-export const AGENT_INTERNAL_API_PORT = 3011;
+export const AGENT_INTERNAL_API_PORT = 3010;
 
 export interface InternalApiServer {
   server: ServerType;
   port: number;
   host: string;
   close(): Promise<void>;
+}
+
+export interface StartInternalApiOptions {
+  port?: number;
+  host?: string;
+  /**
+   * Extra Hono sub-apps to mount on the same server (e.g. the codex login
+   * broker) so AGENT_INTERNAL_URL serves all agent-internal routes on one port.
+   */
+  mountApps?: Hono[];
 }
 
 function isAuthorized(c: { req: { header(name: string): string | undefined } }): boolean {
@@ -78,12 +88,13 @@ export function createInternalApiApp(): Hono {
   return app;
 }
 
-export function startInternalApi(
-  options: { port?: number; host?: string } = {},
-): InternalApiServer {
+export function startInternalApi(options: StartInternalApiOptions = {}): InternalApiServer {
   const port = options.port ?? AGENT_INTERNAL_API_PORT;
   const host = options.host ?? "0.0.0.0";
   const app = createInternalApiApp();
+  for (const subApp of options.mountApps ?? []) {
+    app.route("/", subApp);
+  }
   const server = serve({ fetch: app.fetch, port, hostname: host });
   // When port 0 is requested, Node picks an ephemeral port — expose the actual one.
   const boundPort =

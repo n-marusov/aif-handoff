@@ -9,7 +9,7 @@ import { connectWakeChannel, closeWakeChannel, waitForApiReady } from "./wakeCha
 import { abortAllActiveStages } from "./stageAbort.js";
 import { startPollScheduler } from "./pollScheduler.js";
 import { startInternalApi, type InternalApiServer } from "./internalApi.js";
-import { startLoginBroker, type BrokerServer } from "./codex/loginBroker.js";
+import { createBrokerRuntime, type BrokerServer } from "./codex/loginBroker.js";
 
 const log = logger("agent");
 
@@ -110,46 +110,44 @@ if (env.AGENT_WAKE_ENABLED) {
 }
 
 // ---------------------------------------------------------------------------
-// Codex login broker (feature-flagged)
-// ---------------------------------------------------------------------------
-let codexLoginBroker: BrokerServer | null = null;
-if (env.AIF_ENABLE_CODEX_LOGIN_PROXY) {
-  log.info(
-    { port: env.AIF_CODEX_LOGIN_BROKER_PORT },
-    "AIF_ENABLE_CODEX_LOGIN_PROXY=true — starting codex login broker",
-  );
-  startLoginBroker({
-    port: env.AIF_CODEX_LOGIN_BROKER_PORT,
-    codexCliPath: env.CODEX_CLI_PATH ?? "codex",
-  })
-    .then((broker) => {
-      codexLoginBroker = broker;
-      log.info(
-        { host: broker.host, port: broker.port },
-        "[CodexLoginBroker] listening on 0.0.0.0:${port}",
-      );
-    })
-    .catch((err) => {
-      log.error({ err }, "[CodexLoginBroker] failed to start");
-    });
-} else {
-  log.debug("AIF_ENABLE_CODEX_LOGIN_PROXY=false — codex login broker disabled");
-}
-
-log.info("Agent coordinator is running. Press Ctrl+C to stop.");
-
-// ---------------------------------------------------------------------------
-// Always-on internal API: lets the API trigger GitLab git-prepare (and any
-// future agent-side operations) synchronously. Not gated by the codex broker
-// flag — production needs it for Connect/Sync git-prepare.
+// Always-on internal API + optional codex login broker on ONE port
+// (AGENT_INTERNAL_URL port). The broker mounts its routes on the same Hono app
+// when enabled; otherwise only the internal routes (e.g. /gitlab/prepare) run.
 // ---------------------------------------------------------------------------
 let internalApiServer: InternalApiServer | null = null;
+let codexLoginBroker: BrokerServer | null = null;
 try {
-  internalApiServer = startInternalApi();
-  log.info({ port: internalApiServer.port }, "Agent internal API started");
+  if (env.AIF_ENABLE_CODEX_LOGIN_PROXY) {
+    log.info(
+      { port: env.AIF_CODEX_LOGIN_BROKER_PORT },
+      "AIF_ENABLE_CODEX_LOGIN_PROXY=true — mounting codex login broker on internal API port",
+    );
+    const runtime = createBrokerRuntime({
+      port: env.AIF_CODEX_LOGIN_BROKER_PORT,
+      codexCliPath: env.CODEX_CLI_PATH ?? "codex",
+    });
+    internalApiServer = startInternalApi({
+      port: env.AIF_CODEX_LOGIN_BROKER_PORT,
+      mountApps: [runtime.app],
+    });
+    codexLoginBroker = {
+      runtime,
+      server: internalApiServer.server,
+      port: internalApiServer.port,
+      host: internalApiServer.host,
+      close: () => internalApiServer!.close(),
+    };
+    log.info({ port: internalApiServer.port }, "Codex login broker mounted on internal API");
+  } else {
+    log.debug("AIF_ENABLE_CODEX_LOGIN_PROXY=false — codex login broker disabled");
+    internalApiServer = startInternalApi();
+    log.info({ port: internalApiServer.port }, "Agent internal API started");
+  }
 } catch (err) {
   log.error({ err }, "Failed to start agent internal API; GitLab git-prepare will be unavailable");
 }
+
+log.info("Agent coordinator is running. Press Ctrl+C to stop.");
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown: flush buffered activity logs before exit
