@@ -530,6 +530,27 @@ describe("ProjectSelector", () => {
     expect(screen.queryByText("MCP Servers")).toBeNull();
   });
 
+  it("does not render a Root Path field and submits without rootPath", () => {
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
+
+    render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByText("New project"));
+
+    expect(screen.queryByText("Root Path")).toBeNull();
+    expect(screen.queryByPlaceholderText("/Users/me/projects/my-project")).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText("My Project"), {
+      target: { value: "Test Project" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    const [input] = mutateCreateProject.mock.calls[0];
+    expect(input.name).toBe("Test Project");
+    expect(input).not.toHaveProperty("rootPath");
+  });
+
   it("shows error toast when project creation fails", () => {
     mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
 
@@ -548,9 +569,6 @@ describe("ProjectSelector", () => {
     // Fill form
     fireEvent.change(screen.getByPlaceholderText("My Project"), {
       target: { value: "Test Project" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("/Users/me/projects/my-project"), {
-      target: { value: "/tmp/test-project" },
     });
 
     // Submit
@@ -763,9 +781,6 @@ describe("ProjectSelector", () => {
       fireEvent.click(screen.getByText("New project"));
       fireEvent.change(screen.getByPlaceholderText("My Project"), {
         target: { value: "Test Project" },
-      });
-      fireEvent.change(screen.getByPlaceholderText("/Users/me/projects/my-project"), {
-        target: { value: "/tmp/test-project" },
       });
       fireEvent.click(screen.getAllByRole("switch")[1]);
       fireEvent.click(screen.getByText("Create"));
