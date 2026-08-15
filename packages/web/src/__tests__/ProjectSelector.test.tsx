@@ -18,6 +18,16 @@ const mockToast = vi.fn();
 let mockGitHubIssuePrEnabled = true;
 let mockGitProvider = "github";
 let mockGitLabIssueMrEnabled = false;
+let mockProjectGitLab: () => {
+  data: {
+    connection: import("@aif/shared/browser").GitLabRepositoryConnection | null;
+    issues: import("@aif/shared/browser").GitLabIssueLink[];
+  };
+  isLoading: boolean;
+} = () => ({
+  data: { connection: null, issues: [] },
+  isLoading: false,
+});
 let mockProjects = [
   {
     id: "p-1",
@@ -66,7 +76,7 @@ vi.mock("@/hooks/useProjects", () => ({
   useConnectProjectGitHub: () => ({ mutate: mutateConnectGitHub, isPending: false }),
   useDisconnectProjectGitHub: () => ({ mutate: mutateDisconnectGitHub, isPending: false }),
   useSyncProjectGitHub: () => ({ mutate: mutateSyncGitHub, isPending: false }),
-  useProjectGitLab: () => ({ data: { connection: null, issues: [] }, isLoading: false }),
+  useProjectGitLab: () => mockProjectGitLab(),
   useConnectProjectGitLab: () => ({ mutate: mutateConnectGitLab, isPending: false }),
   useDisconnectProjectGitLab: () => ({ mutate: mutateDisconnectGitLab, isPending: false }),
   useSyncProjectGitLab: () => ({ mutate: mutateSyncGitLab, isPending: false }),
@@ -624,6 +634,76 @@ describe("ProjectSelector", () => {
 
     expect(screen.queryByText("GitHub Issue-to-PR")).toBeNull();
     expect(screen.getByText("GitLab Issue-to-MR")).toBeDefined();
+  });
+
+  it("connects a GitLab repository with GITLAB_TOKEN auto-substituted", () => {
+    mockGitProvider = "gitlab";
+    mockGitLabIssueMrEnabled = true;
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
+
+    render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    // Repository accepts a full clone URL; the token env var is auto-set.
+    fireEvent.change(screen.getByPlaceholderText("https://gitlab.example.com/group/project"), {
+      target: { value: "https://gitlab.com/vedo-ecosystem/vedo-core" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+
+    expect(mutateConnectGitLab).toHaveBeenCalledWith(
+      {
+        id: "p-1",
+        input: {
+          repository: "vedo-ecosystem/vedo-core",
+          tokenEnvVar: "GITLAB_TOKEN",
+          enabled: true,
+          eligibility: { labels: [], assignee: null, milestone: null },
+        },
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it("prefills the GitLab repository field with the saved project URL", async () => {
+    mockGitProvider = "gitlab";
+    mockGitLabIssueMrEnabled = true;
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false });
+    mockProjectGitLab = () => ({
+      data: {
+        connection: {
+          projectId: "p-1",
+          namespace: "vedo-ecosystem",
+          name: "vedo-core",
+          webUrl: "https://gitlab.com/vedo-ecosystem/vedo-core",
+          defaultBranch: "main",
+          tokenEnvVar: "GITLAB_TOKEN",
+          eligibility: { labels: [], assignee: null, milestone: null },
+          enabled: true,
+          tokenConfigured: true,
+          lastSyncedAt: null,
+          syncError: null,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z",
+        },
+        issues: [],
+      },
+      isLoading: false,
+    });
+
+    render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByTitle("Edit"));
+
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByPlaceholderText(
+            "https://gitlab.example.com/group/project",
+          ) as HTMLInputElement
+        ).value,
+      ).toBe("https://gitlab.com/vedo-ecosystem/vedo-core");
+    });
   });
 
   describe("auto-queue toggle", () => {

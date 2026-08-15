@@ -53,6 +53,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
+import { normalizeRepositoryPath } from "@/lib/utils";
 import type { Project } from "@aif/shared/browser";
 import { PROJECT_SORT_OPTIONS, sortProjects, type ProjectSort } from "@/lib/projectSorting";
 
@@ -109,7 +110,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const [githubAssignee, setGitHubAssignee] = useState("");
   const [githubMilestone, setGitHubMilestone] = useState("");
   const [gitlabRepository, setGitLabRepository] = useState("");
-  const [gitlabTokenEnvVar, setGitLabTokenEnvVar] = useState("GITLAB_TOKEN");
   const [gitlabLabels, setGitLabLabels] = useState("");
   const [gitlabAssignee, setGitLabAssignee] = useState("");
   const [gitlabMilestone, setGitLabMilestone] = useState("");
@@ -223,8 +223,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     if (!isEditDialogOpen || !gitlabData) return;
     const connection = gitlabData.connection;
     const timeout = window.setTimeout(() => {
-      setGitLabRepository(connection ? `${connection.namespace}/${connection.name}` : "");
-      setGitLabTokenEnvVar(connection?.tokenEnvVar ?? "GITLAB_TOKEN");
+      setGitLabRepository(connection ? connection.webUrl : "");
       setGitLabLabels(connection?.eligibility.labels.join(", ") ?? "");
       setGitLabAssignee(connection?.eligibility.assignee ?? "");
       setGitLabMilestone(connection?.eligibility.milestone ?? "");
@@ -251,7 +250,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     setGitHubAssignee("");
     setGitHubMilestone("");
     setGitLabRepository("");
-    setGitLabTokenEnvVar("GITLAB_TOKEN");
     setGitLabLabels("");
     setGitLabAssignee("");
     setGitLabMilestone("");
@@ -287,7 +285,6 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
     setGitHubAssignee("");
     setGitHubMilestone("");
     setGitLabRepository("");
-    setGitLabTokenEnvVar("GITLAB_TOKEN");
     setGitLabLabels("");
     setGitLabAssignee("");
     setGitLabMilestone("");
@@ -310,11 +307,17 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
 
   const handleConnectGitHub = () => {
     if (!editingId || !githubRepository.trim() || !githubTokenEnvVar.trim()) return;
+    // Guard against pasting a token value into the env-var-name field. The API
+    // only accepts an env var name (GITHUB_*); a secret must live in .env.
+    if (!/^GITHUB_[A-Z0-9_]+$/.test(githubTokenEnvVar.trim())) {
+      toast("Enter the env variable name (e.g. GITHUB_TOKEN), not the token value", "error", 8000);
+      return;
+    }
     connectGitHub.mutate(
       {
         id: editingId,
         input: {
-          repository: githubRepository.trim(),
+          repository: normalizeRepositoryPath(githubRepository),
           tokenEnvVar: githubTokenEnvVar.trim(),
           enabled: true,
           eligibility: {
@@ -355,13 +358,14 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   };
 
   const handleConnectGitLab = () => {
-    if (!editingId || !gitlabRepository.trim() || !gitlabTokenEnvVar.trim()) return;
+    if (!editingId || !gitlabRepository.trim()) return;
     connectGitLab.mutate(
       {
         id: editingId,
         input: {
-          repository: gitlabRepository.trim(),
-          tokenEnvVar: gitlabTokenEnvVar.trim(),
+          repository: normalizeRepositoryPath(gitlabRepository),
+          // GIT_PROVIDER=gitlab mode always reads the token from GITLAB_TOKEN.
+          tokenEnvVar: "GITLAB_TOKEN",
           enabled: true,
           eligibility: {
             labels: gitlabLabels
@@ -902,17 +906,10 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                   ) : (
                     <>
                       <Input
-                        placeholder="namespace/repository"
-                        aria-label="GitLab repository"
+                        placeholder="https://gitlab.example.com/group/project"
+                        aria-label="Full GitLab project URL"
                         value={gitlabRepository}
                         onChange={(event) => setGitLabRepository(event.target.value)}
-                      />
-                      <Input
-                        placeholder="GITLAB_TOKEN"
-                        aria-label="GitLab token environment variable"
-                        className="font-mono text-sm"
-                        value={gitlabTokenEnvVar}
-                        onChange={(event) => setGitLabTokenEnvVar(event.target.value)}
                       />
                       <Input
                         placeholder="Required labels, comma-separated"
@@ -935,8 +932,10 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                         />
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        The server reads the token from this environment variable; the token is
-                        never stored in the database.
+                        Paste the full GitLab project URL (any instance, incl. corporate
+                        self-hosted). The namespace/name is extracted automatically. In
+                        GIT_PROVIDER=gitlab mode the token is read from the GITLAB_TOKEN environment
+                        variable; it is never stored in the database.
                       </p>
                       {gitlabConnection?.syncError && (
                         <p className="text-xs text-destructive">{gitlabConnection.syncError}</p>
@@ -946,11 +945,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                           type="button"
                           size="sm"
                           onClick={handleConnectGitLab}
-                          disabled={
-                            connectGitLab.isPending ||
-                            !gitlabRepository.trim() ||
-                            !gitlabTokenEnvVar.trim()
-                          }
+                          disabled={connectGitLab.isPending || !gitlabRepository.trim()}
                         >
                           {connectGitLab.isPending
                             ? "Connecting..."
