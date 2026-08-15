@@ -271,4 +271,26 @@ describe("gitlab schema", () => {
     expect(getTableName(gitlabRepositories)).toBe("gitlab_repositories");
     expect(getTableName(gitlabIssues)).toBe("gitlab_issues");
   });
+
+  it("tracks git preparation on gitlab_repositories (git_prepared_at, migration v30)", () => {
+    // The drizzle table must expose gitPreparedAt so the agent can mark a repo prepared.
+    expect(gitlabRepositories.gitPreparedAt).toBeDefined();
+
+    db.insert(projects).values({ id: "gitlab-project", name: "Repo", rootPath: "/tmp/repo" }).run();
+    db.insert(gitlabRepositories)
+      .values({
+        projectId: "gitlab-project",
+        namespace: "gitlab-org",
+        name: "example",
+        webUrl: "https://gitlab.com/gitlab-org/example",
+        defaultBranch: "main",
+        tokenEnvVar: "GITLAB_TOKEN",
+        enabled: true,
+        gitPreparedAt: "2026-08-15T10:00:00.000Z",
+      })
+      .run();
+
+    const repo = db.select().from(gitlabRepositories).get();
+    expect(repo?.gitPreparedAt).toBe("2026-08-15T10:00:00.000Z");
+  });
 });

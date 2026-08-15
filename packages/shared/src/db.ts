@@ -1125,6 +1125,13 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 30,
+    description: "Track when a GitLab repository was auto-prepared (git_prepared_at)",
+    sql: `
+      ALTER TABLE gitlab_repositories ADD COLUMN git_prepared_at TEXT;
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

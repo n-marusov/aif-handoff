@@ -162,6 +162,7 @@ export interface GitLabRepositoryConnection {
   tokenConfigured: boolean;
   lastSyncedAt: string | null;
   syncError: string | null;
+  gitPreparedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

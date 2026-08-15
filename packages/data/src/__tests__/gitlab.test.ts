@@ -16,6 +16,7 @@ const {
   importGitLabIssueTask,
   listGitLabIssues,
   markGitLabIssueUnavailable,
+  markGitLabRepositoryPrepared,
   updateGitLabMergeRequest,
   upsertGitLabRepository,
 } = await import("../index.js");
@@ -46,6 +47,26 @@ describe("GitLab repository data", () => {
     expect(findGitLabRepository("project-1")?.eligibility.labels).toEqual(["aif"]);
     expect(deleteGitLabRepository("project-1")).toBe(true);
     expect(findGitLabRepository("project-1")).toBeUndefined();
+  });
+
+  it("round-trips gitPreparedAt and marks a repository prepared", () => {
+    const connection = upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "gitlab-org",
+      name: "example",
+      webUrl: "https://gitlab.com/gitlab-org/example",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+    });
+
+    // Fresh connection has no preparation timestamp.
+    expect(connection.gitPreparedAt).toBeNull();
+
+    const prepared = markGitLabRepositoryPrepared("project-1");
+    expect(prepared?.gitPreparedAt).toBeDefined();
+    expect(findGitLabRepository("project-1")?.gitPreparedAt).toBe(prepared?.gitPreparedAt);
   });
 });
 

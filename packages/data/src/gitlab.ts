@@ -109,6 +109,7 @@ function toConnection(row: typeof gitlabRepositories.$inferSelect): GitLabReposi
     tokenConfigured: Boolean(process.env[row.tokenEnvVar]?.trim()),
     lastSyncedAt: row.lastSyncedAt,
     syncError: row.syncError,
+    gitPreparedAt: row.gitPreparedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -141,6 +142,7 @@ export function upsertGitLabRepository(input: {
   tokenEnvVar: string;
   eligibility: GitLabEligibility;
   enabled: boolean;
+  gitPreparedAt?: string | null;
 }): GitLabRepositoryConnection {
   const now = new Date().toISOString();
   getDb()
@@ -163,6 +165,7 @@ export function upsertGitLabRepository(input: {
         eligibilityJson: JSON.stringify(input.eligibility),
         enabled: input.enabled,
         syncError: null,
+        gitPreparedAt: input.gitPreparedAt ?? null,
         updatedAt: now,
       },
     })
@@ -172,6 +175,24 @@ export function upsertGitLabRepository(input: {
     "GitLab repository connection saved",
   );
   return findGitLabRepository(input.projectId)!;
+}
+
+/**
+ * Record that the agent auto-prepared the local git repo (origin/credentials/
+ * default branch + AI Factory scaffold) for this connection. Returns the
+ * updated connection, or undefined when the project has no connection.
+ */
+export function markGitLabRepositoryPrepared(projectId: string): GitLabRepositoryConnection | undefined {
+  const now = new Date().toISOString();
+  const existing = findGitLabRepository(projectId);
+  if (!existing) return undefined;
+  getDb()
+    .update(gitlabRepositories)
+    .set({ gitPreparedAt: now, updatedAt: now })
+    .where(eq(gitlabRepositories.projectId, projectId))
+    .run();
+  log.debug({ projectId, gitPreparedAt: now }, "GitLab repository marked prepared");
+  return findGitLabRepository(projectId);
 }
 
 export function deleteGitLabRepository(projectId: string): boolean {

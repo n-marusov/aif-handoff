@@ -348,6 +348,7 @@ export const gitlabRepositories = sqliteTable("gitlab_repositories", {
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   lastSyncedAt: text("last_synced_at"),
   syncError: text("sync_error"),
+  gitPreparedAt: text("git_prepared_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
