@@ -35,7 +35,8 @@
 3. Открывает Web UI и следит за прогрессом задачи.
 4. Одобряет и мерджит MR.
 
-Всё остальное делает система.
+Всё остальное делает система — включая настройку `origin`, git-credentials,
+извлечение главной ветки и инициализацию AI Factory файлов (шаг 4, автоматически).
 
 ---
 
@@ -295,61 +296,35 @@ docker compose -f docker-compose.production.yml exec agent git -C /home/www/demo
 # → на ветке main (или master), работает чисто
 ```
 
-### 4.2. Настроить origin
+### 4.2–4.4. Git remote, credentials, главная ветка — автоматически ✅
 
-**Действие.**
+> Эти шаги **больше не нужно выполнять вручную**. При подключении репозитория через
+> **Connect** (и повторно при **Sync now**) агент сам в контейнере выполняет
+> `prepareGitLabRepository()`:
+>
+> 1. `git remote add origin <webUrl>.git` (если `origin` отсутствует);
+> 2. `git config credential.helper` (токен из `$GITLAB_TOKEN` в контейнере агента);
+> 3. `git config --global --add safe.directory <root>` (идемпотентно — устраняет
+>    `dubious ownership`);
+> 4. `git fetch origin`;
+> 5. извлекает **главную ветку** по имени из `connection.defaultBranch`
+>    (`main`/`master`/`develop`/... — как сообщает GitLab; fallback `origin/HEAD`);
+>    если на GitLab веток нет — остаётся локальная ветка и пушит скаффолд как
+>    стартовый `defaultBranch`;
+> 6. `initProject()` — инициализирует AI Factory файлы (`.ai-factory/`, `.claude/`,
+>    `.codex/`, ...), если их ещё нет (идемпотентно);
+> 7. коммитит скаффолд (`chore: ai-factory scaffold`), если появились файлы.
+>
+> **Проверяемый результат:** после Connect/Sync now в `/home/www/demo` настроен `origin`,
+> локальная ветка = главная ветка репозитория, AI Factory скаффолд закоммичен.
+> Если подготовка не удалась (например, неверный токен) — **Sync now вернёт ошибку
+> сразу** (`gitlab_prepare_*`), задача не импортируется и остаётся `blocked`.
 
-```bash
-docker compose -f docker-compose.production.yml exec agent git -C /home/www/demo remote add origin https://gitlab.com/<NAMESPACE>/<PROJECT>.git
-```
-
-**Смысл.** Подключает gitlab.com как удалённый репозиторий, в который агент будет
-пушить ветки задач.
-
-**Проверяемый результат.** Команда завершается без ошибок (пустой вывод = успех).
-
-### 4.3. Настроить credential-helper для неинтерактивного push
-
-**Действие.**
-
-```bash
-docker compose -f docker-compose.production.yml exec agent git -C /home/www/demo config credential.helper '!f() { echo username=GITLAB_USERNAME; echo password=$GITLAB_TOKEN; }; f'
-```
-
-**Смысл.** git не должен спрашивать логин/пароль при `git push`. Helper берёт токен из
-переменной окружения `$GITLAB_TOKEN` (она есть в контейнере агента через `env_file: .env`).
-Логин (`username=...`) GitLab.com при PAT-авторизации игнорирует — важна только
-последовательность «логин:токен».
-
-**Проверяемый результат.**
-
-```bash
-docker compose -f docker-compose.production.yml exec agent git -C /home/www/demo remote -v
-# → origin  https://gitlab.com/<NAMESPACE>/<PROJECT>.git (fetch)
-# → origin  https://gitlab.com/<NAMESPACE>/<PROJECT>.git (push)
-```
-
-### 4.4. (Рекомендуется) Синхронизировать локальный репозиторий с main gitlab.com
-
-**Действие.**
-
-```bash
-docker compose -f docker-compose.production.yml exec agent sh -c 'cd /home/www/demo && git fetch origin && git checkout -B main origin/main'
-```
-
-**Смысл.** Заменяет пустой скаффолд-репозиторий содержимым реального `main` с gitlab.com.
-Тогда ветка задачи создаётся от настоящего кода, а MR показывает **только** изменения
-задачи, а не «новый файл в пустом репозитории». Агент сам делает `git pull --ff-only
-origin main` перед созданием ветки — но в нестрогом режиме сбой этого pull является
-best-effort (предупреждение в логах, работа продолжается с локальной базы). Зеркалирование
-делает демо детерминированным.
-
-**Проверяемый результат.**
-
-```bash
-docker compose -f docker-compose.production.yml exec agent sh -c 'cd /home/www/demo && git log --oneline -1'
-# → последний коммит вашего main на gitlab.com
-```
+> 💡 Ручной эквивалент (если нужно сделать вручную):
+> `docker compose -f docker-compose.production.yml exec agent git -C /home/www/demo remote add origin https://gitlab.com/<NAMESPACE>/<PROJECT>.git`
+>
+> - credential-helper + `git fetch origin && git checkout -B <defaultBranch> origin/<defaultBranch>`.
+>   Обычно не требуется — агент делает это сам.
 
 > ⚠️ Про чистоту MR: `ai-factory init` создаёт в корне `.ai-factory/` (не входит в
 > глобальный `.gitignore`). Если задача «закоммитит всё» (`git add -A`), скаффолд-файлы
@@ -524,18 +499,18 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 
 ## Сводная таблица «Действие → Смысл → Результат»
 
-| Шаг | Действие                                                         | Смысл                                            | Проверяемый результат                                                                                      |
-| --- | ---------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| 1   | Заполнить `.env`                                                 | Включить GitLab-режим + router.ai + skills-режим | `printenv GIT_PROVIDER` → `gitlab`                                                                         |
-| 2   | `docker compose -f docker-compose.production.yml build && up -d` | Поднять прод-стек                                | `ps` → все `Up`, health-проверки проходят                                                                  |
-| 3   | Авто-посев профиля (`.env` + старт API), validate                | Подключить router.ai как LLM                     | `validate` → `{ok:true}`; профиль `Bootstrap (Codex CLI)` в `GET /runtime-profiles`; дефолты в `/settings` |
-| 4   | POST `/projects`, remote add, credential helper                  | Рабочий репозиторий + origin                     | `remote -v` показывает gitlab.com; `git log` — ваш main (после 4.4)                                        |
-| 5   | PUT `/projects/:id/gitlab`                                       | Связать проект с репозиторием                    | `GET /projects/:id/gitlab` → `connection` с `defaultBranch: main`                                          |
-| 6   | PATCH `/projects/:id/auto-queue-mode`                            | Разрешить авто-продвижение задач                 | `{ enabled: true }`                                                                                        |
-| 7   | Создать Issue + `POST .../gitlab/sync`                           | Импортировать Issue как задачу                   | `imported: 1`; карточка `GITLAB #<iid>` в `backlog`                                                        |
-| 8   | Наблюдать `logs -f agent`                                        | Пайплайн планирования/реализации/ревью           | Задача прошла до `done`; MR `Closes #<iid>` в gitlab.com                                                   |
-| 9   | Approve + Merge на gitlab.com                                    | Человек принимает решение                        | Задача `verified`                                                                                          |
-| 10  | Контрольный список                                               | Приёмка                                          | все пункты зелёные                                                                                         |
+| Шаг | Действие                                                                    | Смысл                                            | Проверяемый результат                                                                                      |
+| --- | --------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| 1   | Заполнить `.env`                                                            | Включить GitLab-режим + router.ai + skills-режим | `printenv GIT_PROVIDER` → `gitlab`                                                                         |
+| 2   | `docker compose -f docker-compose.production.yml build && up -d`            | Поднять прод-стек                                | `ps` → все `Up`, health-проверки проходят                                                                  |
+| 3   | Авто-посев профиля (`.env` + старт API), validate                           | Подключить router.ai как LLM                     | `validate` → `{ok:true}`; профиль `Bootstrap (Codex CLI)` в `GET /runtime-profiles`; дефолты в `/settings` |
+| 4   | POST `/projects` (git remote/credentials/ветка — автоматически при Connect) | Рабочий репозиторий + origin                     | `connection` с `defaultBranch`; агент сам настроил `origin` и главную ветку                                |
+| 5   | PUT `/projects/:id/gitlab`                                                  | Связать проект с репозиторием                    | `GET /projects/:id/gitlab` → `connection` с `defaultBranch: main`                                          |
+| 6   | PATCH `/projects/:id/auto-queue-mode`                                       | Разрешить авто-продвижение задач                 | `{ enabled: true }`                                                                                        |
+| 7   | Создать Issue + `POST .../gitlab/sync`                                      | Импортировать Issue как задачу                   | `imported: 1`; карточка `GITLAB #<iid>` в `backlog`                                                        |
+| 8   | Наблюдать `logs -f agent`                                                   | Пайплайн планирования/реализации/ревью           | Задача прошла до `done`; MR `Closes #<iid>` в gitlab.com                                                   |
+| 9   | Approve + Merge на gitlab.com                                               | Человек принимает решение                        | Задача `verified`                                                                                          |
+| 10  | Контрольный список                                                          | Приёмка                                          | все пункты зелёные                                                                                         |
 
 ---
 
@@ -593,7 +568,7 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 | `PUT /projects/:id/gitlab` → `502 gitlab_upstream`       | Неожиданный сетевой сбой при вызове GitLab API: чаще всего транзиентный DNS (`getaddrinfo EAI_AGAIN gitlab.com`) — повторите запрос; если повторяется, проверьте сеть/DNS хоста (VPN, корпоративный DNS). |
 | `validate` → `ok: false`                                 | router.ai недоступен/несовместим с Codex-протоколом; неверный ключ; модель без tool use.                                                                                                                  |
 | Задача застряла в `backlog`                              | Не включена авто-очередь (шаг 6).                                                                                                                                                                         |
-| `git push` в логах агента падает                         | Нет credential-helper (шаг 4.3); у PAT нет `write_repository`; роль ниже Developer.                                                                                                                       |
+| `git push` в логах агента падает                         | Credential-helper настраивается автоматически при Connect/Sync now; если push всё равно падает — проверьте `GITLAB_TOKEN` (скоуп `write_repository`) и роль Developer.                                    |
 | Ветка задачи не появляется на gitlab.com                 | Смотрите `logs -f agent`: ошибка будет `StageManualBlockError("GitLab branch push failed...")`.                                                                                                           |
 | MR не создаётся                                          | Проверьте, что ветка запушена, а `defaultBranch` репозитория — `main` (иначе укажите свой в `GET /projects/:id/gitlab`).                                                                                  |
 | MR создан, но diff огромный                              | Локальный репозиторий не зеркалирован с gitlab.com (шаг 4.4).                                                                                                                                             |

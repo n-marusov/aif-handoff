@@ -3,6 +3,7 @@
 Run through this list whenever you touch anything under `packages/api/`.
 
 - [x] New or changed REST endpoints → update `docs/api.md` and the Zod schemas in `schemas.ts`. (GitLab routes + `gitlabConnectSchema`/`gitlabSyncSchema`/`gitlabPublishSchema`; docs/api.md updated)
+- [x] New internal bridge to the agent → verify `AGENT_INTERNAL_URL` is used consistently and failures are structured (`gitlabPrepareBridge.ts`; sync aborts import on strict prepare failure).
 - [ ] New or changed WebSocket events → update `docs/api.md` and the web client (`packages/web/src/hooks/useWebSocket.ts`).
 - [x] All DB access goes through `@aif/data`. Never import drizzle helpers or construct SQL directly here.
 - [ ] Runtime execution goes through `@aif/runtime` — no direct provider SDK calls from routes or services.

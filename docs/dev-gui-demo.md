@@ -11,8 +11,8 @@
 > LLM-бэкенд — router.ai (OpenAI-совместимый, через Codex CLI), репозиторий — gitlab.com.
 >
 > **Способ настройки:** почти всё делается **через Web UI**. В `.env` выносится только то,
-> что GUI не хранит (секреты и флаги включения GitLab-режима), а через CLI — только
-> git remote/credential helper локального репозитория (их в GUI нет).
+> что GUI не хранит (секреты и флаги включения GitLab-режима). Git remote/credentials/
+> главная ветка настраиваются **автоматически** агентом при Connect/Sync now.
 >
 > **Формат шагов:** `Действие` → `Смысл` → `Проверяемый результат`. Никаких скрытых
 > шагов: всё, что нужно сделать «руками», перечислено явно.
@@ -45,7 +45,7 @@
 | Создать проект + Root Path                  | GUI: **проект → New project**                                      |
 | GitLab-репозиторий + eligibility            | GUI: **Edit Project → GitLab Issue-to-MR → Connect**               |
 | Авто-очередь (auto-queue)                   | GUI: **Create/Edit Project → Auto-Queue Mode**                     |
-| `origin` и git-credentials локального repo  | CLI: `git remote add` + `git config credential.helper`             |
+| `origin` и git-credentials локального repo  | автоматически: агент при **Connect / Sync now** (шаг 4.2–4.4)      |
 | Git-идентичность коммитов (bot-атрибуция)   | `.env`: `AIF_GIT_BOT_NAME` / `AIF_GIT_BOT_EMAIL` (опционально)     |
 
 **Что делает человек по ходу демо (только эти действия):**
@@ -53,11 +53,11 @@
 1. Пишет `.env` (флаги GitLab + секреты) и запускает `npm run dev`.
 2. В Web UI создаёт runtime-профиль router.ai и проверяет связь (`Validate`).
 3. В Web UI создаёт проект, подключает GitLab-репозиторий и включает Auto-Queue.
-4. Через CLI один раз настраивает `origin` + credential-helper локального проекта.
-5. Создаёт Issue на gitlab.com и жмёт **Sync now** в Web UI.
-6. Следит за прогрессом на доске, затем одобряет и мерджит MR.
+4. Создаёт Issue на gitlab.com и жмёт **Sync now** в Web UI.
+5. Следит за прогрессом на доске, затем одобряет и мерджит MR.
 
-Всё остальное делает система.
+Всё остальное делает система — включая настройку `origin`, git-credentials,
+извлечение главной ветки и инициализацию AI Factory файлов (шаг 4, автоматически).
 
 ---
 
@@ -294,69 +294,29 @@ git -C <LOCAL_ROOT> status
 # → на ветке main (или master), работает чисто
 ```
 
-### 4.2. Настроить origin
+### 4.2–4.4. Git remote, credentials, главная ветка — автоматически ✅
 
-**Действие.**
-
-```bash
-git -C <LOCAL_ROOT> remote add origin https://gitlab.com/<NAMESPACE>/<PROJECT>.git
-```
-
-**Смысл.** Подключает gitlab.com как удалённый репозиторий, в который агент будет
-пушить ветки задач. Это та же операция, что в прод-сценарии делалась через
-`docker compose exec agent git ...` — но теперь выполняется напрямую на хосте.
-
-**Проверяемый результат.** Команда завершается без ошибок (пустой вывод = успех).
-
-### 4.3. Настроить credential-helper для неинтерактивного push
-
-**Действие.**
-
-```bash
-git -C <LOCAL_ROOT> config credential.helper '!f() { echo username=oauth2; echo password=$GITLAB_TOKEN; }; f'
-```
-
-**Смысл.** git не должен спрашивать логин/пароль при `git push`. Helper берёт токен из
-переменной окружения `$GITLAB_TOKEN`. Важно: `GITLAB_TOKEN` должен быть в окружении
-**процесса, который порождает `git push`** — то есть в окружении `npm run dev` (он туда
-попадает из `.env`, см. шаг 1). Логин (`username=...`) GitLab.com при PAT-авторизации
-игнорирует — важна только последовательность «логин:токен».
-
-> Windows-примечание: shell-helper `!f() {...}` — POSIX-конструкция; в PowerShell/cmd
-> используйте другой способ (например, `credential.helper=manager` + сохранённые
-> креды, или SSH remote `git@gitlab.com:...` с ключом). Альтернатива для любого ОС —
-> SSH remote и `GIT_SSH_COMMAND`/ключ по умолчанию.
-
-**Проверяемый результат.**
-
-```bash
-git -C <LOCAL_ROOT> remote -v
-# → origin  https://gitlab.com/<NAMESPACE>/<PROJECT>.git (fetch)
-# → origin  https://gitlab.com/<NAMESPACE>/<PROJECT>.git (push)
-```
-
-### 4.4. (Рекомендуется) Синхронизировать локальный репозиторий с main gitlab.com
-
-**Действие.**
-
-```bash
-cd <LOCAL_ROOT>
-git fetch origin
-git checkout -B main origin/main
-```
-
-**Смысл.** Заменяет пустой скаффолд-репозиторий содержимым реального `main` с gitlab.com.
-Тогда ветка задачи создаётся от настоящего кода, а MR показывает **только** изменения
-задачи, а не «новый файл в пустом репозитории». Агент сам делает `git pull --ff-only
-origin main` перед созданием ветки — но в нестрогом режиме сбой этого pull является
-best-effort. Зеркалирование делает демо детерминированным.
-
-**Проверяемый результат.**
-
-```bash
-git -C <LOCAL_ROOT> log --oneline -1
-# → последний коммит вашего main на gitlab.com
-```
+> Эти шаги **больше не нужно выполнять вручную**. При подключении репозитория через
+> **Connect** (и повторно при **Sync now**) агент сам выполняет `prepareGitLabRepository()`
+> в корне проекта:
+>
+> 1. `git remote add origin <webUrl>.git` (если `origin` отсутствует);
+> 2. `git config credential.helper` (токен из `$GITLAB_TOKEN` в окружении агента);
+> 3. `git config --global --add safe.directory <root>` (идемпотентно — устраняет
+>    `dubious ownership`);
+> 4. `git fetch origin`;
+> 5. извлекает **главную ветку** по имени из `connection.defaultBranch`
+>    (`main`/`master`/`develop`/... — как сообщает GitLab; fallback `origin/HEAD`);
+>    если на GitLab веток нет — остаётся локальная ветка и пушит скаффолд как
+>    стартовый `defaultBranch`;
+> 6. `initProject()` — инициализирует AI Factory файлы (`.ai-factory/`, `.claude/`,
+>    `.codex/`, ...), если их ещё нет (идемпотентно);
+> 7. коммитит скаффолд (`chore: ai-factory scaffold`), если появились файлы.
+>
+> **Проверяемый результат:** после Connect/Sync now в `<LOCAL_ROOT>` настроен `origin`,
+> локальная ветка = главная ветка репозитория, AI Factory скаффолд закоммичен.
+> Если подготовка не удалась (например, неверный токен) — **Sync now вернёт ошибку
+> сразу** (`gitlab_prepare_*`), задача не импортируется и остаётся `blocked`.
 
 > ⚠️ Про чистоту MR: `ai-factory init` создаёт в корне `.ai-factory/` (не входит в
 > глобальный `.gitignore`). Если задача «закоммитит всё» (`git add -A`), скаффолд-файлы
@@ -517,18 +477,18 @@ backlog ──▶ planning ──▶ plan_ready ──▶ implementing ──▶
 
 ## Сводная таблица «Действие → Смысл → Результат»
 
-| Шаг | Действие                                                    | Смысл                                            | Проверяемый результат                                                          |
-| --- | ----------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------ |
-| 1   | Заполнить `.env`                                            | Включить GitLab-режим + router.ai + skills-режим | `grep ... .env` → все строки на месте                                          |
-| 2   | `npm install && npm run init && npm run dev`                | Поднять нативный dev-стек                        | Web UI `:5180`, `GET /health` `:3009` → 200                                    |
-| 3   | Global Settings: профиль + Validate + Save Runtime Defaults | Подключить router.ai как LLM                     | `Validate` успешен; профиль в списке; дефолты стадий указывают на профиль      |
-| 4   | New project + `git remote add` + credential-helper + mirror | Рабочий репозиторий + origin                     | `git -C <LOCAL_ROOT> remote -v` → gitlab.com; `git log` — ваш main (после 4.4) |
-| 5   | Edit Project → GitLab Issue-to-MR → Connect                 | Связать проект с репозиторием                    | Бейдж **Connected**, появились **Sync now**/**Disconnect**                     |
-| 6   | Edit Project → Auto-Queue Mode → Save                       | Разрешить авто-продвижение задач                 | Переключатель включён                                                          |
-| 7   | Создать Issue + **Sync now**                                | Импортировать Issue как задачу                   | Карточка `GITLAB #<iid>` в `backlog`                                           |
-| 8   | Наблюдать доску и логи `npm run dev`                        | Пайплайн планирования/реализации/ревью           | Задача прошла до `done`; MR `Closes #<iid>` в gitlab.com                       |
-| 9   | Approve + Merge на gitlab.com                               | Человек принимает решение                        | Задача `verified`                                                              |
-| 10  | Контрольный список                                          | Приёмка                                          | все пункты зелёные                                                             |
+| Шаг | Действие                                                               | Смысл                                            | Проверяемый результат                                                                 |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| 1   | Заполнить `.env`                                                       | Включить GitLab-режим + router.ai + skills-режим | `grep ... .env` → все строки на месте                                                 |
+| 2   | `npm install && npm run init && npm run dev`                           | Поднять нативный dev-стек                        | Web UI `:5180`, `GET /health` `:3009` → 200                                           |
+| 3   | Global Settings: профиль + Validate + Save Runtime Defaults            | Подключить router.ai как LLM                     | `Validate` успешен; профиль в списке; дефолты стадий указывают на профиль             |
+| 4   | New project (git remote/credentials/ветка — автоматически при Connect) | Рабочий репозиторий + origin                     | Бейдж **Connected**; агент сам настроил `origin`, главную ветку и AI Factory скаффолд |
+| 5   | Edit Project → GitLab Issue-to-MR → Connect                            | Связать проект с репозиторием                    | Бейдж **Connected**, появились **Sync now**/**Disconnect**                            |
+| 6   | Edit Project → Auto-Queue Mode → Save                                  | Разрешить авто-продвижение задач                 | Переключатель включён                                                                 |
+| 7   | Создать Issue + **Sync now**                                           | Импортировать Issue как задачу                   | Карточка `GITLAB #<iid>` в `backlog`                                                  |
+| 8   | Наблюдать доску и логи `npm run dev`                                   | Пайплайн планирования/реализации/ревью           | Задача прошла до `done`; MR `Closes #<iid>` в gitlab.com                              |
+| 9   | Approve + Merge на gitlab.com                                          | Человек принимает решение                        | Задача `verified`                                                                     |
+| 10  | Контрольный список                                                     | Приёмка                                          | все пункты зелёные                                                                    |
 
 ---
 
@@ -562,8 +522,9 @@ backlog ──▶ planning ──▶ plan_ready ──▶ implementing ──▶
 
 1. **`.env`** — секреты (`GITLAB_TOKEN`, `OPENAI_API_KEY`) и флаги включения
    (`GIT_PROVIDER`, `AIF_GITLAB_ISSUE_MR_ENABLED`). GUI хранит только имена env-переменных.
-2. **git remote + credentials** — `origin` и credential-helper/SSH для неинтерактивного
-   `git push` (в GUI поля для этого нет).
+2. **git remote + credentials** — настраиваются **автоматически** агентом при
+   **Connect / Sync now** (шаг 4.2–4.4); вручную нужны только если вы отключили
+   автоматику или используете SSH-кредиты.
 
 ---
 
