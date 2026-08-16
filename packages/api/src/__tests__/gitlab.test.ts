@@ -890,6 +890,47 @@ describe("GitLab project routes", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("requires the internal broadcast token for sync and publish when configured", async () => {
+    upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "namespace",
+      name: "repo",
+      webUrl: "https://gitlab.com/namespace/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+      gitPreparedAt: "2026-08-15T00:00:00.000Z",
+    });
+    vi.stubEnv("INTERNAL_BROADCAST_TOKEN", "internal-secret");
+    resetEnvCache();
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Without the token the sync must be rejected before any fetch.
+    const unauthorized = await app.request("/projects/project-1/gitlab/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // With the token the sync passes auth and reaches the upstream (unmocked
+    // fetch → 502). A 401 here would mean the token was not accepted.
+    const authorized = await app.request("/projects/project-1/gitlab/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Broadcast-Token": "internal-secret",
+      },
+      body: "{}",
+    });
+    expect(authorized.status).not.toBe(401);
+  });
+
   it("marks the task verified when the merge request is merged and pauses it when closed unmerged", async () => {
     upsertGitLabRepository({
       projectId: "project-1",

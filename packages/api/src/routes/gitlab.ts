@@ -17,6 +17,7 @@ import {
   upsertGitLabRepository,
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
+import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
 import { gitlabConnectSchema, gitlabPublishSchema, gitlabSyncSchema } from "../schemas.js";
 import { callAgentGitPrepare } from "../services/gitlabPrepareBridge.js";
 import {
@@ -159,211 +160,228 @@ gitlabRouter.delete("/:id/gitlab", (c) => {
     : c.json({ error: "GitLab connection not found" }, 404);
 });
 
-gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c) => {
-  const projectId = c.req.param("id");
-  const connection = findGitLabRepository(projectId);
-  if (!connection) return c.json({ error: "GitLab connection not found" }, 404);
-  if (!connection.enabled)
-    return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitLabIssues(projectId) });
+gitlabRouter.post(
+  "/:id/gitlab/sync",
+  internalBroadcastAuth,
+  jsonValidator(gitlabSyncSchema),
+  async (c) => {
+    const projectId = c.req.param("id");
+    const connection = findGitLabRepository(projectId);
+    if (!connection) return c.json({ error: "GitLab connection not found" }, 404);
+    if (!connection.enabled)
+      return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitLabIssues(projectId) });
 
-  // First sync (or reconnect) also runs strict git-prepare: extract the default
-  // branch + init AI Factory files. On failure, surface the error immediately
-  // (task stays blocked) instead of importing issues into a broken repo.
-  if (!connection.gitPreparedAt) {
-    const prepare = await callAgentGitPrepare(projectId, { strict: true });
-    if (!prepare.ok) {
-      log.warn(
-        { projectId, errorCode: prepare.errorCode, error: prepare.error },
-        "GitLab git-prepare failed on sync; aborting import",
-      );
-      return c.json(
-        {
-          error: prepare.error ?? "GitLab git-prepare failed",
-          code: prepare.errorCode ?? "gitlab_prepare_failed",
-        },
-        502,
-      );
+    // First sync (or reconnect) also runs strict git-prepare: extract the default
+    // branch + init AI Factory files. On failure, surface the error immediately
+    // (task stays blocked) instead of importing issues into a broken repo.
+    if (!connection.gitPreparedAt) {
+      const prepare = await callAgentGitPrepare(projectId, { strict: true });
+      if (!prepare.ok) {
+        log.warn(
+          { projectId, errorCode: prepare.errorCode, error: prepare.error },
+          "GitLab git-prepare failed on sync; aborting import",
+        );
+        return c.json(
+          {
+            error: prepare.error ?? "GitLab git-prepare failed",
+            code: prepare.errorCode ?? "gitlab_prepare_failed",
+          },
+          502,
+        );
+      }
     }
-  }
 
-  try {
-    const client = clientFor(connection);
-    const remoteIssues = await client.listIssues(connection.namespace, connection.name);
-    const existingByIid = new Map(listGitLabIssues(projectId).map((issue) => [issue.iid, issue]));
-    const hasMrDiscoveryCandidates = remoteIssues.some(
-      (issue) =>
-        !existingByIid.get(issue.iid)?.mrIid && issueIsEligible(issue, connection.eligibility),
-    );
-    const openMergeRequests = hasMrDiscoveryCandidates
-      ? await client.listMergeRequests(connection.namespace, connection.name)
-      : [];
-    let imported = 0;
-    let updated = 0;
-    let skipped = 0;
-    const synchronizedIids = new Set<number>();
-    for (const issue of remoteIssues) {
-      const existing = existingByIid.get(issue.iid);
-      const eligible = issueIsEligible(issue, connection.eligibility);
-      synchronizedIids.add(issue.iid);
-      if (!existing?.taskId && !eligible) {
-        skipped += 1;
-        continue;
-      }
-      const closingMr = existing?.mrIid
-        ? null
-        : findMergeRequestClosingIssue(openMergeRequests, issue.iid);
-      if (closingMr) {
-        log.debug(
-          { projectId, iid: issue.iid, mrIid: closingMr.iid },
-          "GitLab closing merge request discovered",
-        );
-      }
-      const snapshot = await toIssueSnapshot(client, connection.namespace, connection.name, issue);
-      const result = importGitLabIssueTask({
-        projectId,
-        namespace: connection.namespace,
-        repository: connection.name,
-        iid: issue.iid,
-        globalId: `gid://gitlab/Issue/${issue.id}`,
-        webUrl: issue.web_url,
-        state: issue.state === "closed" ? "closed" : "open",
-        sourceUpdatedAt: issue.updated_at,
-        snapshot,
-        ...(closingMr
-          ? {
-              mergeRequest: {
-                iid: closingMr.iid,
-                url: closingMr.web_url,
-                state: "open" as const,
-              },
-            }
-          : {}),
-      });
-      if (result.created) imported += 1;
-      else updated += 1;
-
-      const mrIid = existing?.mrIid ?? closingMr?.iid;
-      if (mrIid) {
-        const mr =
-          closingMr ?? (await client.getMergeRequest(connection.namespace, connection.name, mrIid));
-        const approvals = await client.getMergeRequestApprovals(
-          connection.namespace,
-          connection.name,
-          mr.iid,
-        );
-        const mrState: "open" | "closed" | "merged" =
-          mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
-        const checks = await client.getCommitChecks(connection.namespace, connection.name, mr.sha);
-        // GitLab "Request changes" is not exposed via detailed_merge_status on
-        // Free; the signal is a system note ("requested changes") in the MR
-        // notes API. Track the last-processed note id so a task resumes at
-        // implementing exactly once per review action (edge-trigger), mirroring
-        // the GitHub changes_requested handling in routes/github.ts.
-        const mrNotes = await client.listMergeRequestNotes(
-          connection.namespace,
-          connection.name,
-          mr.iid,
-        );
-        const requestChangesNote = mrNotes
-          .filter(
-            (note) => note.system && note.body?.trim().toLowerCase().includes("requested changes"),
-          )
-          .sort((a, b) => b.id - a.id)[0];
-        const mergeRequestUpdate: Parameters<typeof updateGitLabMergeRequest>[0] = {
-          projectId,
-          iid: issue.iid,
-          mrIid: mr.iid,
-          mrUrl: mr.web_url,
-          mrState,
-          mrChecksStatus: checks,
-          reviewState: approvals.reviewState,
-        };
-        if (requestChangesNote) {
-          mergeRequestUpdate.lastReviewNoteId = requestChangesNote.id;
+    try {
+      const client = clientFor(connection);
+      const remoteIssues = await client.listIssues(connection.namespace, connection.name);
+      const existingByIid = new Map(listGitLabIssues(projectId).map((issue) => [issue.iid, issue]));
+      const hasMrDiscoveryCandidates = remoteIssues.some(
+        (issue) =>
+          !existingByIid.get(issue.iid)?.mrIid && issueIsEligible(issue, connection.eligibility),
+      );
+      const openMergeRequests = hasMrDiscoveryCandidates
+        ? await client.listMergeRequests(connection.namespace, connection.name)
+        : [];
+      let imported = 0;
+      let updated = 0;
+      let skipped = 0;
+      const synchronizedIids = new Set<number>();
+      for (const issue of remoteIssues) {
+        const existing = existingByIid.get(issue.iid);
+        const eligible = issueIsEligible(issue, connection.eligibility);
+        synchronizedIids.add(issue.iid);
+        if (!existing?.taskId && !eligible) {
+          skipped += 1;
+          continue;
         }
-        updateGitLabMergeRequest(mergeRequestUpdate);
-        let task = findTaskById(result.taskId);
-        const discoveredMrNeedsDone =
-          closingMr && task && task.status !== "done" && task.status !== "verified";
-        if (discoveredMrNeedsDone && task) {
-          updateTaskStatus(
-            task.id,
-            "done",
-            {},
-            { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
-          );
-          // Refresh the task row so downstream status checks (merged → verified,
-          // requested-changes → implementing) see the post-transition status.
-          task = findTaskById(result.taskId);
-        }
-        if (task && mrState === "merged" && task.status === "done") {
-          updateTaskStatus(
-            task.id,
-            "verified",
-            {},
-            { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
-          );
-        } else if (task && mrState === "closed") {
-          setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
-        } else if (
-          task &&
-          requestChangesNote &&
-          requestChangesNote.id > (existing?.lastReviewNoteId ?? 0) &&
-          (task.status === "done" || task.status === "review")
-        ) {
-          updateTaskStatus(
-            task.id,
-            "implementing",
-            {
-              reworkRequested: true,
-              reviewComments: task.reviewComments,
-              autoQueueCommitStatus: "pending",
-              autoQueueCommitBaseSha: task.commitSha,
-              commitSha: null,
-              autoQueueCommitError: null,
-              autoQueueCommitCompletedAt: null,
-            },
-            { kind: "system", id: "gitlab-review", displayNameSnapshot: "GitLab Review" },
-          );
-          log.info(
-            { taskId: task.id, iid: issue.iid, noteId: requestChangesNote.id },
-            "GitLab requested-changes review resumed task at implementing",
-          );
-        } else if (requestChangesNote && task) {
+        const closingMr = existing?.mrIid
+          ? null
+          : findMergeRequestClosingIssue(openMergeRequests, issue.iid);
+        if (closingMr) {
           log.debug(
-            {
-              taskId: task.id,
-              iid: issue.iid,
-              noteId: requestChangesNote.id,
-              lastReviewNoteId: existing?.lastReviewNoteId ?? null,
-              status: task.status,
-            },
-            "GitLab requested-changes note already processed or task not actionable; skipping",
+            { projectId, iid: issue.iid, mrIid: closingMr.iid },
+            "GitLab closing merge request discovered",
+          );
+        }
+        const snapshot = await toIssueSnapshot(
+          client,
+          connection.namespace,
+          connection.name,
+          issue,
+        );
+        const result = importGitLabIssueTask({
+          projectId,
+          namespace: connection.namespace,
+          repository: connection.name,
+          iid: issue.iid,
+          globalId: `gid://gitlab/Issue/${issue.id}`,
+          webUrl: issue.web_url,
+          state: issue.state === "closed" ? "closed" : "open",
+          sourceUpdatedAt: issue.updated_at,
+          snapshot,
+          ...(closingMr
+            ? {
+                mergeRequest: {
+                  iid: closingMr.iid,
+                  url: closingMr.web_url,
+                  state: "open" as const,
+                },
+              }
+            : {}),
+        });
+        if (result.created) imported += 1;
+        else updated += 1;
+
+        const mrIid = existing?.mrIid ?? closingMr?.iid;
+        if (mrIid) {
+          const mr =
+            closingMr ??
+            (await client.getMergeRequest(connection.namespace, connection.name, mrIid));
+          const approvals = await client.getMergeRequestApprovals(
+            connection.namespace,
+            connection.name,
+            mr.iid,
+          );
+          const mrState: "open" | "closed" | "merged" =
+            mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
+          const checks = await client.getCommitChecks(
+            connection.namespace,
+            connection.name,
+            mr.sha,
+          );
+          // GitLab "Request changes" is not exposed via detailed_merge_status on
+          // Free; the signal is a system note ("requested changes") in the MR
+          // notes API. Track the last-processed note id so a task resumes at
+          // implementing exactly once per review action (edge-trigger), mirroring
+          // the GitHub changes_requested handling in routes/github.ts.
+          const mrNotes = await client.listMergeRequestNotes(
+            connection.namespace,
+            connection.name,
+            mr.iid,
+          );
+          const requestChangesNote = mrNotes
+            .filter(
+              (note) =>
+                note.system && note.body?.trim().toLowerCase().includes("requested changes"),
+            )
+            .sort((a, b) => b.id - a.id)[0];
+          const mergeRequestUpdate: Parameters<typeof updateGitLabMergeRequest>[0] = {
+            projectId,
+            iid: issue.iid,
+            mrIid: mr.iid,
+            mrUrl: mr.web_url,
+            mrState,
+            mrChecksStatus: checks,
+            reviewState: approvals.reviewState,
+          };
+          if (requestChangesNote) {
+            mergeRequestUpdate.lastReviewNoteId = requestChangesNote.id;
+          }
+          updateGitLabMergeRequest(mergeRequestUpdate);
+          let task = findTaskById(result.taskId);
+          const discoveredMrNeedsDone =
+            closingMr && task && task.status !== "done" && task.status !== "verified";
+          if (discoveredMrNeedsDone && task) {
+            updateTaskStatus(
+              task.id,
+              "done",
+              {},
+              { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
+            );
+            // Refresh the task row so downstream status checks (merged → verified,
+            // requested-changes → implementing) see the post-transition status.
+            task = findTaskById(result.taskId);
+          }
+          if (task && mrState === "merged" && task.status === "done") {
+            updateTaskStatus(
+              task.id,
+              "verified",
+              {},
+              { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
+            );
+          } else if (task && mrState === "closed") {
+            setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
+          } else if (
+            task &&
+            requestChangesNote &&
+            requestChangesNote.id > (existing?.lastReviewNoteId ?? 0) &&
+            (task.status === "done" || task.status === "review")
+          ) {
+            updateTaskStatus(
+              task.id,
+              "implementing",
+              {
+                reworkRequested: true,
+                reviewComments: task.reviewComments,
+                autoQueueCommitStatus: "pending",
+                autoQueueCommitBaseSha: task.commitSha,
+                commitSha: null,
+                autoQueueCommitError: null,
+                autoQueueCommitCompletedAt: null,
+              },
+              { kind: "system", id: "gitlab-review", displayNameSnapshot: "GitLab Review" },
+            );
+            log.info(
+              { taskId: task.id, iid: issue.iid, noteId: requestChangesNote.id },
+              "GitLab requested-changes review resumed task at implementing",
+            );
+          } else if (requestChangesNote && task) {
+            log.debug(
+              {
+                taskId: task.id,
+                iid: issue.iid,
+                noteId: requestChangesNote.id,
+                lastReviewNoteId: existing?.lastReviewNoteId ?? null,
+                status: task.status,
+              },
+              "GitLab requested-changes note already processed or task not actionable; skipping",
+            );
+          }
+        }
+      }
+      for (const existing of existingByIid.values()) {
+        if (!synchronizedIids.has(existing.iid)) {
+          markGitLabIssueUnavailable(
+            projectId,
+            existing.iid,
+            "Issue is no longer available from the connected repository.",
           );
         }
       }
+      recordGitLabRepositorySync(projectId, null);
+      log.info({ projectId, imported, updated, skipped }, "GitLab issue synchronization completed");
+      return c.json({ imported, updated, skipped, issues: listGitLabIssues(projectId) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "GitLab sync failed";
+      recordGitLabRepositorySync(projectId, message);
+      return gitlabErrorResponse(c, error);
     }
-    for (const existing of existingByIid.values()) {
-      if (!synchronizedIids.has(existing.iid)) {
-        markGitLabIssueUnavailable(
-          projectId,
-          existing.iid,
-          "Issue is no longer available from the connected repository.",
-        );
-      }
-    }
-    recordGitLabRepositorySync(projectId, null);
-    log.info({ projectId, imported, updated, skipped }, "GitLab issue synchronization completed");
-    return c.json({ imported, updated, skipped, issues: listGitLabIssues(projectId) });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "GitLab sync failed";
-    recordGitLabRepositorySync(projectId, message);
-    return gitlabErrorResponse(c, error);
-  }
-});
+  },
+);
 
 gitlabRouter.post(
   "/:id/gitlab/tasks/:taskId/publish",
+  internalBroadcastAuth,
   jsonValidator(gitlabPublishSchema),
   async (c) => {
     const projectId = c.req.param("id");
