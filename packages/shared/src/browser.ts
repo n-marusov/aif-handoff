@@ -72,6 +72,7 @@ export {
   type TaskCommentBroadcastPayload,
   type TaskHeartbeatPayload,
   type TaskUsagePayload,
+  type TaskCurrentTool,
   type ChatMessage,
   type ChatMessageAttachment,
   type ChatAttachment,

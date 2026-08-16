@@ -43,6 +43,7 @@ describe("env validation", () => {
     expect(result.AGENT_STAGE_STALE_TIMEOUT_MS).toBe(90 * 60 * 1000);
     expect(result.AGENT_STAGE_STALE_MAX_RETRY).toBe(3);
     expect(result.AGENT_STAGE_RUN_TIMEOUT_MS).toBe(60 * 60 * 1000);
+    expect(result.AGENT_ACTIVITY_SILENCE_MS).toBe(5 * 60 * 1000);
     expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(60 * 1000);
     expect(result.AGENT_QUERY_START_RETRY_DELAY_MS).toBe(1000);
     expect(result.API_RUNTIME_START_TIMEOUT_MS).toBe(60 * 1000);

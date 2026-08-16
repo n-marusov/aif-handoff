@@ -1132,6 +1132,14 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE gitlab_repositories ADD COLUMN git_prepared_at TEXT;
     `,
   },
+  {
+    version: 31,
+    description: "Add task activity progress columns (last_activity_at, current_tool_json)",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN last_activity_at TEXT;
+      ALTER TABLE tasks ADD COLUMN current_tool_json TEXT;
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

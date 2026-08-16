@@ -45,6 +45,7 @@ const {
   deleteProject,
   findProjectByTaskId,
   appendTaskActivityLog,
+  setTaskInFlightTool,
   updateTaskHeartbeat,
   updateTaskStatus,
   saveTaskActiveRuntimeSelection,
@@ -242,6 +243,16 @@ describe("data layer", () => {
       expect(result[0]).not.toHaveProperty("agentActivityLog");
       expect(result[0]).not.toHaveProperty("attachments");
       expect(result[0]).not.toHaveProperty("runtimeOptions");
+    });
+
+    it("exposes activity progress fields", () => {
+      const t = createTask({ projectId: "proj-1", title: "A", description: "D" })!;
+      appendTaskActivityLog(t.id, "line1");
+      setTaskInFlightTool(t.id, { name: "Read", startedAt: "2026-08-16T02:00:00.000Z" });
+
+      const result = listTaskListItems("proj-1");
+      expect(result[0]?.lastActivityAt).toBeTruthy();
+      expect(result[0]?.currentTool?.name).toBe("Read");
     });
 
     it("sorts by kanban status order before position", () => {
@@ -795,6 +806,7 @@ describe("data layer", () => {
       appendTaskActivityLog(t!.id, "line1");
       const found = findTaskById(t!.id);
       expect(found!.agentActivityLog).toBe("line1");
+      expect(found!.lastActivityAt).toBeTruthy();
     });
 
     it("appends to existing log", () => {
@@ -803,6 +815,25 @@ describe("data layer", () => {
       appendTaskActivityLog(t!.id, "line2");
       const found = findTaskById(t!.id);
       expect(found!.agentActivityLog).toBe("line1\nline2");
+      expect(found!.lastActivityAt).toBeTruthy();
+    });
+  });
+
+  describe("setTaskInFlightTool", () => {
+    it("sets currentTool and stamps lastActivityAt, then clears it", () => {
+      const t = createTask({ projectId: "proj-1", title: "T", description: "D" });
+      setTaskInFlightTool(t!.id, {
+        name: "Bash",
+        detail: "pnpm install",
+        startedAt: "2026-08-16T02:00:00.000Z",
+      });
+      const withTool = findTaskById(t!.id);
+      expect(withTool!.currentToolJson).toContain("Bash");
+      expect(withTool!.lastActivityAt).toBeTruthy();
+
+      setTaskInFlightTool(t!.id, null);
+      const cleared = findTaskById(t!.id);
+      expect(cleared!.currentToolJson).toBeNull();
     });
   });
 
@@ -813,6 +844,15 @@ describe("data layer", () => {
       const found = findTaskById(t!.id);
       expect(found!.lastHeartbeatAt).toBeDefined();
       expect(found!.updatedAt).toBeDefined();
+    });
+
+    it("does not touch lastActivityAt", () => {
+      const t = createTask({ projectId: "proj-1", title: "T", description: "D" });
+      appendTaskActivityLog(t!.id, "line1");
+      const before = findTaskById(t!.id)!.lastActivityAt;
+      updateTaskHeartbeat(t!.id);
+      const after = findTaskById(t!.id)!.lastActivityAt;
+      expect(after).toBe(before);
     });
   });
 

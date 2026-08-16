@@ -423,6 +423,8 @@ export interface Task {
   autoReviewState: AutoReviewState | null;
   paused: boolean;
   lastHeartbeatAt: string | null;
+  lastActivityAt?: string | null;
+  currentTool?: TaskCurrentTool | null;
   lastSyncedAt: string | null;
   runtimeProfileId?: string | null;
   modelOverride?: string | null;
@@ -475,6 +477,8 @@ export interface TaskListItem {
   paused: boolean;
   lastSyncedAt: string | null;
   lastHeartbeatAt?: string | null;
+  lastActivityAt?: string | null;
+  currentTool?: TaskCurrentTool | null;
   runtimeProfileId?: string | null;
   modelOverride?: string | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
@@ -1087,6 +1091,13 @@ export interface ChatDonePayload {
 export interface TaskHeartbeatPayload {
   taskId: string;
   lastHeartbeatAt: string | null;
+}
+
+/** A tool the agent started but has not yet completed (in-flight). */
+export interface TaskCurrentTool {
+  name: string;
+  detail?: string;
+  startedAt: string;
 }
 
 /** Task-scoped usage delta broadcast at run boundary. */

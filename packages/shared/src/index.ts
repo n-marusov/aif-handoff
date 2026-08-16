@@ -141,6 +141,7 @@ export {
   type ParticipantSessionRevokedPayload,
   type TaskOwnershipBroadcastPayload,
   type TaskCommentBroadcastPayload,
+  type TaskCurrentTool,
   type ChatMessage,
   type ChatMessageAttachment,
   type ChatRequest,

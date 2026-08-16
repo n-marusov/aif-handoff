@@ -68,6 +68,7 @@ import {
   type TaskAssigneeSummary,
   type TaskComment,
   type TaskListItem,
+  type TaskCurrentTool,
   type ParticipantSummary,
   type AuditActor,
   type ExecutionOwner,
@@ -309,6 +310,7 @@ export function toTaskResponse(
     assignees = [],
     runtimeOptionsJson,
     autoReviewStateJson,
+    currentToolJson,
     activeRuntimeSelectionJson: _activeRuntimeSelectionJson,
     activeRuntimeStatus: _activeRuntimeStatus,
     runtimeLimitSnapshotJson,
@@ -335,6 +337,7 @@ export function toTaskResponse(
     runtimeOptions: parseRuntimeObject(runtimeOptionsJson),
     agentActivityLog: redactTaskTextForExternalUse(task.agentActivityLog),
     runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(runtimeLimitSnapshotJson, task.id),
+    currentTool: parseTaskCurrentTool(currentToolJson),
   };
 }
 
@@ -848,7 +851,8 @@ type TaskListItemRow = Pick<TaskRow,
   | "reworkRequested" | "reviewIterationCount" | "maxReviewIterations" | "manualReviewRequired"
   | "runtimeLimitSnapshotJson" | "runtimeLimitUpdatedAt"
   | "tokenInput" | "tokenOutput" | "tokenTotal" | "costUsd"
-  | "lastSyncedAt" | "scheduledAt" | "createdAt" | "updatedAt"
+  | "lastSyncedAt" | "lastHeartbeatAt" | "lastActivityAt" | "currentToolJson"
+  | "scheduledAt" | "createdAt" | "updatedAt"
 > & { hasPlan: boolean | number };
 
 const TASK_LIST_COLUMNS = {
@@ -886,6 +890,8 @@ const TASK_LIST_COLUMNS = {
   costUsd: tasks.costUsd,
   lastSyncedAt: tasks.lastSyncedAt,
   lastHeartbeatAt: tasks.lastHeartbeatAt,
+  lastActivityAt: tasks.lastActivityAt,
+  currentToolJson: tasks.currentToolJson,
   scheduledAt: tasks.scheduledAt,
   createdAt: tasks.createdAt,
   updatedAt: tasks.updatedAt,
@@ -916,6 +922,7 @@ export function toTaskListItem(
   const {
     tags,
     runtimeLimitSnapshotJson,
+    currentToolJson,
     hasPlan,
     skipReview,
     runPostVerify,
@@ -938,6 +945,7 @@ export function toTaskListItem(
       actionContext,
     ),
     runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(runtimeLimitSnapshotJson, row.id),
+    currentTool: parseTaskCurrentTool(currentToolJson),
     hasPlan: toBooleanFlag(hasPlan),
   };
 }
@@ -2675,8 +2683,42 @@ export function appendTaskActivityLog(taskId: string, newLines: string): void {
   setTaskFields(taskId, {
     agentActivityLog: updatedLog,
     lastHeartbeatAt: nowIso,
+    lastActivityAt: nowIso,
     updatedAt: nowIso,
   });
+}
+
+export function parseTaskCurrentTool(raw: string | null | undefined): TaskCurrentTool | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+    if (!parsed || typeof parsed.name !== "string" || typeof parsed.startedAt !== "string") {
+      return null;
+    }
+    return {
+      name: parsed.name,
+      detail: typeof parsed.detail === "string" ? parsed.detail : undefined,
+      startedAt: parsed.startedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function setTaskInFlightTool(taskId: string, tool: TaskCurrentTool | null): void {
+  const nowIso = new Date().toISOString();
+  if (tool) {
+    setTaskFields(taskId, {
+      currentToolJson: JSON.stringify(tool),
+      lastActivityAt: nowIso,
+      updatedAt: nowIso,
+    });
+  } else {
+    setTaskFields(taskId, {
+      currentToolJson: null,
+      updatedAt: nowIso,
+    });
+  }
 }
 
 export function updateTaskHeartbeat(taskId: string): string {

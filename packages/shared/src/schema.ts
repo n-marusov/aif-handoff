@@ -154,6 +154,8 @@ export const tasks = sqliteTable("tasks", {
   autoReviewStateJson: text("auto_review_state_json"),
   paused: integer("paused", { mode: "boolean" }).notNull().default(false),
   lastHeartbeatAt: text("last_heartbeat_at"),
+  lastActivityAt: text("last_activity_at"),
+  currentToolJson: text("current_tool_json"),
   lastSyncedAt: text("last_synced_at"),
   runtimeProfileId: text("runtime_profile_id"),
   modelOverride: text("model_override"),

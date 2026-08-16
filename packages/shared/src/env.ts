@@ -103,6 +103,7 @@ const envSchema = z.object({
   AGENT_STAGE_STALE_TIMEOUT_MS: z.coerce.number().default(90 * 60 * 1000),
   AGENT_STAGE_STALE_MAX_RETRY: z.coerce.number().default(3),
   AGENT_STAGE_RUN_TIMEOUT_MS: z.coerce.number().default(60 * 60 * 1000),
+  AGENT_ACTIVITY_SILENCE_MS: z.coerce.number().default(5 * 60 * 1000),
   AGENT_QUERY_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
   AGENT_QUERY_START_RETRY_DELAY_MS: z.coerce.number().default(1000),
   AGENT_FIRST_ACTIVITY_TIMEOUT_MS: z.coerce.number().default(60 * 1000),

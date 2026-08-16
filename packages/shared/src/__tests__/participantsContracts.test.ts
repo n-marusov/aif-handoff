@@ -8,6 +8,7 @@ import {
   type TaskExecutorHistoryEntry,
   type TaskHeartbeatPayload,
   type TaskListItem,
+  type TaskCurrentTool,
   type TaskOwnershipBroadcastPayload,
   type TaskUsagePayload,
   type WsEvent,
@@ -127,5 +128,50 @@ describe("browser-safe participant contracts", () => {
 
     expect(events.map((event) => event.type)).toEqual(["task:heartbeat", "task:usage_updated"]);
     expect(listItem.lastHeartbeatAt).toBe("2026-08-16T01:51:00.000Z");
+  });
+
+  it("supports activity-progress fields on task list items", () => {
+    const inFlightTool = {
+      name: "Bash",
+      detail: "pnpm install",
+      startedAt: "2026-08-16T02:00:00.000Z",
+    } satisfies TaskCurrentTool;
+    const listItem = {
+      id: "task-1",
+      projectId: "project-1",
+      title: "Task",
+      description: "",
+      autoMode: true,
+      executionOwner: "ai",
+      ownershipRevision: 1,
+      assignees: [],
+      isFix: false,
+      status: "implementing",
+      priority: 0,
+      position: 0,
+      blockedReason: null,
+      blockedFromStatus: null,
+      retryAfter: null,
+      retryCount: 0,
+      roadmapAlias: null,
+      tags: [],
+      reworkRequested: false,
+      reviewIterationCount: 0,
+      maxReviewIterations: 3,
+      manualReviewRequired: false,
+      paused: false,
+      lastSyncedAt: null,
+      lastHeartbeatAt: "2026-08-16T02:01:00.000Z",
+      lastActivityAt: "2026-08-16T02:00:00.000Z",
+      currentTool: inFlightTool,
+      scheduledAt: null,
+      createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T02:01:00.000Z",
+      hasPlan: false,
+    } satisfies TaskListItem;
+
+    expect(listItem.lastActivityAt).toBe("2026-08-16T02:00:00.000Z");
+    expect(listItem.currentTool?.name).toBe("Bash");
+    expect(listItem.currentTool?.startedAt).toBe("2026-08-16T02:00:00.000Z");
   });
 });

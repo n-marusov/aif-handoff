@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 30;
+const CURRENT_SCHEMA_VERSION = 31;
 
 function removeSqliteArtifacts(dbPath: string): void {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -1057,6 +1057,28 @@ describe("db", () => {
         "idx_runtime_warmup_expires",
       ]);
       expect(userVersion).toBe(CURRENT_SCHEMA_VERSION);
+    } finally {
+      closeDb();
+      removeSqliteArtifacts(dbPath);
+    }
+  });
+
+  it("migrates databases to add activity-progress columns to tasks", () => {
+    closeDb();
+    const dbPath = join(tmpdir(), `aif-shared-activity-${Date.now()}-${Math.random()}.sqlite`);
+
+    try {
+      getDb(dbPath);
+      closeDb();
+      const sqlite = new Database(dbPath, { readonly: true });
+      const taskColumns = sqlite.prepare("PRAGMA table_info(tasks)").all() as Array<{
+        name: string;
+      }>;
+      const names = new Set(taskColumns.map((column) => column.name));
+      expect(names.has("last_activity_at")).toBe(true);
+      expect(names.has("current_tool_json")).toBe(true);
+      expect(sqlite.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+      sqlite.close();
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);
