@@ -798,10 +798,18 @@ issues/comments, and reconciles MR approval/check state. Repeated calls update t
 task. For a newly imported issue, sync also detects an open MR whose description contains
 a same-repository `Closes`, `Fixes`, or `Resolves #<iid>` reference and creates the linked
 task directly in `done`. Review state is approvals-only: `approved` when
-`GET /merge_requests/:iid/approvals` reports `approved=true`, otherwise `pending` — there
-is no automatic `changes_requested` transition in v1. A closed issue pauses its task; a
-closed unmerged MR also pauses it. A merged MR advances a MR-ready `done` task to
-`verified`; the coordinator never merges an MR itself.
+`GET /merge_requests/:iid/approvals` reports `approved=true`, otherwise `pending`. A closed
+issue pauses its task; a closed unmerged MR also pauses it. A merged MR advances a MR-ready
+`done` task to `verified`; the coordinator never merges an MR itself.
+
+A GitLab "Request changes" review action is detected from the MR notes API
+(`GET /merge_requests/:iid/notes`): the signal is a system note whose body is
+`requested changes` (GitLab Free does not expose `requested_changes` in
+`detailed_merge_status`, which stays `mergeable`). When such a note is newer than the
+last-processed one (`gitlab_issues.last_review_note_id`, persisted on every sync) and the
+task is in `done` or `review`, the sync resumes the task at `implementing` with
+`reworkRequested=true` and resets the auto-queue commit state. The transition is
+edge-triggered by the note id, so repeated syncs do not bounce the task.
 
 ### Publish a Task Merge Request
 
@@ -1191,6 +1199,12 @@ With Participants Mode enabled, the server returns the authoritative action subs
 | `blocked_external`    | `retry_from_blocked`                        |
 | `done`                | `approve_done`, `request_changes`           |
 
+In legacy mode (Participants Mode off), the same two review events are also available to
+Human-owned tasks in `review`: `complete_review` (→ `done`, or `verify` with
+`runPostVerify`) and `request_review_changes` (→ `implementing` + `reworkRequested`). This
+unblocks the manual-review handoff (see Auto-Review Convergence) without exposing buttons
+for AI-owned review tasks, which the coordinator owns.
+
 For AI-owned tasks, `improve` and `verify` are coordinator-only stages and intentionally
 expose no legacy manual action. Human-owned tasks use the explicit actions above.
 
@@ -1201,7 +1215,7 @@ Additional constraints:
 - `fast_fix` requires `autoMode=false` and at least one human comment on the task.
 - `request_changes` transitions `done -> implementing`, sets `reworkRequested=true`, and resets watchdog retry state (`retryCount=0`).
 - With `autoMode=true`, coordinator can trigger this same `request_changes`-style rework loop automatically after review if blocking findings are extracted from `reviewComments`.
-- If auto-review stops converging, the coordinator leaves the task in `done`, sets `manualReviewRequired=true`, and waits for a human `approve_done` or `request_changes` action.
+- If auto-review stops converging, the coordinator leaves the task in `review`, hands it to a human (`executionOwner: "human"`), and sets `manualReviewRequired=true`. The human resolves it with `complete_review` (→ `done`) or `request_review_changes` (→ `implementing`) from the review status, or hands it back to AI via the handoff control.
 
 **Response:** `200 OK` — the updated task object.
 

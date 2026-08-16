@@ -201,9 +201,13 @@ changes.
 `Done` is the terminal **MR ready for human decision** state in this mode. The coordinator
 never merges and the web UI does not offer local approve/request-change actions for these
 tasks. Review state is approvals-only: `approved` when the MR approvals endpoint reports
-`approved=true`, otherwise `pending` — there is no automatic `changes_requested` transition
-in v1. A merged MR advances a MR-ready `Done` task to `Verified`; a closed unmerged MR
-pauses its task. Authentication/access failures, rate limits, push failures, closed issues,
+`approved=true`, otherwise `pending`. A merged MR advances a MR-ready `Done` task to
+`Verified`; a closed unmerged MR pauses its task. A GitLab "Request changes" review action
+is detected from the MR notes API (system note body `requested changes` — Free tier does
+not expose it in `detailed_merge_status`) and, when newer than the last-processed note id
+(`gitlab_issues.last_review_note_id`), resumes a `done`/`review` task at `Implementing`
+with `reworkRequested=true` (edge-triggered, so repeated syncs do not bounce the task).
+Authentication/access failures, rate limits, push failures, closed issues,
 and unavailable API services are surfaced or paused without creating a second task or MR.
 
 ### Reliability Guards
@@ -255,7 +259,7 @@ Auto-review strategy is controlled globally by `AGENT_AUTO_REVIEW_STRATEGY`:
 
 - `full_re_review` (default): every review cycle can trigger another automatic rework if current blocking findings exist.
 - `closure_first`: rework cycles verify previously-blocking findings first; only `still_blocking` previous findings can trigger another automatic loop.
-- If `closure_first` resolves previous blockers but the reviewer finds new blockers, or if max review iterations are reached, the task moves to `done` with `manualReviewRequired=true` and preserved `autoReviewState` for explicit human triage.
+- If `closure_first` resolves previous blockers but the reviewer finds new blockers, or if max review iterations are reached, the task stays in `review`, is handed to a human (`executionOwner: "human"`), and is marked `manualReviewRequired=true` with preserved `autoReviewState` for explicit human triage. In legacy mode the human resolves it with `complete_review` (→ `done`) or `request_review_changes` (→ `implementing`) directly from the review status; with Participants Mode these same events are the assigned-participant actions for human-owned review tasks.
 
 Tasks also have a `skipReview` flag (default `false`). When `true`, the coordinator bypasses the review stage entirely — after successful implementation the task moves directly to `done`, skipping the `review-sidecar` and `security-sidecar` runs. This is useful for small changes or tasks where code review is unnecessary.
 
@@ -295,6 +299,11 @@ and runtime-budget consumption.
 | `blocked_external`    | `retry_from_blocked`                                                    |
 | `done`                | `approve_done`, `request_changes`                                       |
 | `verified`            | terminal; no handoff or action                                          |
+
+In legacy mode (Participants Mode off), Human-owned `review` tasks also get the two review
+events (`complete_review`, `request_review_changes`) so a manual-review handoff is always
+resolvable from the web UI; AI-owned review tasks remain coordinator-owned with no legacy
+action.
 
 Handoffs replace owner and assignments in one SQLite transaction. The request must match
 the expected ownership revision and may also assert the previous owner/status. A live AI

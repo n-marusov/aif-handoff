@@ -552,7 +552,7 @@ Auto-review persists its latest blocking snapshot on the task (`autoReviewState`
 
 - `full_re_review` keeps the legacy broad loop and remains the default.
 - `closure_first` verifies prior blockers before allowing another autonomous loop.
-- When convergence fails, the task stays in `done` but is marked `manualReviewRequired=true`. Humans then resolve it with the existing `approve_done` or `request_changes` actions.
+- When convergence fails, the task stays in `review`, is handed to a human (`executionOwner: "human"`), and is marked `manualReviewRequired=true`. Humans resolve it with `complete_review` (→ `done`) or `request_review_changes` (→ `implementing`) from the review status (available in both legacy and Participants modes), or hand it back to AI via the handoff control. For GitLab-linked tasks, a "Request changes" review action on the MR resumes a `done`/`review` task at `implementing` automatically (system-note signal, edge-triggered by note id).
 
 ## Agent Permissions
 

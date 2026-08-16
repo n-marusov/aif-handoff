@@ -108,7 +108,7 @@ Success signals:
   Deliverable: a human clicking "Request changes" on the GitLab MR resumes an AI-owned task at `implementing` (the AI then fixes and re-runs the review loop).
   LOGGING REQUIREMENTS: INFO `{ taskId, iid, noteId }` when resuming the task at `implementing` (component `gitlab-routes`); DEBUG for the idempotent skip (already-processed note); WARN only on API failures (existing `gitlabErrorResponse` path).
 
-- [ ] Task 5: Update documentation for both changes.
+- [x] Task 5: Update documentation for both changes.
   Files to create/modify:
   - `docs/api.md` — GitLab Issue-to-MR "Synchronize Issues and Merge Requests" section: document the `requested_changes → implementing` resume (system-note signal, edge-triggered by note id), replacing the "no automatic changes_requested transition in v1" sentence for GitLab; note the Web UI legacy-mode human review actions (`complete_review` / `request_review_changes` from `review` for human-owned tasks).
   - `docs/architecture.md` — Task State Machine "Human-owned status" table: clarify `review` → `complete_review` / `request_review_changes` also apply in legacy mode for human-owned tasks; GitLab Issue-to-MR section: note the request-changes resume signal.

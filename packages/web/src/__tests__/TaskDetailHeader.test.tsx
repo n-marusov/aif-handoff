@@ -470,6 +470,7 @@ describe("TaskDetailHeader", () => {
             mrState: "open",
             mrChecksStatus: "success",
             reviewState: "pending",
+            lastReviewNoteId: null,
             createdAt: "2026-08-13T00:00:00.000Z",
             updatedAt: "2026-08-13T00:00:00.000Z",
           },
