@@ -54,7 +54,7 @@ Success signals:
 
 ### Path 2 — Legacy-mode human review actions (bugfix)
 
-- [ ] Task 1: Allow `complete_review` / `request_review_changes` for human-owned `review` tasks in legacy mode.
+- [x] Task 1: Allow `complete_review` / `request_review_changes` for human-owned `review` tasks in legacy mode.
   Files to create/modify:
   - `packages/shared/src/stateMachine.ts`:
     - Widen the `resolveLegacyAction` parameter type from `Pick<TaskPolicyView, "status" | "autoMode" | "blockedFromStatus">` to include `executionOwner` and `runPostVerify` (both already exist on `TaskPolicyView`; `resolveTaskAction` already passes the full `TaskPolicyView`).

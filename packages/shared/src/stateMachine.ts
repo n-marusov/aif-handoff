@@ -68,7 +68,10 @@ function denied(code: TaskActionDeniedCode, error: string): TransitionResult {
 }
 
 function resolveLegacyAction(
-  task: Pick<TaskPolicyView, "status" | "autoMode" | "blockedFromStatus">,
+  task: Pick<
+    TaskPolicyView,
+    "status" | "autoMode" | "blockedFromStatus" | "executionOwner" | "runPostVerify"
+  >,
   event: TaskEvent,
 ): TransitionResult {
   switch (event) {
@@ -123,6 +126,35 @@ function resolveLegacyAction(
             patch: { ...CLEAN_STATE_RESET, status: task.blockedFromStatus },
           }
         : denied("blocked_status_missing", "blockedFromStatus is missing for retry_from_blocked");
+    case "complete_review":
+      if (task.status !== "review" || task.executionOwner !== "human") {
+        return denied(
+          "action_not_allowed",
+          "complete_review is only allowed from review for human-owned tasks",
+        );
+      }
+      return {
+        ok: true,
+        patch: {
+          ...CLEAN_STATE_RESET,
+          status: task.runPostVerify ? "verify" : "done",
+        },
+      };
+    case "request_review_changes":
+      if (task.status !== "review" || task.executionOwner !== "human") {
+        return denied(
+          "action_not_allowed",
+          "request_review_changes is only allowed from review for human-owned tasks",
+        );
+      }
+      return {
+        ok: true,
+        patch: {
+          ...CLEAN_STATE_RESET,
+          status: "implementing",
+          reworkRequested: true,
+        },
+      };
     default:
       return denied("action_not_allowed", "Unknown task event");
   }
@@ -257,7 +289,10 @@ export function resolveTaskAction(
 
 /** Backward-compatible disabled-mode resolver used by existing callers. */
 export function applyHumanTaskEvent(
-  task: Pick<Task, "status" | "autoMode" | "blockedFromStatus">,
+  task: Pick<
+    Task,
+    "status" | "autoMode" | "blockedFromStatus" | "executionOwner" | "runPostVerify"
+  >,
   event: TaskEvent,
 ): TransitionResult {
   return resolveLegacyAction(task, event);

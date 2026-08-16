@@ -386,4 +386,67 @@ describe("task state machine", () => {
       }),
     ).toMatchObject({ ok: true, patch: { status: "planning" } });
   });
+
+  it("allows complete_review for human-owned review tasks in legacy mode", () => {
+    const task = {
+      ...makeTask("review"),
+      executionOwner: "human" as const,
+      assignees: [],
+    };
+    expect(
+      resolveTaskAction(task, "complete_review", {
+        participantsModeEnabled: false,
+        actor: { kind: "anonymous", id: null, displayNameSnapshot: null },
+      }),
+    ).toMatchObject({ ok: true, patch: { status: "done" } });
+  });
+
+  it("routes complete_review to verify when runPostVerify is set", () => {
+    const task = {
+      ...makeTask("review"),
+      executionOwner: "human" as const,
+      runPostVerify: true,
+      assignees: [],
+    };
+    expect(
+      resolveTaskAction(task, "complete_review", {
+        participantsModeEnabled: false,
+        actor: { kind: "anonymous", id: null, displayNameSnapshot: null },
+      }),
+    ).toMatchObject({ ok: true, patch: { status: "verify" } });
+  });
+
+  it("allows request_review_changes for human-owned review tasks in legacy mode", () => {
+    const task = {
+      ...makeTask("review"),
+      executionOwner: "human" as const,
+      assignees: [],
+    };
+    expect(
+      resolveTaskAction(task, "request_review_changes", {
+        participantsModeEnabled: false,
+        actor: { kind: "anonymous", id: null, displayNameSnapshot: null },
+      }),
+    ).toMatchObject({ ok: true, patch: { status: "implementing", reworkRequested: true } });
+  });
+
+  it("keeps AI-owned review tasks action-less in legacy mode", () => {
+    const task = {
+      ...makeTask("review"),
+      executionOwner: "ai" as const,
+      assignees: [],
+    };
+    expect(
+      resolveTaskAction(task, "complete_review", {
+        participantsModeEnabled: false,
+        actor: { kind: "anonymous", id: null, displayNameSnapshot: null },
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      resolveTaskAction(task, "request_review_changes", {
+        participantsModeEnabled: false,
+        actor: { kind: "anonymous", id: null, displayNameSnapshot: null },
+      }),
+    ).toMatchObject({ ok: false });
+  });
 });
