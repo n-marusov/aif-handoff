@@ -1,38 +1,59 @@
 # Research
 
-Updated: 2026-08-16 04:38
+Updated: 2026-08-16 08:10
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: Agent loop detection — prevent runaway tool-call loops (stage 1: hard caps + read-only burst)
+Topic: Unblock manual-review handoff + wire GitLab "request changes" to rework
 
-Goal: Detect and stop an agent that spins in a repetitive tool-call loop (e.g. the review agent re-running `git diff <sha>^ <sha> -- <file>` hundreds of times) before it burns hours of wall-clock and ~40M tokens. Confirmed incident: task b0f811dc (review, Codex CLI / deepseek-v4-flash) looped twice (~25-28 min per attempt) on read-only `git diff`/`git show` of the same commit; the 1h `runTimeoutMs` was the only guard.
+Goal: Fix two gaps that left task b0f811dc (GitLab issue #1, MR !1) stuck in `review` after auto-review hit max iterations (4/3) and handed off to a human with zero actionable UI buttons (legacy mode).
 
-Scope (stage 1): agent-side detection + blocking only (no UI "possible loop" indicator yet).
-- (A) Hard tool-call cap per stage: `AGENT_MAX_TOOL_CALLS_PER_STAGE` (default 500). Exceed → block.
-- (B) Read-only burst: N consecutive tool calls that are all read-only (Read/Glob/Grep/Bash `git show|diff|cat|sed|rg`) with NO write (Edit/Write/Bash `git add|commit|push`) → block. Threshold: 20 reads without a write.
-- Action: immediately move the task to `blocked_external` with reason `possible_loop` (human decides next), NO auto-retry. Mirror the stale-watchdog transition pattern.
+Two planned changes:
+1. **Path 2 (UI, bugfix):** allow `complete_review` / `request_review_changes` for human-owned tasks in `review` status even when participants mode is OFF (legacy). Today `resolveTaskAction` routes ALL legacy-mode tasks through `resolveLegacyAction`, which has no review events → `permittedActions: []` → no buttons. Guard on `executionOwner === "human"` so AI-owned review tasks (coordinator-owned) stay untouched. NOTE: `request_review_changes` → `implementing` keeps the task human-owned → coordinator skips it (`processOneTask` returns false for non-AI) → user then uses "Assign / hand off" to hand back to AI (2 clicks).
+2. **Path 3 (feature, GitLab):** detect GitLab "Request changes" and resume the task at `implementing` with `reworkRequested: true`, mirroring GitHub `changes_requested` handling (routes/github.ts:254-274).
 
-Key decisions:
-- Detection counts from `onToolUse` (completion events) in the agent (`subagentQuery`) — works for all transports including CLI.
-- Blocking mirrors `recoverStaleInProgressTasks` (transitionTaskStatus → blocked_external, blockedReason `possible_loop`, blockedFromStatus resume).
-- Deferred: normalized-template repetition (C), novelty ratio (D), token-bloat (E, SDK/app-server only), UI "possible loop" indicator (F).
+CRITICAL evidence (Path 3 signal): GitLab "Request changes" in the GUI does NOT set `detailed_merge_status: requested_changes` on gitlab.com Free (verified live: stays `mergeable` even with `?with_merge_status_recheck=true`). The real signal is a **system note** in the MR discussions/notes API: `{ system: true, body: "requested changes" }` (verified live: note id 3691116788, author nikomaru, 2026-08-16T07:42:03Z). Dedup via note `id` > stored `lastReviewNoteId` (analog of GitHub `lastReviewId`), NOT via detailed_merge_status.
 
 Constraints:
-- No new migration (blocking reuses blocked_external columns).
+- Migration append-only: new column `last_review_note_id` (or similar) in `gitlab_issues` at next free version — never renumber existing migrations.
 - DB boundary via @aif/data.
+- Legacy-mode behavior is pinned by test `stateMachine.test.ts` "preserves disabled-mode anonymous compatibility" (human-owned backlog can still `start_ai`) → do NOT route all human-owned tasks through `resolveHumanOwnerAction` in legacy mode; add guarded cases instead.
 - Every package >=70% coverage; `npm run ai:validate`.
 
 Success signals:
-- A looping stage is blocked within minutes (not hours), tokens stop burning, task lands in blocked_external with a clear reason.
-- Legit long stages (build/install) are NOT falsely blocked (read-only burst requires no writes; tool-call cap high enough).
+- Task b0f811dc (or any manual-review handoff) shows "Complete review" / "Request review changes" buttons in Web UI (legacy mode).
+- Clicking "Request review changes" moves task to `implementing` with `reworkRequested: true`.
+- A new "requested changes" system note on the GitLab MR moves an AI-owned `review`/`done` task back to `implementing` exactly once (edge-triggered by note id).
 
-Next step: /aif-plan (full or fast) for loop-detection stage 1 (A+B + blocking)
+Next step: /aif-plan full for both paths (Path 2 first — small bugfix; Path 3 second — GitLab feature with migration)
 <!-- aif:active-summary:end -->
 
 ## Sessions
 <!-- aif:sessions:start -->
+### 2026-08-16 07:00 — Manual-review handoff stuck in legacy mode + GitLab "request changes" signal
+What changed: Investigated why task b0f811dc showed "Auto-review stopped and human review is required" but offered no way to send it back for fixing; then validated the GitLab "Request changes" flow end-to-end against live API data.
+Key notes:
+- Task state after manual handoff: `status=review`, `executionOwner=human`, `manualReviewRequired=1`, `reviewIterationCount=4` (> max 3), `permittedActions=[]`.
+- Root cause (Path 2): in legacy mode (`PARTICIPANTS_MODE_ENABLED` unset) `resolveTaskAction` routes every task through `resolveLegacyAction`, which has NO events from `review`. `complete_review`/`request_review_changes` exist only in `resolveHumanOwnerAction` (participants mode). UI warning text references Approve/Request changes but those are `done`-status actions → nothing renders.
+- Docs mismatch: docs/api.md:1204 and docs/configuration.md:555 claim the task stays in `done` after failed convergence, but coordinator.ts keeps `review` (test coordinator.test.ts:1560 asserts `review`).
+- Test pins legacy semantics: stateMachine.test.ts:376 human-owned backlog can `start_ai` in disabled mode → do NOT reroute all human-owned tasks; add guarded legacy cases for review events.
+- Path 3 live validation: clicked "Request changes" in GitLab GUI → discussion thread shows system note "requested changes". MR API still reports `detailed_merge_status: "mergeable"` (even with `with_merge_status_recheck=true`), `approved` still true in DB (approvals API is binary). Signal = system note `{system:true, body:"requested changes"}` (id 3691116788). GitLabNoteResponse type lacks `system`/`type` fields → must add.
+- GitHub analog: routes/github.ts:254-274 uses `review.state === "changes_requested" && review.id !== existing?.lastReviewId && task.status === "done"` → implementing + reworkRequested + reset autoQueueCommit. GitLab needs `last_review_note_id` column (append-only migration).
+- GitHub mode also documents a differences: docs/architecture.md:201-207 says web UI does not offer local approve/request-change actions for GitLab tasks; TaskDetailHeader filter only hides `approve_done`/`open_request_changes` when `task.github || task.gitlab` (gitlab field is never populated by toTaskRouteResponse — only `github`) so `complete_review`/`request_review_changes` buttons would render after Path 2 fix.
+Links (paths):
+- packages/shared/src/stateMachine.ts (resolveLegacyAction / resolveHumanOwnerAction / resolveTaskAction)
+- packages/shared/src/__tests__/stateMachine.test.ts:376 (legacy pin)
+- packages/agent/src/coordinator.ts:633-686 (manual_review_required handoff), coordinator.test.ts:1560
+- packages/api/src/routes/github.ts:254-274 (changes_requested analog)
+- packages/api/src/routes/gitlab.ts:245-287 (sync status transitions), 308-401 (publish)
+- packages/api/src/services/gitlab.ts (GitLabClient, GitLabNoteResponse, GitLabMergeRequestResponse)
+- packages/data/src/gitlab.ts (updateGitLabMergeRequest, importGitLabIssueTask)
+- packages/shared/src/schema.ts (gitlabIssues table)
+- .ai-factory/references/gitlab-rest-api.md (Notes API system:true at L340; detailed_merge_status values at L259)
+- docs/api.md:1204, docs/configuration.md:555-557, docs/architecture.md:201-207
+
+<!-- aif:sessions:end -->
 ### 2026-08-13 14:00 — GitLab adapter exploration (Option A)
 What changed:
 - Clarified "adapter" ambiguity: GitLab = repository-hosting integration (GitHub Issue-to-PR mirror), NOT an AI runtime adapter (runtime/adapters/ is for LLM providers only).

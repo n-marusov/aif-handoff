@@ -321,10 +321,31 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
     const tags = [...new Set(["gitlab", ...input.snapshot.labels])].slice(0, 50);
     if (linked.taskId) {
       taskId = linked.taskId;
-      tx.update(tasks)
-        .set({ title, description, tags: JSON.stringify(tags), paused: input.state === "closed", updatedAt: now })
-        .where(eq(tasks.id, taskId))
-        .run();
+      const existing = tx.select().from(tasks).where(eq(tasks.id, taskId)).get();
+      const nextTags = JSON.stringify(tags);
+      const nextPaused = input.state === "closed";
+      // Only touch the task row when the synced content actually changed.
+      // Writing updatedAt on every sync defeats releaseStaleTaskClaims: the
+      // dead-process reaper treats fresh updatedAt as "recently active", so a
+      // crashed coordinator claim would block the task until the lock TTL
+      // expires instead of being recovered within the heartbeat window.
+      const changed =
+        !existing ||
+        existing.title !== title ||
+        existing.description !== description ||
+        existing.tags !== nextTags ||
+        existing.paused !== nextPaused;
+      if (changed) {
+        tx.update(tasks)
+          .set({ title, description, tags: nextTags, paused: nextPaused, updatedAt: now })
+          .where(eq(tasks.id, taskId))
+          .run();
+      } else {
+        log.debug(
+          { projectId: input.projectId, iid: input.iid, taskId },
+          "[FIX] GitLab sync skipped unchanged task row to avoid masking stale-claim recovery",
+        );
+      }
       return;
     }
 

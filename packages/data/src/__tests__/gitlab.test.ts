@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { projects, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
@@ -105,6 +106,40 @@ describe("GitLab issue import", () => {
     expect(listGitLabIssues("project-1")).toHaveLength(1);
     expect(testDb.current.select().from(tasks).all()).toHaveLength(1);
     expect(findGitLabIssueByTaskId(first.taskId)?.metadata.title).toBe("Updated title");
+  });
+
+  it("does NOT bump task updatedAt when the synced snapshot is unchanged", () => {
+    const first = importGitLabIssueTask(input);
+    const taskRow = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
+    if (!taskRow) throw new Error("expected task row");
+
+    // Record the updatedAt produced by the first import.
+    const firstUpdatedAt = taskRow.updatedAt;
+    // Ensure at least 1ms elapses so a spurious write would be observable.
+    const before = new Date().toISOString();
+
+    // Identical snapshot re-import must not touch the task row at all.
+    importGitLabIssueTask({ ...input, sourceUpdatedAt: before });
+
+    const after = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
+    expect(after?.updatedAt).toBe(firstUpdatedAt);
+  });
+
+  it("updates task row when the synced snapshot actually changed", () => {
+    const first = importGitLabIssueTask(input);
+    const changed = importGitLabIssueTask({
+      ...input,
+      sourceUpdatedAt: "2026-08-13T11:00:00Z",
+      snapshot: { ...input.snapshot, title: "Updated title" },
+    });
+
+    // The change must be reflected on the linked task row. (updatedAt equality
+    // is not asserted here — both imports can land in the same millisecond.)
+    const taskRow = testDb.current.select().from(tasks).where(eq(tasks.id, changed.taskId)).get();
+    expect(taskRow?.title).toBe("#42 Updated title");
+    expect(taskRow?.description).toContain("Issue body");
+    expect(taskRow?.paused).toBe(false);
+    expect(first.taskId).toBe(changed.taskId);
   });
 
   it("updates merge request linkage on the existing issue", () => {

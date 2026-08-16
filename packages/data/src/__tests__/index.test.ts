@@ -1314,20 +1314,41 @@ describe("data layer", () => {
       expect(findTaskById("dead-hb")!.lockedBy).toBeNull();
     });
 
-    it("does NOT release fresh claims with null heartbeat", () => {
+    it("releases dead coordinator claims even when updatedAt is fresh (git-sync pollution)", () => {
       const db = testDb.current;
       const future = new Date(Date.now() + 3600000).toISOString();
+      const staleHeartbeat = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-      // Just claimed — updatedAt is fresh, heartbeat not yet set
+      // Regression test: a dead process whose lock is still within TTL and whose
+      // updatedAt is kept fresh by unrelated writers (e.g. GitLab/GitHub sync)
+      // must still be recovered via the stale heartbeat. Previously the updatedAt
+      // guard blocked this until the lock TTL expired.
       db.insert(tasks).values({
-        id: "fresh", projectId: "proj-1", title: "Fresh", status: "planning",
-        lockedBy: "coord-1", lockedUntil: future,
-        lastHeartbeatAt: null, updatedAt: new Date().toISOString(),
+        id: "polluted-fresh-updated", projectId: "proj-1", title: "Polluted", status: "review",
+        lockedBy: "crashed-coord", lockedUntil: future,
+        lastHeartbeatAt: staleHeartbeat, updatedAt: new Date().toISOString(),
+      }).run();
+
+      const released = releaseStaleTaskClaims();
+      expect(released).toBe(1);
+      expect(findTaskById("polluted-fresh-updated")!.lockedBy).toBeNull();
+    });
+
+    it("does NOT release QA locks with stale heartbeat (QA runs have no heartbeat)", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+      const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      // QA runs never write a heartbeat; their lock must live until TTL expiry.
+      db.insert(tasks).values({
+        id: "qa-lock", projectId: "proj-1", title: "QA", status: "implementing",
+        lockedBy: "qa:some-run-id", lockedUntil: future,
+        lastHeartbeatAt: null, updatedAt: staleTime,
       }).run();
 
       const released = releaseStaleTaskClaims();
       expect(released).toBe(0);
-      expect(findTaskById("fresh")!.lockedBy).toBe("coord-1");
+      expect(findTaskById("qa-lock")!.lockedBy).toBe("qa:some-run-id");
     });
   });
 

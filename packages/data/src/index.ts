@@ -14,6 +14,7 @@ import {
   max,
   min,
   ne,
+  notLike,
   or,
   sql,
 } from "drizzle-orm";
@@ -2526,11 +2527,11 @@ export function releaseStaleTaskClaims(): number {
       or(
         // Lock TTL expired
         lte(tasks.lockedUntil, nowIso),
-        // Process died: heartbeat stale, task still in-progress, and not freshly claimed
+        // Process died: heartbeat stale, task still in-progress, and the claim
+        // is not a QA lock (QA runs have no heartbeat and must live until TTL).
         and(
           inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
-          // Ensure task was claimed at least 5 min ago (avoid race with fresh claims)
-          lte(tasks.updatedAt, heartbeatDeadline),
+          notLike(tasks.lockedBy, "qa:%"),
           or(
             sql`${tasks.lastHeartbeatAt} IS NULL`,
             lte(tasks.lastHeartbeatAt, heartbeatDeadline),
