@@ -90,7 +90,7 @@ Success signals:
   Deliverable: the sync can read the last-processed review note id from the DB.
   LOGGING REQUIREMENTS: DEBUG in `updateGitLabMergeRequest` when `lastReviewNoteId` changes (extend the existing write path log if present; keep INFO-free).
 
-- [ ] Task 4: Detect GitLab "requested changes" system note in sync and resume the task at `implementing`.
+- [x] Task 4: Detect GitLab "requested changes" system note in sync and resume the task at `implementing`.
   Files to create/modify:
   - `packages/api/src/routes/gitlab.ts` — in the sync handler (the `if (mrIid)` block, around lines 245-287):
     1. After fetching MR approvals/checks, fetch MR notes: `const mrNotes = await client.listMergeRequestNotes(connection.namespace, connection.name, mr.iid)`.

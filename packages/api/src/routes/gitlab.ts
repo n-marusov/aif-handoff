@@ -254,7 +254,29 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         const mrState: "open" | "closed" | "merged" =
           mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
         const checks = await client.getCommitChecks(connection.namespace, connection.name, mr.sha);
-        updateGitLabMergeRequest({
+        // GitLab "Request changes" is not exposed via detailed_merge_status on
+        // Free; the signal is a system note ("requested changes") in the MR
+        // notes API. Track the last-processed note id so a task resumes at
+        // implementing exactly once per review action (edge-trigger), mirroring
+        // the GitHub changes_requested handling in routes/github.ts.
+        const mrNotes = await client.listMergeRequestNotes(
+          connection.namespace,
+          connection.name,
+          mr.iid,
+        );
+        const requestChangesNote = mrNotes
+          .filter((note) => note.system && note.body?.trim() === "requested changes")
+          .sort((a, b) => b.id - a.id)[0];
+        const mergeRequestUpdate: {
+          projectId: string;
+          iid: number;
+          mrIid: number;
+          mrUrl: string;
+          mrState: "open" | "closed" | "merged";
+          mrChecksStatus?: "pending" | "success" | "failure" | null;
+          reviewState?: "pending" | "approved" | null;
+          lastReviewNoteId?: number | null;
+        } = {
           projectId,
           iid: issue.iid,
           mrIid: mr.iid,
@@ -262,7 +284,11 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           mrState,
           mrChecksStatus: checks,
           reviewState: approvals.reviewState,
-        });
+        };
+        if (requestChangesNote) {
+          mergeRequestUpdate.lastReviewNoteId = requestChangesNote.id;
+        }
+        updateGitLabMergeRequest(mergeRequestUpdate);
         const task = findTaskById(result.taskId);
         const discoveredMrNeedsDone =
           closingMr && task && task.status !== "done" && task.status !== "verified";
@@ -283,6 +309,41 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           );
         } else if (task && mrState === "closed") {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
+        } else if (
+          task &&
+          requestChangesNote &&
+          requestChangesNote.id > (existing?.lastReviewNoteId ?? 0) &&
+          (task.status === "done" || task.status === "review")
+        ) {
+          updateTaskStatus(
+            task.id,
+            "implementing",
+            {
+              reworkRequested: true,
+              reviewComments: task.reviewComments,
+              autoQueueCommitStatus: "pending",
+              autoQueueCommitBaseSha: task.commitSha,
+              commitSha: null,
+              autoQueueCommitError: null,
+              autoQueueCommitCompletedAt: null,
+            },
+            { kind: "system", id: "gitlab-review", displayNameSnapshot: "GitLab Review" },
+          );
+          log.info(
+            { taskId: task.id, iid: issue.iid, noteId: requestChangesNote.id },
+            "GitLab requested-changes review resumed task at implementing",
+          );
+        } else if (requestChangesNote && task) {
+          log.debug(
+            {
+              taskId: task.id,
+              iid: issue.iid,
+              noteId: requestChangesNote.id,
+              lastReviewNoteId: existing?.lastReviewNoteId ?? null,
+              status: task.status,
+            },
+            "GitLab requested-changes note already processed or task not actionable; skipping",
+          );
         }
       }
     }

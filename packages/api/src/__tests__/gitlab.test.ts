@@ -684,7 +684,8 @@ describe("GitLab project routes", () => {
           .mockResolvedValueOnce(jsonResponse([mergeRequest]))
           .mockResolvedValueOnce(jsonResponse([])) // issue notes
           .mockResolvedValueOnce(jsonResponse({ approved, approved_by: [] }))
-          .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])),
+          .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
+          .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
       );
       const app = new Hono();
       app.route("/projects", gitlabRouter);
@@ -808,7 +809,8 @@ describe("GitLab project routes", () => {
         .mockResolvedValueOnce(jsonResponse([mergeRequest]))
         .mockResolvedValueOnce(jsonResponse([])) // issue notes
         .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] }))
-        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])),
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
     );
     const app = new Hono();
     app.route("/projects", gitlabRouter);
@@ -969,7 +971,8 @@ describe("GitLab project routes", () => {
           }),
         ) // getMergeRequest (existing.mrIid path)
         .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] }))
-        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])),
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
     );
 
     await app.request("/projects/project-1/gitlab/sync", {
@@ -1015,7 +1018,8 @@ describe("GitLab project routes", () => {
           }),
         )
         .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] }))
-        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])),
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
     );
 
     await app.request("/projects/project-1/gitlab/sync", {
@@ -1024,6 +1028,149 @@ describe("GitLab project routes", () => {
       body: "{}",
     });
     expect(findTaskById(imported.taskId)?.paused).toBe(true);
+  });
+
+  it("resumes a done task at implementing on a new GitLab requested-changes note (edge-triggered)", async () => {
+    upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "namespace",
+      name: "repo",
+      webUrl: "https://gitlab.com/namespace/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+      gitPreparedAt: "2026-08-15T00:00:00.000Z",
+    });
+    const imported = importGitLabIssueTask({
+      projectId: "project-1",
+      namespace: "namespace",
+      repository: "repo",
+      iid: 154,
+      globalId: "gid://gitlab/Issue/154",
+      webUrl: "https://gitlab.com/namespace/repo/-/issues/154",
+      state: "open",
+      sourceUpdatedAt: "2026-08-13T00:00:00Z",
+      snapshot: {
+        title: "GitLab mode",
+        body: "Implement it",
+        author: "author",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        comments: [],
+      },
+      mergeRequest: {
+        iid: 200,
+        url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+        state: "open",
+      },
+    });
+    updateTaskStatus(
+      imported.taskId,
+      "done",
+      { reviewComments: "approved by auto-review" },
+      { kind: "system", id: "test", displayNameSnapshot: "Test" },
+    );
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+
+    const syncRequest = () =>
+      app.request("/projects/project-1/gitlab/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+
+    const issueList = [
+      {
+        id: 154,
+        iid: 154,
+        global_id: "gid://gitlab/Issue/154",
+        web_url: "https://gitlab.com/namespace/repo/-/issues/154",
+        state: "opened",
+        title: "GitLab mode",
+        description: "Implement it",
+        author: { username: "author" },
+        labels: [],
+        assignees: [],
+        milestone: null,
+        updated_at: "2026-08-13T00:00:00Z",
+      },
+    ];
+    const mergeRequest = {
+      iid: 200,
+      web_url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+      state: "opened",
+      merged_at: null,
+      source_branch: "feature/gitlab-issue-154",
+      sha: "0123456789abcdef",
+      description: "Closes #154",
+    };
+    const requestedChangesNote = {
+      id: 3691116788,
+      body: "requested changes",
+      author: { username: "nikomaru" },
+      created_at: "2026-08-16T07:42:03.778Z",
+      updated_at: "2026-08-16T07:42:03.778Z",
+      system: true,
+    };
+
+    // First sync: the new requested-changes note must move done → implementing.
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(issueList)) // listIssues
+        .mockResolvedValueOnce(jsonResponse([])) // issue notes
+        .mockResolvedValueOnce(jsonResponse(mergeRequest)) // getMergeRequest
+        .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] })) // approvals
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+        .mockResolvedValueOnce(jsonResponse([requestedChangesNote])), // MR notes
+    );
+    await syncRequest();
+
+    const afterFirst = findTaskById(imported.taskId);
+    expect(afterFirst?.status).toBe("implementing");
+    expect(afterFirst?.reworkRequested).toBe(true);
+    expect(afterFirst?.reviewComments).toBe("approved by auto-review");
+    expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
+
+    // Second sync: the same note id must NOT bounce the task again.
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(issueList)) // listIssues
+        .mockResolvedValueOnce(jsonResponse([])) // issue notes
+        .mockResolvedValueOnce(jsonResponse(mergeRequest)) // getMergeRequest
+        .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] })) // approvals
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+        .mockResolvedValueOnce(jsonResponse([requestedChangesNote])), // MR notes
+    );
+    await syncRequest();
+
+    const afterSecond = findTaskById(imported.taskId);
+    expect(afterSecond?.status).toBe("implementing");
+    expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
+
+    // Sync with NO requested-changes note: no transition, metadata unchanged.
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(issueList)) // listIssues
+        .mockResolvedValueOnce(jsonResponse([])) // issue notes
+        .mockResolvedValueOnce(jsonResponse(mergeRequest)) // getMergeRequest
+        .mockResolvedValueOnce(jsonResponse({ approved: true, approved_by: [] })) // approvals
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes
+    );
+    await syncRequest();
+
+    const afterThird = findTaskById(imported.taskId);
+    expect(afterThird?.status).toBe("implementing");
+    expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
   });
 
   it("returns 404 when publishing for an unlinked task", async () => {
