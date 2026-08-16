@@ -8,7 +8,7 @@ import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
 import { useUsageLimitsEnabled } from "@/hooks/useSettings";
 import { TaskOwnershipSummary } from "@/components/task/TaskOwnership";
 import { HeartbeatIndicator } from "@/components/ui/heartbeat-indicator";
-import { useTaskLiveness } from "@/hooks/useTaskLiveness";
+import { useTaskProgress } from "@/hooks/useTaskProgress";
 
 const PRIORITY_LABELS: Record<number, { label: string; className: string }> = {
   0: { label: "None", className: "hidden" },
@@ -48,7 +48,7 @@ export function TaskCard({
 }: TaskCardProps) {
   const priority = PRIORITY_LABELS[task.priority] ?? PRIORITY_LABELS[0];
   const isCompact = density === "compact";
-  const liveness = useTaskLiveness(task.status, task.lastHeartbeatAt);
+  const progress = useTaskProgress(task.status, task.lastActivityAt, task.currentTool);
   const showReorder =
     task.status === "backlog" && (onMoveUp !== undefined || onMoveDown !== undefined);
   const showPauseToggle = task.status === "backlog" && onTogglePause !== undefined;
@@ -96,7 +96,7 @@ export function TaskCard({
         <div
           className={`flex items-center gap-1.5 ${isCompact ? "pl-1.5 text-xs" : "pl-2 text-sm"} font-medium leading-tight tracking-tight`}
         >
-          <HeartbeatIndicator liveness={liveness} />
+          <HeartbeatIndicator progress={progress} />
           {task.title}
         </div>
         <div className="flex shrink-0 flex-wrap items-start justify-end gap-1">

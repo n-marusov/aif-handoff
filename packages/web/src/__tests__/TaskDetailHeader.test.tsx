@@ -3,11 +3,11 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import type { Task } from "@aif/shared/browser";
 import { TaskDetailHeader } from "@/components/task/TaskDetailHeader";
 
-vi.mock("@/hooks/useTaskLiveness", () => ({
-  useTaskLiveness: vi.fn(() => "idle"),
+vi.mock("@/hooks/useTaskProgress", () => ({
+  useTaskProgress: vi.fn(() => "idle"),
 }));
 
-const { useTaskLiveness } = await import("@/hooks/useTaskLiveness");
+const { useTaskProgress } = await import("@/hooks/useTaskProgress");
 
 const baseTask: Task = {
   id: "hdr-1",
@@ -86,10 +86,10 @@ describe("TaskDetailHeader", () => {
   });
 
   it("renders a heartbeat indicator for an in-progress task", () => {
-    vi.mocked(useTaskLiveness).mockReturnValue("running");
+    vi.mocked(useTaskProgress).mockReturnValue("working");
     render(
       <TaskDetailHeader
-        task={{ ...baseTask, status: "implementing", lastHeartbeatAt: new Date().toISOString() }}
+        task={{ ...baseTask, status: "implementing", lastActivityAt: new Date().toISOString() }}
         activeTab="implementation"
         onTabChange={vi.fn()}
         onActionClick={vi.fn()}
@@ -100,7 +100,47 @@ describe("TaskDetailHeader", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText("Running")).toBeDefined();
+    expect(screen.getByLabelText("Working")).toBeDefined();
+  });
+
+  it("renders a hung danger icon for a stale in-progress task", () => {
+    vi.mocked(useTaskProgress).mockReturnValue("hung");
+    render(
+      <TaskDetailHeader
+        task={{ ...baseTask, status: "implementing", lastActivityAt: null }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Hung")).toBeDefined();
+  });
+
+  it("shows an in-flight tool line when a tool is running", () => {
+    vi.mocked(useTaskProgress).mockReturnValue("working");
+    render(
+      <TaskDetailHeader
+        task={{
+          ...baseTask,
+          status: "implementing",
+          currentTool: { name: "Bash", startedAt: new Date().toISOString() },
+        }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/running: Bash/)).toBeDefined();
   });
 
   it("blinks the robot indicator when a task:usage_updated event fires", () => {

@@ -2,12 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { TaskListItem } from "@aif/shared/browser";
 
-vi.mock("@/hooks/useTaskLiveness", () => ({
-  useTaskLiveness: vi.fn(() => "idle"),
+vi.mock("@/hooks/useTaskProgress", () => ({
+  useTaskProgress: vi.fn(() => "idle"),
 }));
 
 const { TaskCard } = await import("@/components/kanban/TaskCard");
-const { useTaskLiveness } = await import("@/hooks/useTaskLiveness");
+const { useTaskProgress } = await import("@/hooks/useTaskProgress");
 
 const mockTask: TaskListItem = {
   id: "card-1",
@@ -54,33 +54,33 @@ describe("TaskCard", () => {
     expect(screen.getByText("Sample Task")).toBeDefined();
   });
 
-  it("renders a running heartbeat indicator for an in-progress task", () => {
-    vi.mocked(useTaskLiveness).mockReturnValue("running");
+  it("renders a working heartbeat indicator for an in-progress task", () => {
+    vi.mocked(useTaskProgress).mockReturnValue("working");
     render(
       <TaskCard
-        task={{ ...mockTask, status: "implementing", lastHeartbeatAt: new Date().toISOString() }}
+        task={{ ...mockTask, status: "implementing", lastActivityAt: new Date().toISOString() }}
         onClick={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText("Running")).toBeDefined();
+    expect(screen.getByLabelText("Working")).toBeDefined();
   });
 
-  it("renders a stalled heartbeat indicator for a stale in-progress task", () => {
-    vi.mocked(useTaskLiveness).mockReturnValue("stalled");
+  it("renders a hung heartbeat indicator for a stale in-progress task", () => {
+    vi.mocked(useTaskProgress).mockReturnValue("hung");
     render(
       <TaskCard
-        task={{ ...mockTask, status: "implementing", lastHeartbeatAt: null }}
+        task={{ ...mockTask, status: "implementing", lastActivityAt: null }}
         onClick={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText("Stalled")).toBeDefined();
+    expect(screen.getByLabelText("Hung")).toBeDefined();
   });
 
   it("does not render a heartbeat indicator for idle tasks", () => {
-    vi.mocked(useTaskLiveness).mockReturnValue("idle");
+    vi.mocked(useTaskProgress).mockReturnValue("idle");
     render(<TaskCard task={mockTask} onClick={vi.fn()} />);
-    expect(screen.queryByLabelText("Running")).toBeNull();
-    expect(screen.queryByLabelText("Stalled")).toBeNull();
+    expect(screen.queryByLabelText("Working")).toBeNull();
+    expect(screen.queryByLabelText("Hung")).toBeNull();
   });
 
   it("should render task description", () => {

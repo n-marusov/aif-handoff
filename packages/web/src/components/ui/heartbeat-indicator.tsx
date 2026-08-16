@@ -1,21 +1,21 @@
 import { AlertTriangle } from "lucide-react";
-import type { TaskLiveness } from "@/hooks/useTaskLiveness";
+import type { TaskProgress } from "@/hooks/useTaskProgress";
 
 interface HeartbeatIndicatorProps {
-  liveness: TaskLiveness;
+  progress: TaskProgress;
 }
 
 /**
- * Lightweight running/stalled indicator. Uses opacity animation only
- * (`animate-pulse`) for the running dot; no box-shadow/backdrop-filter per
- * project UI rules. Stalled state renders a danger icon instead of a dot.
+ * Lightweight working/hung indicator. Uses opacity animation only
+ * (`animate-pulse`) for the working dot; no box-shadow/backdrop-filter per
+ * project UI rules. Hung state renders a danger icon instead of a dot.
  */
-export function HeartbeatIndicator({ liveness }: HeartbeatIndicatorProps) {
-  if (liveness === "idle") return null;
+export function HeartbeatIndicator({ progress }: HeartbeatIndicatorProps) {
+  if (progress === "idle") return null;
 
-  if (liveness === "stalled") {
+  if (progress === "hung") {
     return (
-      <span aria-label="Stalled" className="inline-flex shrink-0 text-destructive">
+      <span aria-label="Hung" className="inline-flex shrink-0 text-destructive">
         <AlertTriangle className="h-3.5 w-3.5" />
       </span>
     );
@@ -23,7 +23,7 @@ export function HeartbeatIndicator({ liveness }: HeartbeatIndicatorProps) {
 
   return (
     <span
-      aria-label="Running"
+      aria-label="Working"
       className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500 animate-pulse"
     />
   );

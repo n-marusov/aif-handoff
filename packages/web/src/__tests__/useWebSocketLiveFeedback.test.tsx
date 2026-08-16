@@ -142,4 +142,47 @@ describe("useWebSocket live feedback events", () => {
     const event = dispatchEvent.mock.calls[0][0] as CustomEvent;
     expect(event.type).toBe("task:usage_updated");
   });
+
+  it("patches cached activity progress from a task:activity payload without board invalidation", () => {
+    const queryClient = new QueryClient();
+    const setQueryData = vi.spyOn(queryClient, "setQueryData");
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    queryClient.setQueryData(["task", "task-1"], {
+      id: "task-1",
+      title: "T",
+      status: "implementing",
+      lastActivityAt: null,
+      currentTool: null,
+    });
+    queryClient.setQueryData(
+      ["tasks", "project-1"],
+      [
+        {
+          id: "task-1",
+          title: "T",
+          status: "implementing",
+          lastActivityAt: null,
+          currentTool: null,
+        },
+      ],
+    );
+    renderHook(() => useWebSocket(), { wrapper: createWrapper(queryClient) });
+
+    act(() => {
+      FakeWebSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: "task:activity",
+          payload: {
+            taskId: "task-1",
+            lastActivityAt: "2026-08-16T02:00:00.000Z",
+            currentTool: { name: "Bash", startedAt: "2026-08-16T02:00:00.000Z" },
+          },
+        }),
+      } as MessageEvent);
+    });
+
+    expect(setQueryData).toHaveBeenCalled();
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["task", "task-1"] });
+    expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["tasks"] });
+  });
 });

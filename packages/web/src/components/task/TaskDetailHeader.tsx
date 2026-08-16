@@ -11,10 +11,18 @@ import { Tabs } from "@/components/ui/tabs";
 import { AlertBox } from "@/components/ui/alert-box";
 import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
 import { useUsageLimitsEnabled, useQaPipelineEnabled } from "@/hooks/useSettings";
-import { useTaskLiveness } from "@/hooks/useTaskLiveness";
+import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { HeartbeatIndicator } from "@/components/ui/heartbeat-indicator";
 import { RobotBlink } from "@/components/ui/robot-blink";
 import { TaskOwnershipSummary } from "./TaskOwnership";
+
+function inFlightDuration(startedAt: string): string {
+  const ms = Date.now() - new Date(startedAt).getTime();
+  if (Number.isNaN(ms) || ms < 0) return "…";
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+}
 
 export type TaskDetailTab =
   | "implementation"
@@ -136,7 +144,7 @@ export function TaskDetailHeader({
   );
   const usageLimitsEnabled = useUsageLimitsEnabled();
   const qaPipelineEnabled = useQaPipelineEnabled();
-  const liveness = useTaskLiveness(task.status, task.lastHeartbeatAt);
+  const progress = useTaskProgress(task.status, task.lastActivityAt, task.currentTool);
   const tabItems = [
     { value: "implementation", label: "Implementation" },
     { value: "review", label: "Review" },
@@ -162,7 +170,7 @@ export function TaskDetailHeader({
       <SheetClose onClose={onClose} />
       <SheetHeader className="mb-3">
         <div className="mb-1 flex items-center gap-2">
-          <HeartbeatIndicator liveness={liveness} />
+          <HeartbeatIndicator progress={progress} />
           <Badge size="sm" style={statusColorStyle(task.status)}>
             {STATUS_CONFIG[task.status].label}
           </Badge>
@@ -223,6 +231,14 @@ export function TaskDetailHeader({
             cost: {formatUsd(task.costUsd)}
           </Badge>
         </div>
+        {task.currentTool && (
+          <div className="mb-2 inline-flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300">
+            <span className="font-medium">running: {task.currentTool.name}</span>
+            <span className="text-muted-foreground">
+              ({inFlightDuration(task.currentTool.startedAt)})
+            </span>
+          </div>
+        )}
         <TaskOwnershipSummary executionOwner={task.executionOwner} assignees={task.assignees} />
         <SheetTitle className="tracking-tight">{task.title}</SheetTitle>
       </SheetHeader>

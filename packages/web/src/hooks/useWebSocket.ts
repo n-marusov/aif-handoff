@@ -5,6 +5,7 @@ import type {
   WsEvent,
   Task,
   TaskListItem,
+  TaskCurrentTool,
   TaskStatus,
   TaskOwnershipBroadcastPayload,
 } from "@aif/shared/browser";
@@ -81,6 +82,18 @@ function hasTaskUsagePayload(
     typeof value.taskId === "string" &&
     typeof value.projectId === "string" &&
     isRecord(value.usage)
+  );
+}
+
+function hasTaskActivityPayload(value: unknown): value is {
+  taskId: string;
+  lastActivityAt: string | null;
+  currentTool: TaskCurrentTool | null;
+} {
+  return (
+    isRecord(value) &&
+    typeof value.taskId === "string" &&
+    (value.lastActivityAt === null || typeof value.lastActivityAt === "string")
   );
 }
 
@@ -341,9 +354,23 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Activity-only update: refresh task detail without touching the board list
-      if (data.type === "task:activity" && hasIdPayload(data.payload)) {
-        queryClient.invalidateQueries({ queryKey: ["task", data.payload.id] });
+      // Activity update: refresh the task detail log AND patch cached progress fields.
+      if (data.type === "task:activity" && hasTaskActivityPayload(data.payload)) {
+        const { taskId, lastActivityAt, currentTool } = data.payload;
+        queryClient.setQueryData<Task>(["task", taskId], (current) =>
+          current ? { ...current, lastActivityAt, currentTool } : current,
+        );
+        const taskLists = queryClient.getQueriesData<TaskListItem[]>({ queryKey: ["tasks"] });
+        for (const [queryKey, list] of taskLists) {
+          if (!list) continue;
+          queryClient.setQueryData(
+            queryKey,
+            list.map((item) =>
+              item.id === taskId ? { ...item, lastActivityAt, currentTool } : item,
+            ),
+          );
+        }
+        queryClient.invalidateQueries({ queryKey: ["task", taskId] });
         return;
       }
 
