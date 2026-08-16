@@ -605,3 +605,28 @@ describe("settings overview — provider selector", () => {
     expect((await buildSettingsOverview()).gitlabIssueMrEnabled).toBe(false);
   });
 });
+
+describe("settings overview — agent stale timeout", () => {
+  const original = process.env.AGENT_STAGE_STALE_TIMEOUT_MS;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.AGENT_STAGE_STALE_TIMEOUT_MS;
+    } else {
+      process.env.AGENT_STAGE_STALE_TIMEOUT_MS = original;
+    }
+    resetEnvCache();
+  });
+
+  it("reports agentStageStaleTimeoutMs from AGENT_STAGE_STALE_TIMEOUT_MS", async () => {
+    process.env.AGENT_STAGE_STALE_TIMEOUT_MS = "123456";
+    resetEnvCache();
+    expect((await buildSettingsOverview()).agentStageStaleTimeoutMs).toBe(123456);
+  });
+
+  it("defaults agentStageStaleTimeoutMs to 5400000", async () => {
+    delete process.env.AGENT_STAGE_STALE_TIMEOUT_MS;
+    resetEnvCache();
+    expect((await buildSettingsOverview()).agentStageStaleTimeoutMs).toBe(5400000);
+  });
+});

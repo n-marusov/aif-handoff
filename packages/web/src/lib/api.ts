@@ -198,6 +198,7 @@ export interface SettingsResponse {
   usageLimitsEnabled: boolean;
   warmupEnabled: boolean;
   qaPipelineEnabled?: boolean;
+  agentStageStaleTimeoutMs?: number;
   githubIssuePrEnabled?: boolean;
   gitProvider?: "github" | "gitlab";
   gitlabIssueMrEnabled?: boolean;
