@@ -14,6 +14,8 @@ const { mockWarn, mockError } = vi.hoisted(() => ({
 
 vi.mock("@aif/data", () => ({
   appendTaskActivityLog: vi.fn(),
+  findTaskById: vi.fn(() => null),
+  parseTaskCurrentTool: vi.fn(() => null),
 }));
 
 // Stable backoff for deterministic assertions
@@ -35,6 +37,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
 });
 
 const { classifyStageError, StageManualBlockError } = await import("../stageErrorHandler.js");
+const { AiLoopDetectedError } = await import("../loopGuard.js");
 import { appendTaskActivityLog } from "@aif/data";
 
 function makeInput(overrides: Record<string, unknown> = {}) {
@@ -105,6 +108,24 @@ describe("classifyStageError", () => {
     expect(result).toEqual({
       kind: "blocked_external",
       blockedReason: "Verify gate blocked this task.",
+      retryAfter: null,
+      retryAfterSource: "none",
+      retryCount: 2,
+      limitSnapshot: null,
+    });
+  });
+
+  it("returns manual blocked_external for loop-detected errors without retry", () => {
+    const result = classifyStageError(
+      makeInput({
+        retryCount: 2,
+        err: new AiLoopDetectedError("read_only_burst", 20, 20),
+      }),
+    );
+
+    expect(result).toEqual({
+      kind: "blocked_external",
+      blockedReason: "possible_loop: read_only_burst (20/20)",
       retryAfter: null,
       retryAfterSource: "none",
       retryCount: 2,

@@ -58,6 +58,7 @@ import {
 import { logActivity } from "./hooks.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
+import { LoopGuard } from "./loopGuard.js";
 import { writeQueryAudit } from "./queryAudit.js";
 import { getActiveStageAbortController } from "./stageAbort.js";
 import {
@@ -77,6 +78,9 @@ export class AiHandoffRequiredError extends Error {
     this.name = "AiHandoffRequiredError";
   }
 }
+
+// Loop-guard error (defined in loopGuard.ts to avoid a circular import).
+export { AiLoopDetectedError, type LoopDetectedReason } from "./loopGuard.js";
 
 function assertAiExecutionOwner(taskId: string): void {
   const task = findTaskById(taskId);
@@ -803,6 +807,10 @@ function buildExecutionIntent(
 ): import("@aif/runtime").RuntimeExecutionIntent {
   const env = getEnv();
   const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
+  const loopGuard = new LoopGuard({
+    maxToolCalls: env.AGENT_MAX_TOOL_CALLS_PER_STAGE,
+    readOnlyBurst: env.AGENT_LOOP_READ_ONLY_BURST,
+  });
   const explicitAbort =
     options.abortController ?? getActiveStageAbortController(options.taskId) ?? undefined;
   const task = findTaskById(options.taskId);
@@ -832,6 +840,7 @@ function buildExecutionIntent(
     abortController: explicitAbort,
     onStderr: stderr,
     onToolUse: (toolName, detail) => {
+      loopGuard.onToolUse(toolName, detail);
       logActivity(options.taskId, "Tool", `${toolName}${detail}`);
       trackTaskInFlight(options.taskId, null);
     },

@@ -44,6 +44,8 @@ describe("env validation", () => {
     expect(result.AGENT_STAGE_STALE_MAX_RETRY).toBe(3);
     expect(result.AGENT_STAGE_RUN_TIMEOUT_MS).toBe(60 * 60 * 1000);
     expect(result.AGENT_ACTIVITY_SILENCE_MS).toBe(5 * 60 * 1000);
+    expect(result.AGENT_MAX_TOOL_CALLS_PER_STAGE).toBe(500);
+    expect(result.AGENT_LOOP_READ_ONLY_BURST).toBe(20);
     expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(60 * 1000);
     expect(result.AGENT_QUERY_START_RETRY_DELAY_MS).toBe(1000);
     expect(result.API_RUNTIME_START_TIMEOUT_MS).toBe(60 * 1000);

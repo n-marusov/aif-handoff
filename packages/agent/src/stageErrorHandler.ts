@@ -13,6 +13,7 @@ import {
   type TaskStatus,
 } from "@aif/shared";
 import { logActivity } from "./hooks.js";
+import { AiLoopDetectedError } from "./loopGuard.js";
 import {
   findBranchIsolationError,
   findRuntimeExecutionError,
@@ -66,6 +67,14 @@ function findStageManualBlockError(err: unknown): StageManualBlockError | null {
   if (err instanceof StageManualBlockError) return err;
   if (err instanceof Error && "cause" in err && err.cause) {
     return findStageManualBlockError(err.cause);
+  }
+  return null;
+}
+
+function findLoopDetectedError(err: unknown): AiLoopDetectedError | null {
+  if (err instanceof AiLoopDetectedError) return err;
+  if (err instanceof Error && "cause" in err && err.cause) {
+    return findLoopDetectedError(err.cause);
   }
   return null;
 }
@@ -168,6 +177,37 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
     return {
       kind: "blocked_external",
       blockedReason: manualBlockErr.blockedReason,
+      retryAfter: null,
+      retryAfterSource: "none",
+      retryCount: input.retryCount ?? 0,
+      limitSnapshot: null,
+    };
+  }
+
+  const loopErr = findLoopDetectedError(err);
+  if (loopErr) {
+    const blockedReason = `possible_loop: ${loopErr.reason} (${loopErr.count}/${loopErr.limit})`;
+    logActivity(
+      taskId,
+      "Agent",
+      `coordinator moved to blocked_external from ${sourceStatus} at ${stageLabel}; retryAfter=manual; source=none; reason=${truncateReason(blockedReason)}`,
+    );
+
+    log.error(
+      {
+        taskId,
+        stage: stageLabel,
+        loopReason: loopErr.reason,
+        count: loopErr.count,
+        limit: loopErr.limit,
+        retryAfter: null,
+      },
+      "Subagent stage aborted due to detected tool-call loop, task requires manual action",
+    );
+
+    return {
+      kind: "blocked_external",
+      blockedReason,
       retryAfter: null,
       retryAfterSource: "none",
       retryCount: input.retryCount ?? 0,

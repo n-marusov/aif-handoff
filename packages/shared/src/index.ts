@@ -324,3 +324,7 @@ export {
   type SafeRuntimeErrorCategory,
   type SafeRuntimeErrorReason,
 } from "./runtimeLimitUtils.js";
+
+// Loop-detection classification
+import { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS } from "./loopDetection.js";
+export { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS };
