@@ -1281,7 +1281,8 @@ Used by the agent process to trigger WebSocket broadcasts after updating a task.
 **Body:**
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | string | `task:updated` | Event type: `task:updated`, `task:moved`, `task:activity`, or `task:scheduled_fired` |
+| `type` | string | `task:updated` | Event type: `task:updated`, `task:moved`, `task:activity`, `task:scheduled_fired`, `task:heartbeat`, or `task:usage_updated` |
+| `payload` | object | optional | Lightweight payload for `task:heartbeat` (`{ taskId, lastHeartbeatAt }`) or `task:usage_updated` (`{ taskId, projectId, usage }`). When omitted, the full task payload is broadcast. |
 
 **Response:** `200 OK`
 
@@ -1656,6 +1657,8 @@ All events are JSON with this structure:
 | `chat:done`                       | `{ conversationId, usage?, projectId?, taskId?, runtimeProfileId?, runtimeLimitSnapshot? }`        | `POST /chat` — stream completed                                                      |
 | `chat:error`                      | `{ conversationId, message, code, projectId?, taskId?, runtimeProfileId?, runtimeLimitSnapshot? }` | `POST /chat` — error during streaming                                                |
 | `task:scheduled_fired`            | Full task object                                                                                   | Coordinator fires a backlog task whose `scheduledAt` is due                          |
+| `task:heartbeat`                  | `{ taskId, lastHeartbeatAt }`                                                                      | Coordinator renews a running task's liveness (every 30s)                             |
+| `task:usage_updated`              | `{ taskId, projectId, usage: { inputTokens, outputTokens, totalTokens, costUsd? } }`               | Task-scoped usage recorded at run boundary                                           |
 | `project:auto_queue_mode_changed` | Full project object                                                                                | `PATCH /projects/:id/auto-queue-mode`                                                |
 | `project:auto_queue_advanced`     | `{ id: string }` (task id)                                                                         | Coordinator auto-advances the next backlog task in an auto-queue project             |
 | `project:runtime_limit_updated`   | `{ projectId, runtimeProfileId, taskId? }`                                                         | Persisted runtime-profile limit state or last usage changed                          |

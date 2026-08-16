@@ -488,19 +488,23 @@ documented in `docs/configuration.md`.
 
 The API broadcasts events via WebSocket (`/ws` endpoint) on every state change:
 
-| Event                           | Trigger                                             |
-| ------------------------------- | --------------------------------------------------- |
-| `task:created`                  | New task created                                    |
-| `task:updated`                  | Task fields updated                                 |
-| `task:moved`                    | Task status changed via state machine               |
-| `task:deleted`                  | Task deleted                                        |
-| `task:qa_started`               | QA pipeline started (manual run-qa or auto-trigger) |
-| `task:qa_done`                  | QA pipeline finished successfully                   |
-| `task:qa_failed`                | QA pipeline failed                                  |
-| `agent:wake`                    | Coordinator should check for work                   |
-| `project:runtime_limit_updated` | Runtime-profile limit snapshot persisted or cleared |
+| Event                           | Trigger                                               |
+| ------------------------------- | ----------------------------------------------------- |
+| `task:created`                  | New task created                                      |
+| `task:updated`                  | Task fields updated                                   |
+| `task:moved`                    | Task status changed via state machine                 |
+| `task:deleted`                  | Task deleted                                          |
+| `task:qa_started`               | QA pipeline started (manual run-qa or auto-trigger)   |
+| `task:qa_done`                  | QA pipeline finished successfully                     |
+| `task:qa_failed`                | QA pipeline failed                                    |
+| `agent:wake`                    | Coordinator should check for work                     |
+| `task:heartbeat`                | Running task renewed its liveness (every 30s)         |
+| `task:usage_updated`            | Task-scoped token/cost usage recorded at run boundary |
+| `project:runtime_limit_updated` | Runtime-profile limit snapshot persisted or cleared   |
 
 The web UI connects via `useWebSocket` hook and invalidates React Query caches on incoming events. The agent coordinator also subscribes to this WebSocket to receive wake signals for immediate task processing (see Agent Pipeline above).
+
+`task:heartbeat` and `task:usage_updated` use targeted cache updates instead of full-board refetches: heartbeat patches the cached task/list `lastHeartbeatAt`, and usage updates refresh only the open `["task", id]` query (plus a `task:usage_updated` DOM event for the detail-header indicator).
 
 ### Activity Logging
 
