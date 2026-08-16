@@ -1,44 +1,37 @@
 # Research
 
-Updated: 2026-08-16
+Updated: 2026-08-16 01:51
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: Remove Root Path field from project create/edit dialogs; auto-generate the container project folder path from the name; enforce unique project names
+Topic: Live GUI feedback — Kanban heartbeat animation + real-time token/cost counters in task detail
 
-Goal: Drop the editable "Root Path" field from the Create/Edit Project dialogs. The container project folder path is derived automatically from the project name (slugified under PROJECTS_MOUNT). Project names must be unique (case-insensitive, trimmed). Keep the persisted `rootPath` column and every downstream consumer unchanged.
+Goal: Make the board visibly show that tasks are actively executing, and update token/cost counters in the task detail instantly as usage is recorded. Explicitly exclude LLM reasoning/thinking streaming.
 
-Scope: UI field removal + backend auto-generation + name uniqueness. `rootPath` stays persisted and displayed/searchable, but is no longer editable. The API keeps `rootPath` optional for backward compatibility (existing curl runbooks).
+Scope: (1) Heartbeat pulse on Kanban cards and the task-detail header. (2) Instant run-boundary token/cost updates in the detail header (option 2a). No mid-run incremental token counting, no reasoning console.
 
 Key decisions:
-- Generate rootPath = posix.join(PROJECTS_MOUNT, slugify(name)) on create only. Reuse `slugify` from @aif/shared (planPath.ts) — transliterates Cyrillic→Latin, lowercase kebab, 60 chars.
-- rootPath immutable on rename: editing a project changes only its display name, never moves the on-disk git repo/worktrees.
-- Name uniqueness: trimmed + case-insensitive (NFC) on create and update (excluding self on update).
-- Also guard generated folder/slug uniqueness — distinct names can slugify identically ("Hello World" vs "Hello-World" → hello-world); on collision append -2, -3, ….
-- PROJECTS_MOUNT default /home/www (container); matches current persisted rootPath semantics.
-
-Files to change:
-- packages/web/src/components/project/ProjectSelector.tsx — remove rootPath state/input/submit/guard
-- packages/shared/src/types.ts — CreateProjectInput.rootPath optional
-- packages/api/src/schemas.ts — createProjectSchema.rootPath optional
-- packages/api/src/repositories/projects.ts — generate rootPath + uniqueness checks; update PUT parallel/auto-queue check to use existing.rootPath
-- packages/data/src/index.ts — add findProjectByName (case-insensitive)
-- Tests (TDD): ProjectSelector.test.tsx, api projects.test.ts, + new unit tests for slug generation and name uniqueness
-- Docs: README.md, docs/api.md, docs/getting-started.md, docs/gitlab-demo.md, docs/dev-gui-demo.md
+- Heartbeat: add `lastHeartbeatAt` to `TaskListItem` + `listTaskListItems()` projection. Emit `task:heartbeat { taskId, lastHeartbeatAt }` from `startHeartbeat`. Patch cached card/task via `setQueryData` (NOT a full `tasks` invalidation) to avoid refetch + `updatedAt` resort churn.
+- Running indicator = status in {planning, improve, implementing, review, verify} AND `lastHeartbeatAt` fresh. Staleness threshold = `AGENT_STAGE_STALE_TIMEOUT_MS` (default 90 min) — same as the coordinator watchdog.
+- Token/cost: reuse run-boundary usage. Emit `task:usage_updated { taskId, projectId, usage: RuntimeUsage }` from the usage sink `onRecorded`; patch `task.tokenInput/Output/Total/costUsd` directly instead of the current `project:runtime_limit_updated` full-refetch over-invalidation.
+- Visual for counter updates: a small "robot blink"/activity indicator, not number animation.
+- No LLM reasoning/thinking text surfaced.
 
 Constraints:
-- TDD: write failing tests first, then implement.
-- Every package >=70% coverage; finish with npm run ai:validate.
-- DB access only via @aif/data; API stays thin.
+- No schema migration (columns already exist; only read projection changes).
+- New visuals (heartbeat pulse, robot blink) must be synced with Pencil (.pen).
+- No expensive CSS (opacity/transform only; no box-shadow/blur/backdrop-filter).
+- Theme color pairing → docs/ui-theme-colors.md.
+- DB boundary: api/agent/runtime via @aif/data only.
+- Every package >=70% coverage; finish with `npm run ai:validate`.
 
 Success signals:
-- Create/Edit Project dialogs have no Root Path field; folder auto-created under PROJECTS_MOUNT/<slug>.
-- Renaming a project does not move its folder.
-- Creating a duplicate name (case-insensitive) is rejected with a clear error.
-- Existing curl runbooks with explicit rootPath still work (backward compatible).
+- Kanban cards pulse while running and turn "stalled" after `AGENT_STAGE_STALE_TIMEOUT_MS` without a heartbeat.
+- Task detail header shows the same pulse plus a "robot blink" when token/cost counters update.
+- Token/cost counters in the open detail update with no manual refresh and no full board refetch.
 
-Next step: /aif-implement (TDD)
+Next step: /aif-plan fast (or full) for scope (1) + (2a)
 <!-- aif:active-summary:end -->
 
 ## Sessions
@@ -186,6 +179,26 @@ Links (paths):
 - packages/api/src/schemas.ts
 - packages/shared/src/types.ts, planPath.ts, schema.ts
 - packages/data/src/index.ts
+
+### 2026-08-16 01:51 — Live board heartbeat + real-time token/cost feedback
+What changed: Explored the live-feedback pipeline; scoped to (1) heartbeat pulse on board + detail, (2) instant run-boundary token/cost updates with a "robot blink" indicator. No LLM reasoning stream.
+Key notes:
+- `startHeartbeat` (subagentQuery) already writes `lastHeartbeatAt` + `updatedAt` every 30s but broadcasts nothing; `TaskListItem` has no `lastHeartbeatAt`.
+- Staleness threshold = `AGENT_STAGE_STALE_TIMEOUT_MS` (default 90 min), same as the coordinator watchdog.
+- Token/cost are run-boundary: `recordUsageEvent` rolls usage into task columns on run completion; `onRecorded` currently emits `project:runtime_limit_updated` (full refetch). Replace with targeted `task:usage_updated { taskId, projectId, usage }`.
+- Board must patch cache via `setQueryData`, not invalidate `tasks`, to avoid `updatedAt` resort churn.
+- No schema change; only `TaskListItem` projection + WS events + UI.
+- Pencil sync, theme-pairing, no-expensive-CSS rules apply to new visuals.
+Links (paths):
+- packages/agent/src/subagentQuery.ts (heartbeat, usageSink onRecorded)
+- packages/data/src/index.ts (updateTaskHeartbeat, recordUsageEvent, listTaskListItems projection)
+- packages/shared/src/types.ts (TaskListItem, WsEventType/WsEvent)
+- packages/api/src/ws.ts, packages/api/src/routes/tasks.ts (broadcast path)
+- packages/agent/src/notifier.ts (broadcast helpers)
+- packages/web/src/hooks/useWebSocket.ts (WS handler)
+- packages/web/src/components/kanban/TaskCard.tsx, packages/web/src/components/task/TaskDetailHeader.tsx
+
+<!-- aif:sessions:end -->
 
 ## Runbook (final)
 
