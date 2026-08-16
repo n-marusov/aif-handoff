@@ -10,6 +10,8 @@ const clearRuntimeProfileLimitSnapshotMock = vi.fn();
 const notifyProjectRuntimeLimitBroadcastMock = vi.fn();
 const notifyTaskHeartbeatMock = vi.fn();
 const notifyTaskUsageBroadcastMock = vi.fn();
+const broadcastTaskActivityProgressMock = vi.fn();
+const setTaskInFlightToolMock = vi.fn();
 const updateTaskHeartbeatMock = vi.fn<() => string>(() => "2026-08-16T02:00:00.000Z");
 const saveTaskSessionIdMock = vi.fn();
 const getTaskSessionIdMock = vi.fn<(taskId: string) => string | null>(() => null);
@@ -108,6 +110,7 @@ vi.mock("@aif/data", async (importOriginal) => {
     clearRuntimeProfileLimitSnapshot: clearRuntimeProfileLimitSnapshotMock,
     incrementTaskTokenUsage: incrementTaskTokenUsageMock,
     updateTaskHeartbeat: updateTaskHeartbeatMock,
+    setTaskInFlightTool: setTaskInFlightToolMock,
     renewTaskClaim: vi.fn(),
     persistRuntimeProfileLimitSnapshot: persistRuntimeProfileLimitSnapshotMock,
     saveTaskActiveRuntimeSelection: saveTaskActiveRuntimeSelectionMock,
@@ -137,6 +140,7 @@ const baseMockEnv = {
   AGENT_STAGE_STALE_TIMEOUT_MS: 90 * 60 * 1000,
   AGENT_STAGE_STALE_MAX_RETRY: 3,
   AGENT_STAGE_RUN_TIMEOUT_MS: 60 * 60 * 1000,
+  AGENT_ACTIVITY_SILENCE_MS: 5 * 60 * 1000,
   AGENT_QUERY_START_TIMEOUT_MS: 60 * 1000,
   AGENT_QUERY_START_RETRY_DELAY_MS: 1000,
   DATABASE_URL: "./data/aif.sqlite",
@@ -202,6 +206,7 @@ vi.mock("../notifier.js", () => ({
     notifyProjectRuntimeLimitBroadcastMock(...args),
   notifyTaskHeartbeat: (...args: unknown[]) => notifyTaskHeartbeatMock(...args),
   notifyTaskUsageBroadcast: (...args: unknown[]) => notifyTaskUsageBroadcastMock(...args),
+  broadcastTaskActivityProgress: (...args: unknown[]) => broadcastTaskActivityProgressMock(...args),
 }));
 
 const { RuntimeExecutionError, createRuntimeWorkflowSpec } = await import("@aif/runtime");
@@ -278,6 +283,47 @@ describe("task usage broadcast", () => {
       "project-usage",
       expect.objectContaining({ inputTokens: 5, outputTokens: 3, totalTokens: 8 }),
     );
+  });
+});
+
+describe("in-flight tool tracking", () => {
+  beforeEach(() => {
+    setTaskInFlightToolMock.mockClear();
+    setTaskInFlightToolMock.mockReturnValue(undefined);
+    findTaskByIdMock.mockReturnValue({
+      id: "task-inflight",
+      projectId: "project-inflight",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+  });
+
+  it("clears the in-flight tool when a run completes successfully", async () => {
+    queryMock.mockImplementation(makeSuccessWithSession("session-inflight", "done"));
+    await executeSubagentQuery({
+      taskId: "task-inflight",
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+    expect(setTaskInFlightToolMock).toHaveBeenCalledWith("task-inflight", null);
+  });
+
+  it("clears the in-flight tool when a run fails", async () => {
+    queryMock.mockImplementation(async function* () {
+      throw new Error("boom");
+    });
+    await expect(
+      executeSubagentQuery({
+        taskId: "task-inflight",
+        projectRoot: "/tmp/project",
+        agentName: "implement-coordinator",
+        prompt: "run",
+        workflowKind: "implementer",
+      }),
+    ).rejects.toThrow();
+    expect(setTaskInFlightToolMock).toHaveBeenCalledWith("task-inflight", null);
   });
 });
 

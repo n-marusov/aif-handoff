@@ -18,7 +18,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
 });
 
 const { resetEnvCache } = await import("@aif/shared");
-const { notifyTaskBroadcast, notifyTaskHeartbeat, notifyTaskUsageBroadcast } =
+const { notifyTaskBroadcast, notifyTaskHeartbeat, notifyTaskUsageBroadcast, notifyTaskProgress } =
   await import("../notifier.js");
 
 describe("notifyTaskBroadcast", () => {
@@ -91,6 +91,26 @@ describe("notifyTaskBroadcast", () => {
         taskId: "task-1",
         projectId: "project-1",
         usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, costUsd: 0.01 },
+      },
+    });
+  });
+
+  it("sends an activity-progress broadcast with a lightweight payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as any;
+
+    await notifyTaskProgress("task-1", {
+      lastActivityAt: "2026-08-16T02:00:00.000Z",
+      currentTool: { name: "Bash", startedAt: "2026-08-16T02:00:00.000Z" },
+    });
+
+    const options = fetchMock.mock.calls[0][1];
+    expect(JSON.parse(options?.body)).toEqual({
+      type: "task:activity",
+      payload: {
+        taskId: "task-1",
+        lastActivityAt: "2026-08-16T02:00:00.000Z",
+        currentTool: { name: "Bash", startedAt: "2026-08-16T02:00:00.000Z" },
       },
     });
   });

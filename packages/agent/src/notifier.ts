@@ -1,5 +1,5 @@
-import { findProjectByTaskId } from "@aif/data";
-import { logger, getEnv, sendTelegramNotification } from "@aif/shared";
+import { findProjectByTaskId, findTaskById, parseTaskCurrentTool } from "@aif/data";
+import { logger, getEnv, sendTelegramNotification, type TaskCurrentTool } from "@aif/shared";
 
 const log = logger("agent-notifier");
 
@@ -174,4 +174,31 @@ export async function notifyTaskUsageBroadcast(
     { type: "task:usage_updated", payload: { taskId, projectId, usage } },
     { projectId, usage },
   );
+}
+
+export interface TaskActivityProgress {
+  taskId: string;
+  lastActivityAt: string | null;
+  currentTool: TaskCurrentTool | null;
+}
+
+export async function notifyTaskProgress(
+  taskId: string,
+  progress: Omit<TaskActivityProgress, "taskId">,
+): Promise<void> {
+  const payload: TaskActivityProgress = { taskId, ...progress };
+  await postTaskBroadcast(
+    taskId,
+    { type: "task:activity", payload },
+    { lastActivityAt: payload.lastActivityAt, currentTool: payload.currentTool },
+  );
+}
+
+/** Read the task's current activity state and broadcast it as task:activity. */
+export function broadcastTaskActivityProgress(taskId: string): void {
+  const task = findTaskById(taskId);
+  void notifyTaskProgress(taskId, {
+    lastActivityAt: task?.lastActivityAt ?? null,
+    currentTool: task ? parseTaskCurrentTool(task.currentToolJson) : null,
+  });
 }

@@ -12,6 +12,7 @@ import {
   resolveEffectiveRuntimeProfile,
   saveTaskActiveRuntimeSelection,
   saveTaskSessionId,
+  setTaskInFlightTool,
   updateTaskHeartbeat,
 } from "@aif/data";
 import {
@@ -47,13 +48,20 @@ import {
   type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
-import { getEnv, isWarmupWorkflowKind, logger, redactProviderTextForLogs } from "@aif/shared";
+import {
+  getEnv,
+  isWarmupWorkflowKind,
+  logger,
+  redactProviderTextForLogs,
+  type TaskCurrentTool,
+} from "@aif/shared";
 import { logActivity } from "./hooks.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
 import { writeQueryAudit } from "./queryAudit.js";
 import { getActiveStageAbortController } from "./stageAbort.js";
 import {
+  broadcastTaskActivityProgress,
   notifyProjectRuntimeLimitBroadcast,
   notifyTaskHeartbeat,
   notifyTaskUsageBroadcast,
@@ -825,6 +833,7 @@ function buildExecutionIntent(
     onStderr: stderr,
     onToolUse: (toolName, detail) => {
       logActivity(options.taskId, "Tool", `${toolName}${detail}`);
+      trackTaskInFlight(options.taskId, null);
     },
     onSubagentStart: (name, id) => {
       const idSuffix = id ? ` (${id.slice(0, 8)})` : "";
@@ -1058,6 +1067,15 @@ export async function executeSubagentQuery(
       const originalOnSubagentStart = executionIntent.onSubagentStart;
       executionIntent.onEvent = (event) => {
         wd.markActivity();
+        if (event.type === "tool:use") {
+          const data = (event.data ?? {}) as Record<string, unknown>;
+          if (typeof data.name === "string") {
+            trackTaskInFlight(taskId, {
+              name: data.name,
+              startedAt: new Date().toISOString(),
+            });
+          }
+        }
         if (runtimeUsageLimitsEnabled) {
           latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
             logger: log,
@@ -1135,6 +1153,7 @@ export async function executeSubagentQuery(
         watchdog.clear();
         if (stalledByWatchdog && attempt < FIRST_ACTIVITY_MAX_RETRIES) {
           // Agent stalled — kill and retry
+          trackTaskInFlight(taskId, null);
           log.info(
             { taskId, agentName, attempt: attempt + 1, maxRetries: FIRST_ACTIVITY_MAX_RETRIES },
             "Restarting agent after first-activity stall",
@@ -1142,6 +1161,7 @@ export async function executeSubagentQuery(
           continue;
         }
         // Not a stall or retries exhausted — re-throw
+        trackTaskInFlight(taskId, null);
         throw err;
       }
     }
@@ -1238,8 +1258,10 @@ export async function executeSubagentQuery(
       `${agentName} complete (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"}${effortSuffix})`,
     );
 
+    trackTaskInFlight(taskId, null);
     return { resultText };
   } catch (error) {
+    trackTaskInFlight(taskId, null);
     if (runtimeUsageLimitsEnabled) {
       refreshRuntimeProfileLimitState({
         runtimeProfileId: runtimeProfileIdForError,
@@ -1316,6 +1338,12 @@ export async function executeSubagentQuery(
 let _coordinatorId: string | null = null;
 export function setCoordinatorId(id: string): void {
   _coordinatorId = id;
+}
+
+/** Update the in-flight tool in the DB and broadcast the new activity state. */
+function trackTaskInFlight(taskId: string, tool: TaskCurrentTool | null): void {
+  setTaskInFlightTool(taskId, tool);
+  broadcastTaskActivityProgress(taskId);
 }
 
 /** Start a periodic heartbeat that updates the task's lastHeartbeatAt and renews the lock. */

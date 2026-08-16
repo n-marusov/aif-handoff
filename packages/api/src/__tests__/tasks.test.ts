@@ -978,6 +978,40 @@ describe("tasks API", () => {
       });
     });
 
+    it("emits a task:activity progress payload", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-activity", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-activity/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Broadcast-Token": "internal-token",
+        },
+        body: JSON.stringify({
+          type: "task:activity",
+          payload: {
+            taskId: "broadcast-activity",
+            lastActivityAt: "2026-08-16T02:00:00.000Z",
+            currentTool: { name: "Bash", startedAt: "2026-08-16T02:00:00.000Z" },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(mockBroadcast)).toHaveBeenCalledWith({
+        type: "task:activity",
+        payload: {
+          taskId: "broadcast-activity",
+          lastActivityAt: "2026-08-16T02:00:00.000Z",
+          currentTool: { name: "Bash", startedAt: "2026-08-16T02:00:00.000Z" },
+        },
+      });
+    });
+
     it("rejects task:heartbeat without a valid payload", async () => {
       const db = testDb.current;
       mockInternalBroadcastToken.value = "internal-token";

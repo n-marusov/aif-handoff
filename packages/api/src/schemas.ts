@@ -276,6 +276,18 @@ export const taskUsagePayloadSchema = z.object({
   }),
 });
 
+export const taskActivityPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  lastActivityAt: z.string().nullable(),
+  currentTool: z
+    .object({
+      name: z.string().min(1),
+      detail: z.string().optional(),
+      startedAt: z.string().min(1),
+    })
+    .nullable(),
+});
+
 export const broadcastTaskSchema = z
   .object({
     type: z
@@ -288,14 +300,23 @@ export const broadcastTaskSchema = z
         "task:usage_updated",
       ])
       .default("task:updated"),
-    payload: z.union([taskHeartbeatPayloadSchema, taskUsagePayloadSchema]).optional(),
+    payload: z
+      .union([taskHeartbeatPayloadSchema, taskUsagePayloadSchema, taskActivityPayloadSchema])
+      .optional(),
   })
   .refine(
-    (value) =>
-      (value.type !== "task:heartbeat" ||
-        taskHeartbeatPayloadSchema.safeParse(value.payload).success) &&
-      (value.type !== "task:usage_updated" ||
-        taskUsagePayloadSchema.safeParse(value.payload).success),
+    (value) => {
+      if (value.type === "task:heartbeat") {
+        return taskHeartbeatPayloadSchema.safeParse(value.payload).success;
+      }
+      if (value.type === "task:usage_updated") {
+        return taskUsagePayloadSchema.safeParse(value.payload).success;
+      }
+      if (value.type === "task:activity" && value.payload !== undefined) {
+        return taskActivityPayloadSchema.safeParse(value.payload).success;
+      }
+      return true;
+    },
     { message: "Broadcast payload does not match the event type" },
   );
 

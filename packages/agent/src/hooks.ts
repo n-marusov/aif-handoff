@@ -1,6 +1,6 @@
 import { appendTaskActivityLog } from "@aif/data";
 import { logger, findMonorepoRootFromUrl, getEnv } from "@aif/shared";
-import { notifyTaskBroadcast } from "./notifier.js";
+import { broadcastTaskActivityProgress } from "./notifier.js";
 
 const log = logger("agent-hooks");
 
@@ -45,7 +45,7 @@ const flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Append new log lines to a task's agentActivityLog in the database and broadcast to UI. */
 function appendActivityLogToDb(taskId: string, newLines: string): void {
   appendTaskActivityLog(taskId, newLines);
-  void notifyTaskBroadcast(taskId, "task:activity");
+  broadcastTaskActivityProgress(taskId);
 }
 
 /**
