@@ -62,6 +62,7 @@ Returns frontend-visible defaults and runtime readiness metadata.
   "useSubagents": false,
   "maxReviewIterations": 3,
   "autoReviewStrategy": "full_re_review",
+  "agentActivitySilenceMs": 300000,
   "runtimeReadiness": {
     "availableRuntimeCount": 4,
     "runtimeProfileCount": 6,
@@ -1282,7 +1283,7 @@ Used by the agent process to trigger WebSocket broadcasts after updating a task.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `type` | string | `task:updated` | Event type: `task:updated`, `task:moved`, `task:activity`, `task:scheduled_fired`, `task:heartbeat`, or `task:usage_updated` |
-| `payload` | object | optional | Lightweight payload for `task:heartbeat` (`{ taskId, lastHeartbeatAt }`) or `task:usage_updated` (`{ taskId, projectId, usage }`). When omitted, the full task payload is broadcast. |
+| `payload` | object | optional | Lightweight payload for `task:heartbeat` (`{ taskId, lastHeartbeatAt }`), `task:usage_updated` (`{ taskId, projectId, usage }`), or `task:activity` (`{ taskId, lastActivityAt, currentTool }`). When omitted, the full task payload is broadcast. |
 
 **Response:** `200 OK`
 
