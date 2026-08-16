@@ -40,7 +40,9 @@ function isTrustedInternalPath(method: string, path: string): boolean {
     /^\/tasks\/[^/]+\/broadcast$/.test(path) ||
     /^\/projects\/[^/]+\/broadcast$/.test(path) ||
     /^\/projects\/[^/]+\/github\/sync$/.test(path) ||
-    /^\/projects\/[^/]+\/github\/tasks\/[^/]+\/publish$/.test(path)
+    /^\/projects\/[^/]+\/github\/tasks\/[^/]+\/publish$/.test(path) ||
+    /^\/projects\/[^/]+\/gitlab\/sync$/.test(path) ||
+    /^\/projects\/[^/]+\/gitlab\/tasks\/[^/]+\/publish$/.test(path)
   );
 }
 

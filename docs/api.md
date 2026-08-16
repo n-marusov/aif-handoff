@@ -748,10 +748,10 @@ The endpoint creates or updates one PR containing `Closes #<issue>`, implementat
 test evidence, and a no-auto-merge notice. Automated review feedback uses one marker
 comment updated only when its fingerprint changes. HTTP failures use structured
 `code`, status, and optional `retryAt` fields for authentication, access, validation, and
-rate-limit recovery. Agent calls to sync/publish must provide the
-`INTERNAL_BROADCAST_TOKEN` via `Authorization: Bearer <token>` or
-`X-Internal-Broadcast-Token` (401 otherwise, outside tests); browser calls use normal
-participant auth and CSRF rules.
+rate-limit recovery. In Participants Mode, sync/publish are admin-only and
+the agent may call them with the `INTERNAL_BROADCAST_TOKEN` via `Authorization: Bearer <token>`
+or `X-Internal-Broadcast-Token` (trusted-internal bypass); in legacy mode these routes follow
+the app-wide open-access model alongside the rest of the UI.
 
 ---
 
@@ -833,10 +833,10 @@ test evidence, and a no-auto-merge notice. Automated review feedback uses one ma
 carries the current approvals-derived review state (`approved`/`pending`) refreshed at
 publication time. HTTP failures use
 structured `code`, status, and optional `retryAt` fields for authentication, access,
-validation, and rate-limit recovery. Agent calls to sync/publish must provide the
-`INTERNAL_BROADCAST_TOKEN` via `Authorization: Bearer <token>` or
-`X-Internal-Broadcast-Token` (401 otherwise, outside tests); browser calls use normal
-participant auth and CSRF rules.
+validation, and rate-limit recovery. In Participants Mode, sync/publish are admin-only and
+the agent may call them with the `INTERNAL_BROADCAST_TOKEN` via `Authorization: Bearer <token>`
+or `X-Internal-Broadcast-Token` (trusted-internal bypass); in legacy mode these routes follow
+the app-wide open-access model alongside the rest of the UI.
 
 ---
 

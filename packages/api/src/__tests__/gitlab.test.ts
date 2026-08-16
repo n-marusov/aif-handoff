@@ -10,6 +10,8 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
 });
 
 const { gitlabRouter } = await import("../routes/gitlab.js");
+const { participantAuth } = await import("../middleware/participantAuth.js");
+const { participantRouteAuthorization } = await import("../middleware/requireRole.js");
 const { GitLabClient, findMergeRequestClosingIssue, issueIsEligible } =
   await import("../services/gitlab.js");
 const {
@@ -890,7 +892,7 @@ describe("GitLab project routes", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("requires the internal broadcast token for sync and publish when configured", async () => {
+  it("protects gitlab sync as admin-only and accepts the internal token in participants mode", async () => {
     upsertGitLabRepository({
       projectId: "project-1",
       namespace: "namespace",
@@ -902,14 +904,17 @@ describe("GitLab project routes", () => {
       enabled: true,
       gitPreparedAt: "2026-08-15T00:00:00.000Z",
     });
+    vi.stubEnv("PARTICIPANTS_MODE_ENABLED", "true");
     vi.stubEnv("INTERNAL_BROADCAST_TOKEN", "internal-secret");
     resetEnvCache();
     const app = new Hono();
+    app.use("*", participantAuth);
+    app.use("*", participantRouteAuthorization());
     app.route("/projects", gitlabRouter);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    // Without the token the sync must be rejected before any fetch.
+    // No session and no internal token → rejected before any upstream fetch.
     const unauthorized = await app.request("/projects/project-1/gitlab/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -918,8 +923,7 @@ describe("GitLab project routes", () => {
     expect(unauthorized.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    // With the token the sync passes auth and reaches the upstream (unmocked
-    // fetch → 502). A 401 here would mean the token was not accepted.
+    // Internal token → trusted-internal bypass, reaches the upstream (unmocked fetch → 502).
     const authorized = await app.request("/projects/project-1/gitlab/sync", {
       method: "POST",
       headers: {
