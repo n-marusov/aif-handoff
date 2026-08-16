@@ -18,7 +18,8 @@ vi.mock("@aif/shared", async (importOriginal) => {
 });
 
 const { resetEnvCache } = await import("@aif/shared");
-const { notifyTaskBroadcast } = await import("../notifier.js");
+const { notifyTaskBroadcast, notifyTaskHeartbeat, notifyTaskUsageBroadcast } =
+  await import("../notifier.js");
 
 describe("notifyTaskBroadcast", () => {
   const originalFetch = global.fetch;
@@ -49,6 +50,49 @@ describe("notifyTaskBroadcast", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("sends a heartbeat broadcast with a lightweight payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as any;
+
+    await notifyTaskHeartbeat("task-1", "2026-08-16T02:00:00.000Z");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3999/tasks/task-1/broadcast",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const options = fetchMock.mock.calls[0][1];
+    expect(JSON.parse(options?.body)).toEqual({
+      type: "task:heartbeat",
+      payload: { taskId: "task-1", lastHeartbeatAt: "2026-08-16T02:00:00.000Z" },
+    });
+  });
+
+  it("sends a task usage broadcast with a lightweight payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as any;
+
+    await notifyTaskUsageBroadcast("task-1", "project-1", {
+      inputTokens: 10,
+      outputTokens: 20,
+      totalTokens: 30,
+      costUsd: 0.01,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3999/tasks/task-1/broadcast",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const options = fetchMock.mock.calls[0][1];
+    expect(JSON.parse(options?.body)).toEqual({
+      type: "task:usage_updated",
+      payload: {
+        taskId: "task-1",
+        projectId: "project-1",
+        usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, costUsd: 0.01 },
+      },
+    });
   });
 
   it("uses default event type when omitted", async () => {

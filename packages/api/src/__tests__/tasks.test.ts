@@ -917,6 +917,89 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("emits a lightweight task:heartbeat payload", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-heartbeat", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-heartbeat/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Broadcast-Token": "internal-token",
+        },
+        body: JSON.stringify({
+          type: "task:heartbeat",
+          payload: { taskId: "broadcast-heartbeat", lastHeartbeatAt: "2026-08-16T02:00:00.000Z" },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(mockBroadcast)).toHaveBeenCalledWith({
+        type: "task:heartbeat",
+        payload: { taskId: "broadcast-heartbeat", lastHeartbeatAt: "2026-08-16T02:00:00.000Z" },
+      });
+    });
+
+    it("emits a task:usage_updated payload", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({ id: "broadcast-usage", projectId: "test-project", title: "Broadcast me" })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-usage/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Broadcast-Token": "internal-token",
+        },
+        body: JSON.stringify({
+          type: "task:usage_updated",
+          payload: {
+            taskId: "broadcast-usage",
+            projectId: "test-project",
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, costUsd: 0.01 },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(mockBroadcast)).toHaveBeenCalledWith({
+        type: "task:usage_updated",
+        payload: {
+          taskId: "broadcast-usage",
+          projectId: "test-project",
+          usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, costUsd: 0.01 },
+        },
+      });
+    });
+
+    it("rejects task:heartbeat without a valid payload", async () => {
+      const db = testDb.current;
+      mockInternalBroadcastToken.value = "internal-token";
+      db.insert(tasks)
+        .values({
+          id: "broadcast-heartbeat-invalid",
+          projectId: "test-project",
+          title: "Broadcast me",
+        })
+        .run();
+
+      const res = await app.request("/tasks/broadcast-heartbeat-invalid/broadcast", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Broadcast-Token": "internal-token",
+        },
+        body: JSON.stringify({ type: "task:heartbeat" }),
+      });
+
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("PUT /tasks/:id", () => {

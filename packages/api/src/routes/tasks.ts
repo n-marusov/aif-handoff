@@ -295,11 +295,11 @@ tasksRouter.post(
   jsonValidator(broadcastTaskSchema),
   async (c) => {
     const { id } = c.req.param();
-    const { type } = c.req.valid("json");
+    const { type, payload } = c.req.valid("json");
     const task = findTaskById(id);
     if (!task) return c.json({ error: "Task not found" }, 404);
 
-    broadcast({ type, payload: toTaskBroadcastPayload(task) });
+    broadcast({ type, payload: payload ?? toTaskBroadcastPayload(task) });
     log.debug({ taskId: id, type }, "Task WS broadcast triggered");
     return c.json({ success: true });
   },

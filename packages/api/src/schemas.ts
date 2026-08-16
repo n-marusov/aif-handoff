@@ -260,11 +260,44 @@ export const reorderTaskSchema = z.object({
   position: z.number(),
 });
 
-export const broadcastTaskSchema = z.object({
-  type: z
-    .enum(["task:updated", "task:moved", "task:activity", "task:scheduled_fired"])
-    .default("task:updated"),
+export const taskHeartbeatPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  lastHeartbeatAt: z.string().nullable(),
 });
+
+export const taskUsagePayloadSchema = z.object({
+  taskId: z.string().min(1),
+  projectId: z.string().min(1),
+  usage: z.object({
+    inputTokens: z.number(),
+    outputTokens: z.number(),
+    totalTokens: z.number(),
+    costUsd: z.number().optional(),
+  }),
+});
+
+export const broadcastTaskSchema = z
+  .object({
+    type: z
+      .enum([
+        "task:updated",
+        "task:moved",
+        "task:activity",
+        "task:scheduled_fired",
+        "task:heartbeat",
+        "task:usage_updated",
+      ])
+      .default("task:updated"),
+    payload: z.union([taskHeartbeatPayloadSchema, taskUsagePayloadSchema]).optional(),
+  })
+  .refine(
+    (value) =>
+      (value.type !== "task:heartbeat" ||
+        taskHeartbeatPayloadSchema.safeParse(value.payload).success) &&
+      (value.type !== "task:usage_updated" ||
+        taskUsagePayloadSchema.safeParse(value.payload).success),
+    { message: "Broadcast payload does not match the event type" },
+  );
 
 export const autoQueueModeSchema = z.object({
   enabled: z.boolean(),

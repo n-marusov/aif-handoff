@@ -96,10 +96,10 @@ export async function notifyProjectRuntimeLimitBroadcast(
   }
 }
 
-export async function notifyTaskBroadcast(
+async function postTaskBroadcast(
   taskId: string,
-  type: BroadcastType = "task:updated",
-  info: TaskNotificationInfo = {},
+  body: Record<string, unknown>,
+  context: Record<string, unknown> = {},
 ): Promise<void> {
   const baseUrl = getEnv().API_BASE_URL;
   const url = `${baseUrl}/tasks/${taskId}/broadcast`;
@@ -108,21 +108,29 @@ export async function notifyTaskBroadcast(
     const res = await fetch(url, {
       method: "POST",
       headers: internalApiHeaders(),
-      body: JSON.stringify({ type }),
+      body: JSON.stringify(body),
     });
 
     if (res.ok) {
-      log.info({ taskId, type, toStatus: info.toStatus }, "Task broadcast sent");
+      log.info({ taskId, type: body.type, ...context }, "Task broadcast sent");
     } else {
       log.warn(
-        { taskId, type, status: res.status, url },
+        { taskId, type: body.type, status: res.status, url },
         "Task broadcast request returned non-OK status",
       );
     }
   } catch (err) {
     // Broadcast is best-effort. Agent processing must not fail because API is unavailable.
-    log.warn({ taskId, type, err, url }, "Task broadcast request failed");
+    log.warn({ taskId, type: body.type, err, url }, "Task broadcast request failed");
   }
+}
+
+export async function notifyTaskBroadcast(
+  taskId: string,
+  type: BroadcastType = "task:updated",
+  info: TaskNotificationInfo = {},
+): Promise<void> {
+  await postTaskBroadcast(taskId, { type }, { toStatus: info.toStatus });
 
   // Best-effort Telegram notification — fire and forget.
   // Skip Telegram for activity-only broadcasts (too noisy).
@@ -139,4 +147,31 @@ export async function notifyTaskBroadcast(
       toStatus: info.toStatus,
     });
   }
+}
+
+export async function notifyTaskHeartbeat(taskId: string, lastHeartbeatAt: string): Promise<void> {
+  await postTaskBroadcast(
+    taskId,
+    { type: "task:heartbeat", payload: { taskId, lastHeartbeatAt } },
+    { lastHeartbeatAt },
+  );
+}
+
+export interface TaskUsageNotification {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd?: number;
+}
+
+export async function notifyTaskUsageBroadcast(
+  taskId: string,
+  projectId: string,
+  usage: TaskUsageNotification,
+): Promise<void> {
+  await postTaskBroadcast(
+    taskId,
+    { type: "task:usage_updated", payload: { taskId, projectId, usage } },
+    { projectId, usage },
+  );
 }

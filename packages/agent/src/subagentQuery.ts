@@ -53,7 +53,11 @@ import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./
 import { createStderrCollector } from "./stderrCollector.js";
 import { writeQueryAudit } from "./queryAudit.js";
 import { getActiveStageAbortController } from "./stageAbort.js";
-import { notifyProjectRuntimeLimitBroadcast } from "./notifier.js";
+import {
+  notifyProjectRuntimeLimitBroadcast,
+  notifyTaskHeartbeat,
+  notifyTaskUsageBroadcast,
+} from "./notifier.js";
 
 const log = logger("subagent-query");
 
@@ -88,7 +92,16 @@ function notifyRuntimeUsageRefresh(input: {
   projectId?: string | null;
   runtimeProfileId?: string | null;
   taskId?: string | null;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    costUsd?: number;
+  } | null;
 }): void {
+  if (input.taskId && input.projectId && input.usage) {
+    void notifyTaskUsageBroadcast(input.taskId, input.projectId, input.usage);
+  }
   if (!input.projectId || !input.runtimeProfileId) {
     return;
   }
@@ -493,6 +506,7 @@ async function getRuntimeRegistry(): Promise<RuntimeRegistry> {
           projectId: event.context.projectId ?? null,
           runtimeProfileId: event.profileId ?? null,
           taskId: event.context.taskId ?? null,
+          usage: event.usage ?? null,
         });
       },
     }),
@@ -1307,7 +1321,8 @@ export function setCoordinatorId(id: string): void {
 /** Start a periodic heartbeat that updates the task's lastHeartbeatAt and renews the lock. */
 export function startHeartbeat(taskId: string): NodeJS.Timeout {
   return setInterval(() => {
-    updateTaskHeartbeat(taskId);
+    const lastHeartbeatAt = updateTaskHeartbeat(taskId);
+    void notifyTaskHeartbeat(taskId, lastHeartbeatAt);
     if (_coordinatorId) {
       renewTaskClaim(taskId, _coordinatorId, getLockRenewalMs());
     }
