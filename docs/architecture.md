@@ -526,6 +526,8 @@ Agent tool events are tracked in each task's `agentActivityLog` field. Two modes
 
 Every activity event also stamps the task's `lastActivityAt` (tool completion, subagent start, or in-flight tool start). `startHeartbeat` does **not** touch `lastActivityAt` — it only renews `lastHeartbeatAt`. This separation lets the UI distinguish "working" (recent activity) from "hung" (alive but silent for longer than `AGENT_ACTIVITY_SILENCE_MS`, default 5 min). An in-flight tool (`currentTool`) keeps the task "working" even while a long-running command (e.g. `pnpm install`) has no completion yet. `task:activity` broadcasts carry `{ taskId, lastActivityAt, currentTool }` so the board patches cached cards without a full refetch. In-flight tracking is effective where the transport emits tool-start events (SDK/app-server); opaque CLI/API transports rely on completion recency.
 
+The task-detail header renders one **persistent** status element for in-progress tasks: a small pulse/triangle (working vs hung) next to the status badge plus a muted `working · Ns` line while the agent is active. The element stays mounted for the whole working state (only the `· Ns` duration ticks), so it never flickers as tools start/end; the low-level tool name is intentionally not surfaced.
+
 ## Task Read Models
 
 The API separates task list reads from task detail reads to keep project board

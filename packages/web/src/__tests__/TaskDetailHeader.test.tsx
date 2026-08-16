@@ -5,9 +5,10 @@ import { TaskDetailHeader } from "@/components/task/TaskDetailHeader";
 
 vi.mock("@/hooks/useTaskProgress", () => ({
   useTaskProgress: vi.fn(() => "idle"),
+  useInFlightSeconds: vi.fn(() => null),
 }));
 
-const { useTaskProgress } = await import("@/hooks/useTaskProgress");
+const { useTaskProgress, useInFlightSeconds } = await import("@/hooks/useTaskProgress");
 
 const baseTask: Task = {
   id: "hdr-1",
@@ -121,8 +122,9 @@ describe("TaskDetailHeader", () => {
     expect(screen.getByLabelText("Hung")).toBeDefined();
   });
 
-  it("shows an in-flight tool line when a tool is running", () => {
+  it("shows a persistent muted working line with live duration when a tool is running", () => {
     vi.mocked(useTaskProgress).mockReturnValue("working");
+    vi.mocked(useInFlightSeconds).mockReturnValue(12);
     render(
       <TaskDetailHeader
         task={{
@@ -140,7 +142,50 @@ describe("TaskDetailHeader", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText(/running: Bash/)).toBeDefined();
+    expect(screen.getByText("working")).toBeDefined();
+    expect(screen.getByText(/· 12s/)).toBeDefined();
+    // The low-level tool name must not leak into the header.
+    expect(screen.queryByText(/Bash/)).toBeNull();
+  });
+
+  it("keeps the working line mounted without a number when no tool is in flight", () => {
+    vi.mocked(useTaskProgress).mockReturnValue("working");
+    vi.mocked(useInFlightSeconds).mockReturnValue(null);
+    render(
+      <TaskDetailHeader
+        task={{ ...baseTask, status: "implementing", lastActivityAt: new Date().toISOString() }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+    // The element stays mounted (no flicker) even though the tool toggled off.
+    expect(screen.getByText("working")).toBeDefined();
+    expect(screen.queryByText(/· /)).toBeNull();
+  });
+
+  it("renders no status text line for a hung task (triangle only)", () => {
+    vi.mocked(useTaskProgress).mockReturnValue("hung");
+    render(
+      <TaskDetailHeader
+        task={{ ...baseTask, status: "implementing", lastActivityAt: null }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Hung")).toBeDefined();
+    expect(screen.queryByText("working")).toBeNull();
   });
 
   it("blinks the robot indicator when a task:usage_updated event fires", () => {

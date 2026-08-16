@@ -27,6 +27,27 @@ function useNow(intervalMs: number): number {
 }
 
 /**
+ * Live seconds elapsed since `startedAt` (per-second tick). Returns null when
+ * `startedAt` is not set so consumers can render a number only while a tool is
+ * actually in flight. Cleared on unmount / when startedAt becomes null.
+ */
+export function useInFlightSeconds(startedAt: string | null | undefined): number | null {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!startedAt) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+
+  if (!startedAt) return null;
+  const ms = now - new Date(startedAt).getTime();
+  if (Number.isNaN(ms) || ms < 0) return null;
+  return Math.floor(ms / 1000);
+}
+
+/**
  * Derive a task's visual progress state from its activity freshness and any
  * in-flight tool. `lastActivityAt` is updated ONLY by activity events (tool
  * completion, subagent start, tool start) — the heartbeat does not count, so

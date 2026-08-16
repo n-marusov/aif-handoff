@@ -11,15 +11,13 @@ import { Tabs } from "@/components/ui/tabs";
 import { AlertBox } from "@/components/ui/alert-box";
 import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
 import { useUsageLimitsEnabled, useQaPipelineEnabled } from "@/hooks/useSettings";
-import { useTaskProgress } from "@/hooks/useTaskProgress";
+import { useTaskProgress, useInFlightSeconds } from "@/hooks/useTaskProgress";
 import { HeartbeatIndicator } from "@/components/ui/heartbeat-indicator";
 import { RobotBlink } from "@/components/ui/robot-blink";
 import { TaskOwnershipSummary } from "./TaskOwnership";
 
-function inFlightDuration(startedAt: string): string {
-  const ms = Date.now() - new Date(startedAt).getTime();
-  if (Number.isNaN(ms) || ms < 0) return "…";
-  const s = Math.floor(ms / 1000);
+function formatElapsedSeconds(totalSeconds: number): string {
+  const s = Math.floor(totalSeconds);
   const m = Math.floor(s / 60);
   return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
 }
@@ -145,6 +143,7 @@ export function TaskDetailHeader({
   const usageLimitsEnabled = useUsageLimitsEnabled();
   const qaPipelineEnabled = useQaPipelineEnabled();
   const progress = useTaskProgress(task.status, task.lastActivityAt, task.currentTool);
+  const inFlightSeconds = useInFlightSeconds(task.currentTool?.startedAt);
   const tabItems = [
     { value: "implementation", label: "Implementation" },
     { value: "review", label: "Review" },
@@ -231,12 +230,12 @@ export function TaskDetailHeader({
             cost: {formatUsd(task.costUsd)}
           </Badge>
         </div>
-        {task.currentTool && (
-          <div className="mb-2 inline-flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300">
-            <span className="font-medium">running: {task.currentTool.name}</span>
-            <span className="text-muted-foreground">
-              ({inFlightDuration(task.currentTool.startedAt)})
-            </span>
+        {progress === "working" && (
+          <div className="mb-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">working</span>
+            {inFlightSeconds != null && task.currentTool ? (
+              <span> · {formatElapsedSeconds(inFlightSeconds)}</span>
+            ) : null}
           </div>
         )}
         <TaskOwnershipSummary executionOwner={task.executionOwner} assignees={task.assignees} />
