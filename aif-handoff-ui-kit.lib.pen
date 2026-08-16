@@ -4044,6 +4044,71 @@
         },
         {
           "type": "frame",
+          "id": "HzHb1",
+          "name": "Component/HeartbeatIndicator/Running",
+          "reusable": true,
+          "gap": 4,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "HzHb2",
+              "name": "heartbeatDotRunning",
+              "fill": "$success",
+              "width": 8,
+              "height": 8
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "HzHb3",
+          "name": "Component/HeartbeatIndicator/Stalled",
+          "reusable": true,
+          "gap": 4,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "HzHb4",
+              "name": "heartbeatIconStalled",
+              "width": 16,
+              "height": 16,
+              "icon": "triangle-alert",
+              "library": "lucide",
+              "fill": "$destructive"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "HzRb1",
+          "name": "Component/RobotBlink",
+          "reusable": true,
+          "width": 20,
+          "height": 20,
+          "fill": "$card",
+          "stroke": "$border",
+          "strokeWidth": 1,
+          "strokeAlignment": "inner",
+          "cornerRadius": 10,
+          "alignItems": "center",
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "HzRb2",
+              "name": "robotBlinkIcon",
+              "width": 12,
+              "height": 12,
+              "icon": "bot",
+              "library": "lucide",
+              "fill": "$muted-foreground"
+            }
+          ]
+        },
+        {
+          "type": "frame",
           "id": "AwohF",
           "name": "Component/EmptyState",
           "reusable": true,

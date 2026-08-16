@@ -3,6 +3,12 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import type { Task } from "@aif/shared/browser";
 import { TaskDetailHeader } from "@/components/task/TaskDetailHeader";
 
+vi.mock("@/hooks/useTaskLiveness", () => ({
+  useTaskLiveness: vi.fn(() => "idle"),
+}));
+
+const { useTaskLiveness } = await import("@/hooks/useTaskLiveness");
+
 const baseTask: Task = {
   id: "hdr-1",
   projectId: "proj-1",
@@ -77,6 +83,53 @@ describe("TaskDetailHeader", () => {
     );
     expect(screen.getByText("Header Test Task")).toBeDefined();
     expect(screen.getByText("Plan Ready")).toBeDefined();
+  });
+
+  it("renders a heartbeat indicator for an in-progress task", () => {
+    vi.mocked(useTaskLiveness).mockReturnValue("running");
+    render(
+      <TaskDetailHeader
+        task={{ ...baseTask, status: "implementing", lastHeartbeatAt: new Date().toISOString() }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Running")).toBeDefined();
+  });
+
+  it("blinks the robot indicator when a task:usage_updated event fires", () => {
+    render(
+      <TaskDetailHeader
+        task={baseTask}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent(
+      window,
+      new CustomEvent("task:usage_updated", {
+        detail: {
+          taskId: "hdr-1",
+          projectId: "proj-1",
+          usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        },
+      }),
+    );
+
+    expect(screen.getByLabelText("Usage updated")).toBeDefined();
   });
 
   it("should render priority badge", () => {

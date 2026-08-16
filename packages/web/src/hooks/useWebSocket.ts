@@ -63,6 +63,27 @@ function hasTaskIdPayload(value: unknown): value is { taskId: string } {
   return isRecord(value) && typeof value.taskId === "string";
 }
 
+function hasTaskHeartbeatPayload(
+  value: unknown,
+): value is { taskId: string; lastHeartbeatAt: string | null } {
+  return (
+    isRecord(value) &&
+    typeof value.taskId === "string" &&
+    (value.lastHeartbeatAt === null || typeof value.lastHeartbeatAt === "string")
+  );
+}
+
+function hasTaskUsagePayload(
+  value: unknown,
+): value is { taskId: string; projectId: string; usage: Record<string, unknown> } {
+  return (
+    isRecord(value) &&
+    typeof value.taskId === "string" &&
+    typeof value.projectId === "string" &&
+    isRecord(value.usage)
+  );
+}
+
 function invalidateRuntimeLimitQueries(
   queryClient: QueryClient,
   payload: { projectId: string; taskId?: string | null },
@@ -294,6 +315,30 @@ export function useWebSocket(enabled = true) {
             });
           }
         }
+      }
+
+      // Heartbeat: patch cached card/task lastHeartbeatAt without refetching the board.
+      if (data.type === "task:heartbeat" && hasTaskHeartbeatPayload(data.payload)) {
+        const { taskId, lastHeartbeatAt } = data.payload;
+        queryClient.setQueryData<Task>(["task", taskId], (current) =>
+          current ? { ...current, lastHeartbeatAt } : current,
+        );
+        const taskLists = queryClient.getQueriesData<TaskListItem[]>({ queryKey: ["tasks"] });
+        for (const [queryKey, list] of taskLists) {
+          if (!list) continue;
+          queryClient.setQueryData(
+            queryKey,
+            list.map((item) => (item.id === taskId ? { ...item, lastHeartbeatAt } : item)),
+          );
+        }
+        return;
+      }
+
+      // Usage update: refresh only the open task detail and notify the blink indicator.
+      if (data.type === "task:usage_updated" && hasTaskUsagePayload(data.payload)) {
+        queryClient.invalidateQueries({ queryKey: ["task", data.payload.taskId] });
+        window.dispatchEvent(new CustomEvent("task:usage_updated", { detail: data.payload }));
+        return;
       }
 
       // Activity-only update: refresh task detail without touching the board list

@@ -11,6 +11,9 @@ import { Tabs } from "@/components/ui/tabs";
 import { AlertBox } from "@/components/ui/alert-box";
 import { getRuntimeLimitDisplay } from "@/lib/runtimeLimits";
 import { useUsageLimitsEnabled, useQaPipelineEnabled } from "@/hooks/useSettings";
+import { useTaskLiveness } from "@/hooks/useTaskLiveness";
+import { HeartbeatIndicator } from "@/components/ui/heartbeat-indicator";
+import { RobotBlink } from "@/components/ui/robot-blink";
 import { TaskOwnershipSummary } from "./TaskOwnership";
 
 export type TaskDetailTab =
@@ -133,6 +136,7 @@ export function TaskDetailHeader({
   );
   const usageLimitsEnabled = useUsageLimitsEnabled();
   const qaPipelineEnabled = useQaPipelineEnabled();
+  const liveness = useTaskLiveness(task.status, task.lastHeartbeatAt);
   const tabItems = [
     { value: "implementation", label: "Implementation" },
     { value: "review", label: "Review" },
@@ -158,6 +162,7 @@ export function TaskDetailHeader({
       <SheetClose onClose={onClose} />
       <SheetHeader className="mb-3">
         <div className="mb-1 flex items-center gap-2">
+          <HeartbeatIndicator liveness={liveness} />
           <Badge size="sm" style={statusColorStyle(task.status)}>
             {STATUS_CONFIG[task.status].label}
           </Badge>
@@ -204,6 +209,7 @@ export function TaskDetailHeader({
           </div>
         )}
         <div className="mb-2 flex flex-wrap gap-1.5">
+          <RobotBlink />
           <Badge variant="outline" size="sm">
             in: {formatTokenCount(task.tokenInput)}
           </Badge>
