@@ -1,37 +1,38 @@
 # Research
 
-Updated: 2026-08-16 01:51
+Updated: 2026-08-16 04:01
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: Live GUI feedback — Kanban heartbeat animation + real-time token/cost counters in task detail
+Topic: Task progress indication — "working vs hung" detection for executing tasks
 
-Goal: Make the board visibly show that tasks are actively executing, and update token/cost counters in the task detail instantly as usage is recorded. Explicitly exclude LLM reasoning/thinking streaming.
+Goal: Let the user reliably see that an agent is actively working rather than hung. Loop detection is a separate concern; percentage progress is out of scope (only meaningful for implementing/review stages where a denominator exists).
 
-Scope: (1) Heartbeat pulse on Kanban cards and the task-detail header. (2) Instant run-boundary token/cost updates in the detail header (option 2a). No mid-run incremental token counting, no reasoning console.
+Scope: (1) Server-side `lastActivityAt` column (survives F5) written only on activity events (tool completion, subagent start, and in-flight tool start). `startHeartbeat` must NOT write it. (2) In-flight `currentTool` tracking (tool START via `onEvent` `tool:use`; cleared on completion) so long-running commands (pnpm install/build) are not misread as hung. (3) UI indicator: "working · 12s" vs "hung · no activity for Nm" (danger), driven by `lastActivityAt` with a 5-minute threshold.
 
 Key decisions:
-- Heartbeat: add `lastHeartbeatAt` to `TaskListItem` + `listTaskListItems()` projection. Emit `task:heartbeat { taskId, lastHeartbeatAt }` from `startHeartbeat`. Patch cached card/task via `setQueryData` (NOT a full `tasks` invalidation) to avoid refetch + `updatedAt` resort churn.
-- Running indicator = status in {planning, improve, implementing, review, verify} AND `lastHeartbeatAt` fresh. Staleness threshold = `AGENT_STAGE_STALE_TIMEOUT_MS` (default 90 min) — same as the coordinator watchdog.
-- Token/cost: reuse run-boundary usage. Emit `task:usage_updated { taskId, projectId, usage: RuntimeUsage }` from the usage sink `onRecorded`; patch `task.tokenInput/Output/Total/costUsd` directly instead of the current `project:runtime_limit_updated` full-refetch over-invalidation.
-- Visual for counter updates: a small "robot blink"/activity indicator, not number animation.
-- No LLM reasoning/thinking text surfaced.
+- Silence threshold = 5 min, new env/config `AGENT_ACTIVITY_SILENCE_MS` (NOT `AGENT_STAGE_STALE_TIMEOUT_MS`, which stays 90 min for server auto-recovery).
+- `lastActivityAt` is a new append-only schema migration column on `tasks`, exposed via `TaskListItem`/`Task` + WS (`task:activity` carries it or a new `task:progress` event).
+- In-flight: log `tool:use` START (`onEvent`) into `currentTool {name, startedAt}`; clear on completion. Transport caveat: CLI is opaque (no START events) — in-flight only for SDK/app-server; CLI relies on completion recency.
+- Heartbeat remains the liveness signal only; it must not count as activity.
+- Loop detection (repetition of the same tool template) — SEPARATE feature, out of this scope.
+- Per-stage % — only meaningful for implementing (plan checkboxes `- [x] Task N`) and review (files covered / files in commit); deferred.
 
 Constraints:
-- No schema migration (columns already exist; only read projection changes).
-- New visuals (heartbeat pulse, robot blink) must be synced with Pencil (.pen).
-- No expensive CSS (opacity/transform only; no box-shadow/blur/backdrop-filter).
-- Theme color pairing → docs/ui-theme-colors.md.
+- Migration versions are append-only (new version; never edit an existing one).
 - DB boundary: api/agent/runtime via @aif/data only.
+- New visuals (hung icon) synced with Pencil (.pen).
+- No expensive CSS (opacity/transform only).
+- Theme color pairing → docs/ui-theme-colors.md.
 - Every package >=70% coverage; finish with `npm run ai:validate`.
 
 Success signals:
-- Kanban cards pulse while running and turn "stalled" after `AGENT_STAGE_STALE_TIMEOUT_MS` without a heartbeat.
-- Task detail header shows the same pulse plus a "robot blink" when token/cost counters update.
-- Token/cost counters in the open detail update with no manual refresh and no full board refetch.
+- A hung task (no activity for >5 min) shows a danger "hung" state even while the heartbeat is fresh.
+- A long-running command (tool START, no completion yet) shows "running <tool> (<duration>)" and is NOT flagged hung.
+- The state survives page refresh (server column).
 
-Next step: /aif-plan fast (or full) for scope (1) + (2a)
+Next step: /aif-plan (fast or full) for the working-vs-hung slice (`lastActivityAt` + in-flight + UI)
 <!-- aif:active-summary:end -->
 
 ## Sessions
@@ -197,6 +198,21 @@ Links (paths):
 - packages/agent/src/notifier.ts (broadcast helpers)
 - packages/web/src/hooks/useWebSocket.ts (WS handler)
 - packages/web/src/components/kanban/TaskCard.tsx, packages/web/src/components/task/TaskDetailHeader.tsx
+
+### 2026-08-16 04:01 — Task progress indication: working vs hung
+What changed: Explored how to tell that an agent is actively working rather than hung. Decided: dedicated server `lastActivityAt` + in-flight tool tracking + 5-minute silence threshold; loop detection and per-stage % are separate/deferred.
+Key notes:
+- `lastHeartbeatAt` is conflated: `startHeartbeat` (30s) AND `appendTaskActivityLog` both write it → the UI cannot distinguish "alive" from "working".
+- Root cause of the "suspiciously long" task (#1 Рефакторинг, review stage): the review agent on Codex CLI looped `git diff a245fef^ a245fef -- <file>` for ~25 min; the heartbeat stayed green because the process was alive; ~40M input tokens, `costUsd=0`.
+- Best practices: determinate % only where a denominator exists; "current step" is more valuable than %; structured event streaming (tool-call start/end) is the industry standard; recency + in-flight for "is it working"; loop detection is emerging agent-reliability practice.
+- Decisions: threshold = 5 min (`AGENT_ACTIVITY_SILENCE_MS`, new); server `lastActivityAt` column (survives F5); in-flight `currentTool` now (SDK/app-server only; CLI opaque); loop detection separate.
+Links (paths):
+- packages/agent/src/subagentQuery.ts (startHeartbeat, onEvent, onToolUse wiring)
+- packages/agent/src/hooks.ts (appendActivityLogToDb, createActivityLogger, createSubagentLogger)
+- packages/data/src/index.ts (appendTaskActivityLog — writes lastHeartbeatAt today)
+- packages/shared/src/db.ts (migration append-only)
+- packages/web/src/hooks/useTaskLiveness.ts (current running indicator)
+- packages/web/src/hooks/useWebSocket.ts (task:activity handling)
 
 <!-- aif:sessions:end -->
 
