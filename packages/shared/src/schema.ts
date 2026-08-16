@@ -385,6 +385,7 @@ export const gitlabIssues = sqliteTable(
     mrChecksStatus: text("mr_checks_status").$type<"pending" | "success" | "failure" | null>(),
     reviewState: text("review_state").$type<"pending" | "approved" | null>(),
     reviewFingerprint: text("review_fingerprint"),
+    lastReviewNoteId: integer("last_review_note_id"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),

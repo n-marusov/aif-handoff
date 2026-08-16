@@ -286,6 +286,40 @@ describe("GitLab client", () => {
     expect(String(putCalls[0]![0])).toContain("/notes/99");
   });
 
+  it("lists merge request notes including system review records", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          id: 3691116788,
+          body: "requested changes",
+          author: { username: "nikomaru" },
+          created_at: "2026-08-16T07:42:03.778Z",
+          updated_at: "2026-08-16T07:42:03.778Z",
+          system: true,
+          type: null,
+        },
+        {
+          id: 3691116776,
+          body: "Auto Review Gate Summary",
+          author: { username: "nikomaru" },
+          created_at: "2026-08-16T07:42:03.371Z",
+          updated_at: "2026-08-16T07:42:03.371Z",
+          system: false,
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new GitLabClient("secret", "https://gitlab.com/api/v4");
+    const notes = await client.listMergeRequestNotes("namespace", "repo", 7);
+
+    expect(notes).toHaveLength(2);
+    const requestedChanges = notes.find((note) => note.id === 3691116788);
+    expect(requestedChanges?.system).toBe(true);
+    expect(requestedChanges?.body).toBe("requested changes");
+    expect(notes.find((note) => note.id === 3691116776)?.system).toBe(false);
+  });
+
   it("rejects an issue when labels, assignee, or milestone do not match eligibility", () => {
     const issue = {
       id: 1,

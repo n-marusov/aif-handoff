@@ -48,6 +48,9 @@ interface GitLabNoteResponse {
   author: { username: string } | null;
   created_at: string;
   updated_at: string;
+  /** Auto-generated record marker (state changes, review actions, etc.). */
+  system?: boolean;
+  type?: string | null;
 }
 
 export interface GitLabMergeRequestResponse {

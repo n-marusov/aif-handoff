@@ -202,6 +202,7 @@ export interface GitLabIssueLink {
   mrState: "open" | "closed" | "merged" | null;
   mrChecksStatus: "pending" | "success" | "failure" | null;
   reviewState: "pending" | "approved" | null;
+  lastReviewNoteId: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -1140,6 +1140,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks ADD COLUMN current_tool_json TEXT;
     `,
   },
+  {
+    version: 32,
+    description: "Track last-processed GitLab review note id for request-changes edge trigger",
+    sql: `
+      ALTER TABLE gitlab_issues ADD COLUMN last_review_note_id INTEGER;
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

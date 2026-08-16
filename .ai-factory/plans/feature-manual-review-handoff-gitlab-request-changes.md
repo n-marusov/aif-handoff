@@ -72,7 +72,7 @@ Success signals:
 
 ### Path 3 — GitLab "request changes" → rework (feature)
 
-- [ ] Task 2: Add `system` to the GitLab note response model.
+- [x] Task 2: Add `system` to the GitLab note response model.
   Files to create/modify:
   - `packages/api/src/services/gitlab.ts` — add `system?: boolean` (and `type?: string | null` for future use) to `GitLabNoteResponse` (currently only `id`, `body`, `author`, `created_at`, `updated_at`). `listMergeRequestNotes` already exists and is used by `upsertMarkerNote` — no new client method needed.
   - Tests: `packages/api/src/__tests__/gitlab.test.ts` — type/contract guard: a note parsed from the API can carry `system: true` (extend an existing client test or add a small parse assertion).
@@ -80,7 +80,7 @@ Success signals:
   Deliverable: `GitLabNoteResponse.system` is available to sync logic.
   LOGGING REQUIREMENTS: n/a (type only).
 
-- [ ] Task 3: Persist `last_review_note_id` on `gitlab_issues`.
+- [x] Task 3: Persist `last_review_note_id` on `gitlab_issues`.
   Files to create/modify:
   - `packages/shared/src/schema.ts` — add `lastReviewNoteId: integer("last_review_note_id")` to the `gitlabIssues` table definition.
   - `packages/shared/src/db.ts` — append migration **version 32** (append-only; do NOT touch existing entries): `ALTER TABLE gitlab_issues ADD COLUMN last_review_note_id INTEGER;`

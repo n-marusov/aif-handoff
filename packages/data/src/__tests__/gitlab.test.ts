@@ -214,4 +214,46 @@ describe("GitLab issue import", () => {
     expect(pending?.reviewState).toBe("pending");
     expect(imported.taskId).toBeTruthy();
   });
+
+  it("persists and round-trips the last-processed review note id", () => {
+    const imported = importGitLabIssueTask(input);
+    expect(imported.taskId).toBeTruthy();
+
+    const before = findGitLabIssueByTaskId(imported.taskId);
+    expect(before?.lastReviewNoteId).toBeNull();
+
+    const updated = updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 42,
+      mrIid: 7,
+      mrUrl: "https://gitlab.com/gitlab-org/example/-/merge_requests/7",
+      mrState: "open",
+      reviewState: "approved",
+      lastReviewNoteId: 3691116788,
+    });
+
+    expect(updated?.lastReviewNoteId).toBe(3691116788);
+    expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBe(3691116788);
+
+    // Absent value leaves the stored id unchanged.
+    updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 42,
+      mrIid: 7,
+      mrUrl: "https://gitlab.com/gitlab-org/example/-/merge_requests/7",
+      mrState: "open",
+    });
+    expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBe(3691116788);
+
+    // Explicit null clears it.
+    updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 42,
+      mrIid: 7,
+      mrUrl: "https://gitlab.com/gitlab-org/example/-/merge_requests/7",
+      mrState: "open",
+      lastReviewNoteId: null,
+    });
+    expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBeNull();
+  });
 });

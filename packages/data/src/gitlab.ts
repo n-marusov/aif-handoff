@@ -91,6 +91,7 @@ function toIssueLink(row: GitLabIssueRow): GitLabIssueLink {
     mrState: row.mrState,
     mrChecksStatus: row.mrChecksStatus,
     reviewState: row.reviewState,
+    lastReviewNoteId: row.lastReviewNoteId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -490,6 +491,7 @@ export function updateGitLabMergeRequest(input: {
   mrChecksStatus?: "pending" | "success" | "failure" | null;
   reviewState?: "pending" | "approved" | null;
   reviewFingerprint?: string | null;
+  lastReviewNoteId?: number | null;
 }): GitLabIssueLink | undefined {
   const now = new Date().toISOString();
   getDb()
@@ -501,6 +503,9 @@ export function updateGitLabMergeRequest(input: {
       ...(input.mrChecksStatus !== undefined ? { mrChecksStatus: input.mrChecksStatus } : {}),
       ...(input.reviewState !== undefined ? { reviewState: input.reviewState } : {}),
       ...(input.reviewFingerprint !== undefined ? { reviewFingerprint: input.reviewFingerprint } : {}),
+      ...(input.lastReviewNoteId !== undefined
+        ? { lastReviewNoteId: input.lastReviewNoteId }
+        : {}),
       syncError: null,
       lastSyncedAt: now,
       updatedAt: now,
