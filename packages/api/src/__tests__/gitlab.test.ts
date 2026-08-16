@@ -1171,6 +1171,33 @@ describe("GitLab project routes", () => {
     const afterThird = findTaskById(imported.taskId);
     expect(afterThird?.status).toBe("implementing");
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
+
+    // Case/whitespace variant of the note body must still be detected: put the
+    // task back into done, then sync with a capitalized note and a fresh id.
+    updateTaskStatus(
+      imported.taskId,
+      "done",
+      {},
+      { kind: "system", id: "test", displayNameSnapshot: "Test" },
+    );
+    const variantNote = { ...requestedChangesNote, id: 3691116799, body: "  Requested Changes  " };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(issueList)) // listIssues
+        .mockResolvedValueOnce(jsonResponse([])) // issue notes
+        .mockResolvedValueOnce(jsonResponse(mergeRequest)) // getMergeRequest
+        .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] })) // approvals
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+        .mockResolvedValueOnce(jsonResponse([variantNote])), // MR notes
+    );
+    await syncRequest();
+
+    const afterVariant = findTaskById(imported.taskId);
+    expect(afterVariant?.status).toBe("implementing");
+    expect(afterVariant?.reworkRequested).toBe(true);
+    expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116799);
   });
 
   it("returns 404 when publishing for an unlinked task", async () => {

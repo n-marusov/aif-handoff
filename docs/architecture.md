@@ -199,8 +199,9 @@ review notes carry a `<!-- aif-gitlab-review -->` marker updated only when the f
 changes.
 
 `Done` is the terminal **MR ready for human decision** state in this mode. The coordinator
-never merges and the web UI does not offer local approve/request-change actions for these
-tasks. Review state is approvals-only: `approved` when the MR approvals endpoint reports
+never merges and the web UI does not offer local approve/request-change actions for MR-ready
+`done` tasks (the human decides on the MR itself; a `done`-status GitLab task is resolved via
+merge on GitLab). Review state is approvals-only: `approved` when the MR approvals endpoint reports
 `approved=true`, otherwise `pending`. A merged MR advances a MR-ready `Done` task to
 `Verified`; a closed unmerged MR pauses its task. A GitLab "Request changes" review action
 is detected from the MR notes API (system note body `requested changes` — Free tier does

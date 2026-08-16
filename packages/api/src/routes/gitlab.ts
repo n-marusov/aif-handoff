@@ -265,18 +265,11 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           mr.iid,
         );
         const requestChangesNote = mrNotes
-          .filter((note) => note.system && note.body?.trim() === "requested changes")
+          .filter(
+            (note) => note.system && note.body?.trim().toLowerCase().includes("requested changes"),
+          )
           .sort((a, b) => b.id - a.id)[0];
-        const mergeRequestUpdate: {
-          projectId: string;
-          iid: number;
-          mrIid: number;
-          mrUrl: string;
-          mrState: "open" | "closed" | "merged";
-          mrChecksStatus?: "pending" | "success" | "failure" | null;
-          reviewState?: "pending" | "approved" | null;
-          lastReviewNoteId?: number | null;
-        } = {
+        const mergeRequestUpdate: Parameters<typeof updateGitLabMergeRequest>[0] = {
           projectId,
           iid: issue.iid,
           mrIid: mr.iid,
@@ -289,7 +282,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           mergeRequestUpdate.lastReviewNoteId = requestChangesNote.id;
         }
         updateGitLabMergeRequest(mergeRequestUpdate);
-        const task = findTaskById(result.taskId);
+        let task = findTaskById(result.taskId);
         const discoveredMrNeedsDone =
           closingMr && task && task.status !== "done" && task.status !== "verified";
         if (discoveredMrNeedsDone && task) {
@@ -299,6 +292,9 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
             {},
             { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
           );
+          // Refresh the task row so downstream status checks (merged → verified,
+          // requested-changes → implementing) see the post-transition status.
+          task = findTaskById(result.taskId);
         }
         if (task && mrState === "merged" && task.status === "done") {
           updateTaskStatus(
