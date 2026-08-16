@@ -1,38 +1,34 @@
 # Research
 
-Updated: 2026-08-16 04:01
+Updated: 2026-08-16 04:38
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: Task progress indication — "working vs hung" detection for executing tasks
+Topic: Agent loop detection — prevent runaway tool-call loops (stage 1: hard caps + read-only burst)
 
-Goal: Let the user reliably see that an agent is actively working rather than hung. Loop detection is a separate concern; percentage progress is out of scope (only meaningful for implementing/review stages where a denominator exists).
+Goal: Detect and stop an agent that spins in a repetitive tool-call loop (e.g. the review agent re-running `git diff <sha>^ <sha> -- <file>` hundreds of times) before it burns hours of wall-clock and ~40M tokens. Confirmed incident: task b0f811dc (review, Codex CLI / deepseek-v4-flash) looped twice (~25-28 min per attempt) on read-only `git diff`/`git show` of the same commit; the 1h `runTimeoutMs` was the only guard.
 
-Scope: (1) Server-side `lastActivityAt` column (survives F5) written only on activity events (tool completion, subagent start, and in-flight tool start). `startHeartbeat` must NOT write it. (2) In-flight `currentTool` tracking (tool START via `onEvent` `tool:use`; cleared on completion) so long-running commands (pnpm install/build) are not misread as hung. (3) UI indicator: "working · 12s" vs "hung · no activity for Nm" (danger), driven by `lastActivityAt` with a 5-minute threshold.
+Scope (stage 1): agent-side detection + blocking only (no UI "possible loop" indicator yet).
+- (A) Hard tool-call cap per stage: `AGENT_MAX_TOOL_CALLS_PER_STAGE` (default 500). Exceed → block.
+- (B) Read-only burst: N consecutive tool calls that are all read-only (Read/Glob/Grep/Bash `git show|diff|cat|sed|rg`) with NO write (Edit/Write/Bash `git add|commit|push`) → block. Threshold: 20 reads without a write.
+- Action: immediately move the task to `blocked_external` with reason `possible_loop` (human decides next), NO auto-retry. Mirror the stale-watchdog transition pattern.
 
 Key decisions:
-- Silence threshold = 5 min, new env/config `AGENT_ACTIVITY_SILENCE_MS` (NOT `AGENT_STAGE_STALE_TIMEOUT_MS`, which stays 90 min for server auto-recovery).
-- `lastActivityAt` is a new append-only schema migration column on `tasks`, exposed via `TaskListItem`/`Task` + WS (`task:activity` carries it or a new `task:progress` event).
-- In-flight: log `tool:use` START (`onEvent`) into `currentTool {name, startedAt}`; clear on completion. Transport caveat: CLI is opaque (no START events) — in-flight only for SDK/app-server; CLI relies on completion recency.
-- Heartbeat remains the liveness signal only; it must not count as activity.
-- Loop detection (repetition of the same tool template) — SEPARATE feature, out of this scope.
-- Per-stage % — only meaningful for implementing (plan checkboxes `- [x] Task N`) and review (files covered / files in commit); deferred.
+- Detection counts from `onToolUse` (completion events) in the agent (`subagentQuery`) — works for all transports including CLI.
+- Blocking mirrors `recoverStaleInProgressTasks` (transitionTaskStatus → blocked_external, blockedReason `possible_loop`, blockedFromStatus resume).
+- Deferred: normalized-template repetition (C), novelty ratio (D), token-bloat (E, SDK/app-server only), UI "possible loop" indicator (F).
 
 Constraints:
-- Migration versions are append-only (new version; never edit an existing one).
-- DB boundary: api/agent/runtime via @aif/data only.
-- New visuals (hung icon) synced with Pencil (.pen).
-- No expensive CSS (opacity/transform only).
-- Theme color pairing → docs/ui-theme-colors.md.
-- Every package >=70% coverage; finish with `npm run ai:validate`.
+- No new migration (blocking reuses blocked_external columns).
+- DB boundary via @aif/data.
+- Every package >=70% coverage; `npm run ai:validate`.
 
 Success signals:
-- A hung task (no activity for >5 min) shows a danger "hung" state even while the heartbeat is fresh.
-- A long-running command (tool START, no completion yet) shows "running <tool> (<duration>)" and is NOT flagged hung.
-- The state survives page refresh (server column).
+- A looping stage is blocked within minutes (not hours), tokens stop burning, task lands in blocked_external with a clear reason.
+- Legit long stages (build/install) are NOT falsely blocked (read-only burst requires no writes; tool-call cap high enough).
 
-Next step: /aif-plan (fast or full) for the working-vs-hung slice (`lastActivityAt` + in-flight + UI)
+Next step: /aif-plan (full or fast) for loop-detection stage 1 (A+B + blocking)
 <!-- aif:active-summary:end -->
 
 ## Sessions
@@ -213,6 +209,18 @@ Links (paths):
 - packages/shared/src/db.ts (migration append-only)
 - packages/web/src/hooks/useTaskLiveness.ts (current running indicator)
 - packages/web/src/hooks/useWebSocket.ts (task:activity handling)
+
+### 2026-08-16 04:38 — Agent loop detection: stage 1 (tool-call cap + read-only burst)
+What changed: Proposed and scoped loop detection after the confirmed review-loop incident (task b0f811dc). User decided: immediate blocked_external (no retry), thresholds = 500 tool-calls / 20 reads-without-write, agent-side blocking only (no UI indicator yet).
+Key notes:
+- Incident signature: ~hundreds of `git diff <sha>^ <sha> -- <file>` + `git show <sha>:<file>` (read-only, no mutations) over ~25-28 min per attempt; ~40M input tokens; `runTimeoutMs` (1h) the only existing guard.
+- Options evaluated: A tool-call cap, B read-only burst, C normalized-template repetition, D novelty ratio, E token-bloat (SDK only), F client-side visual warn.
+- Stage 1 = A+B with immediate blocked_external (`possible_loop`); C/D/F deferred; E SDK/app-server only.
+Links (paths):
+- packages/agent/src/subagentQuery.ts (onToolUse counting + abort)
+- packages/agent/src/taskWatchdog.ts (blocked_external transition pattern)
+- packages/data/src/index.ts (transitionTaskStatus, task columns)
+- packages/shared/src/env.ts (new AGENT_MAX_TOOL_CALLS_PER_STAGE)
 
 <!-- aif:sessions:end -->
 
