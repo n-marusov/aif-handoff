@@ -630,3 +630,28 @@ describe("settings overview — agent stale timeout", () => {
     expect((await buildSettingsOverview()).agentStageStaleTimeoutMs).toBe(5400000);
   });
 });
+
+describe("settings overview — agent activity silence", () => {
+  const original = process.env.AGENT_ACTIVITY_SILENCE_MS;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.AGENT_ACTIVITY_SILENCE_MS;
+    } else {
+      process.env.AGENT_ACTIVITY_SILENCE_MS = original;
+    }
+    resetEnvCache();
+  });
+
+  it("reports agentActivitySilenceMs from AGENT_ACTIVITY_SILENCE_MS", async () => {
+    process.env.AGENT_ACTIVITY_SILENCE_MS = "123456";
+    resetEnvCache();
+    expect((await buildSettingsOverview()).agentActivitySilenceMs).toBe(123456);
+  });
+
+  it("defaults agentActivitySilenceMs to 300000", async () => {
+    delete process.env.AGENT_ACTIVITY_SILENCE_MS;
+    resetEnvCache();
+    expect((await buildSettingsOverview()).agentActivitySilenceMs).toBe(300000);
+  });
+});
