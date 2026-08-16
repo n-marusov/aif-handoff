@@ -36,7 +36,6 @@ export function useInFlightSeconds(startedAt: string | null | undefined): number
 
   useEffect(() => {
     if (!startedAt) return undefined;
-    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [startedAt]);
