@@ -885,6 +885,7 @@ const TASK_LIST_COLUMNS = {
   tokenTotal: tasks.tokenTotal,
   costUsd: tasks.costUsd,
   lastSyncedAt: tasks.lastSyncedAt,
+  lastHeartbeatAt: tasks.lastHeartbeatAt,
   scheduledAt: tasks.scheduledAt,
   createdAt: tasks.createdAt,
   updatedAt: tasks.updatedAt,
@@ -2678,9 +2679,10 @@ export function appendTaskActivityLog(taskId: string, newLines: string): void {
   });
 }
 
-export function updateTaskHeartbeat(taskId: string): void {
+export function updateTaskHeartbeat(taskId: string): string {
   const nowIso = new Date().toISOString();
   setTaskFields(taskId, { lastHeartbeatAt: nowIso, updatedAt: nowIso });
+  return nowIso;
 }
 
 export function updateTaskStatus(

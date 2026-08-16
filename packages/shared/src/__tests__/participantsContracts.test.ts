@@ -6,7 +6,10 @@ import {
   type AuthSessionState,
   type ParticipantBroadcastPayload,
   type TaskExecutorHistoryEntry,
+  type TaskHeartbeatPayload,
+  type TaskListItem,
   type TaskOwnershipBroadcastPayload,
+  type TaskUsagePayload,
   type WsEvent,
 } from "../browser.js";
 
@@ -74,5 +77,55 @@ describe("browser-safe participant contracts", () => {
     ] satisfies WsEvent[];
 
     expect(events.map((event) => event.type)).toEqual(["participant:updated", "task:handoff"]);
+  });
+
+  it("supports live heartbeat and usage WebSocket payloads", () => {
+    const heartbeat = {
+      taskId: "task-1",
+      lastHeartbeatAt: "2026-08-16T01:51:00.000Z",
+    } satisfies TaskHeartbeatPayload;
+    const usage = {
+      taskId: "task-1",
+      projectId: "project-1",
+      usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, costUsd: 0.01 },
+    } satisfies TaskUsagePayload;
+    const listItem = {
+      id: "task-1",
+      projectId: "project-1",
+      title: "Task",
+      description: "",
+      autoMode: true,
+      executionOwner: "ai",
+      ownershipRevision: 1,
+      assignees: [],
+      isFix: false,
+      status: "implementing",
+      priority: 0,
+      position: 0,
+      blockedReason: null,
+      blockedFromStatus: null,
+      retryAfter: null,
+      retryCount: 0,
+      roadmapAlias: null,
+      tags: [],
+      reworkRequested: false,
+      reviewIterationCount: 0,
+      maxReviewIterations: 3,
+      manualReviewRequired: false,
+      paused: false,
+      lastSyncedAt: null,
+      lastHeartbeatAt: "2026-08-16T01:51:00.000Z",
+      scheduledAt: null,
+      createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:00:00.000Z",
+      hasPlan: false,
+    } satisfies TaskListItem;
+    const events = [
+      { type: "task:heartbeat", payload: heartbeat },
+      { type: "task:usage_updated", payload: usage },
+    ] satisfies WsEvent[];
+
+    expect(events.map((event) => event.type)).toEqual(["task:heartbeat", "task:usage_updated"]);
+    expect(listItem.lastHeartbeatAt).toBe("2026-08-16T01:51:00.000Z");
   });
 });

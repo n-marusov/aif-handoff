@@ -70,6 +70,8 @@ export {
   type ParticipantSessionRevokedPayload,
   type TaskOwnershipBroadcastPayload,
   type TaskCommentBroadcastPayload,
+  type TaskHeartbeatPayload,
+  type TaskUsagePayload,
   type ChatMessage,
   type ChatMessageAttachment,
   type ChatAttachment,

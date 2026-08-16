@@ -474,6 +474,7 @@ export interface TaskListItem {
   manualReviewRequired: boolean;
   paused: boolean;
   lastSyncedAt: string | null;
+  lastHeartbeatAt?: string | null;
   runtimeProfileId?: string | null;
   modelOverride?: string | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
@@ -689,7 +690,9 @@ export type WsEventType =
   | "task:commit_failed"
   | "task:qa_started"
   | "task:qa_done"
-  | "task:qa_failed";
+  | "task:qa_failed"
+  | "task:heartbeat"
+  | "task:usage_updated";
 
 export interface RoadmapCompletePayload {
   projectId: string;
@@ -785,7 +788,9 @@ export interface WsEvent {
     | ParticipantBroadcastPayload
     | ParticipantSessionRevokedPayload
     | TaskOwnershipBroadcastPayload
-    | TaskCommentBroadcastPayload;
+    | TaskCommentBroadcastPayload
+    | TaskHeartbeatPayload
+    | TaskUsagePayload;
 }
 
 export const RuntimeTransport = {
@@ -1076,6 +1081,19 @@ export interface ChatDonePayload {
   taskId?: string | null;
   runtimeProfileId?: string | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
+}
+
+/** Lightweight task heartbeat broadcast to the board/detail UI. */
+export interface TaskHeartbeatPayload {
+  taskId: string;
+  lastHeartbeatAt: string | null;
+}
+
+/** Task-scoped usage delta broadcast at run boundary. */
+export interface TaskUsagePayload {
+  taskId: string;
+  projectId: string;
+  usage: ChatDoneUsage;
 }
 
 export interface ChatErrorPayload {

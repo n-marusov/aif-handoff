@@ -209,6 +209,7 @@ describe("data layer", () => {
         implementationLog: "heavy implementation log",
         reviewComments: "heavy review comments",
         agentActivityLog: "heavy activity log",
+        lastHeartbeatAt: "2026-08-16T02:00:00.000Z",
       });
       updateTask(withPlan.id, {
         tokenInput: 10,
@@ -231,6 +232,7 @@ describe("data layer", () => {
         tokenOutput: 20,
         tokenTotal: 30,
         costUsd: 0.12,
+        lastHeartbeatAt: "2026-08-16T02:00:00.000Z",
         tags: ["roadmap"],
         roadmapAlias: "v1",
       });
