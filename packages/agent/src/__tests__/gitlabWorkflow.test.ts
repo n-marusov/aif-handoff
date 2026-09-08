@@ -188,4 +188,20 @@ describe("GitLab workflow publication", () => {
 
     await expect(publishGitLabTask("task-1", "/tmp/repo")).rejects.toThrow(/rate limit/i);
   });
+
+  it("uses the configured publish timeout for the internal API call", async () => {
+    vi.stubEnv("AGENT_GIT_PUBLISH_TIMEOUT_MS", "45000");
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => new AbortController().signal);
+    findGitLabIssueMock.mockReturnValue({ projectId: "project-1", iid: 154 });
+    findTaskMock.mockReturnValue({ projectId: "project-1", branchName: "feature/x" });
+    ensureAutoQueueCommitMock.mockResolvedValue({ commitSha: "abc" });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as typeof fetch;
+
+    await publishGitLabTask("task-1", "/tmp/repo");
+
+    expect(timeoutSpy).toHaveBeenCalledWith(45000);
+  });
 });

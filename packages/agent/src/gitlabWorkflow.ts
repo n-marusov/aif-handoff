@@ -74,7 +74,10 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
         );
       }
     } catch (error) {
-      log.warn({ projectId: connection.projectId, error }, "GitLab repository sync unavailable");
+      log.warn(
+        { projectId: connection.projectId, err: error },
+        "GitLab repository sync unavailable",
+      );
     }
   }
 }
@@ -107,7 +110,7 @@ export async function publishGitLabTask(taskId: string, projectRoot: string): Pr
   try {
     pushBranch(executionRoot, task.branchName);
   } catch (error) {
-    log.error({ taskId, branch: task.branchName, error }, "GitLab task branch push failed");
+    log.error({ taskId, branch: task.branchName, err: error }, "GitLab task branch push failed");
     throw new StageManualBlockError(
       "GitLab branch push failed. Check repository access and Git credentials, then retry.",
     );
@@ -126,10 +129,13 @@ export async function publishGitLabTask(taskId: string, projectRoot: string): Pr
         implementationLog: refreshed?.implementationLog ?? null,
         reviewComments: refreshed?.reviewComments ?? null,
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(getEnv().AGENT_GIT_PUBLISH_TIMEOUT_MS),
     });
   } catch (error) {
-    log.error({ taskId, branch: task.branchName, error }, "GitLab merge request API unavailable");
+    log.error(
+      { taskId, branch: task.branchName, err: error },
+      "GitLab merge request API unavailable",
+    );
     throw new StageManualBlockError(
       "GitLab merge request publication is unavailable. Check the API service and retry.",
     );

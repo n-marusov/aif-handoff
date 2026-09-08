@@ -109,6 +109,10 @@ const envSchema = z.object({
   AGENT_QUERY_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
   AGENT_QUERY_START_RETRY_DELAY_MS: z.coerce.number().default(1000),
   AGENT_FIRST_ACTIVITY_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
+  // Timeout for the internal publish fetch to the API. The API's publish
+  // handler runs several upstream GitLab/GitHub calls sequentially (30s each
+  // plus retries), so a 30s client timeout aborts before the API responds.
+  AGENT_GIT_PUBLISH_TIMEOUT_MS: z.coerce.number().default(120 * 1000),
   API_RUNTIME_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
   API_RUNTIME_RUN_TIMEOUT_MS: z.coerce.number().default(120 * 1000),
   DATABASE_URL: z.string().default("./data/aif.sqlite"),

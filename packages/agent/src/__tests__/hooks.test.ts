@@ -79,6 +79,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     AGENT_AUTO_REVIEW_STRATEGY: "full_re_review" as const,
     AGENT_USE_SUBAGENTS: true,
     AGENT_FIRST_ACTIVITY_TIMEOUT_MS: 60_000,
+    AGENT_GIT_PUBLISH_TIMEOUT_MS: 120_000,
     AIF_USAGE_LIMITS_ENABLED: false,
     AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED: false,
     AIF_GITHUB_ISSUE_PR_ENABLED: false,

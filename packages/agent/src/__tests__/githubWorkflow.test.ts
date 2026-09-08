@@ -2,11 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listRepositoriesMock = vi.fn();
 const findGitHubIssueMock = vi.fn();
+const appendActivityLogMock = vi.fn();
+const findTaskMock = vi.fn();
+const ensureAutoQueueCommitMock = vi.fn();
+const execFileSyncMock = vi.fn();
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFileSync: (...args: unknown[]) => execFileSyncMock(...args),
+  };
+});
 
 vi.mock("@aif/data", () => ({
-  appendTaskActivityLog: vi.fn(),
+  appendTaskActivityLog: (...args: unknown[]) => appendActivityLogMock(...args),
   findGitHubIssueByTaskId: (...args: unknown[]) => findGitHubIssueMock(...args),
-  findTaskById: vi.fn(),
+  findTaskById: (...args: unknown[]) => findTaskMock(...args),
   listEnabledGitHubRepositories: (...args: unknown[]) => listRepositoriesMock(...args),
 }));
 
@@ -15,9 +27,11 @@ vi.mock("@aif/shared", async (importOriginal) => {
   return { ...actual, getEnv: () => actual.validateEnv(process.env) };
 });
 
-vi.mock("../autoQueueCommit.js", () => ({ ensureAutoQueueTaskCommit: vi.fn() }));
+vi.mock("../autoQueueCommit.js", () => ({
+  ensureAutoQueueTaskCommit: (...args: unknown[]) => ensureAutoQueueCommitMock(...args),
+}));
 
-const { synchronizeGitHubProjects } = await import("../githubWorkflow.js");
+const { synchronizeGitHubProjects, publishGitHubTask } = await import("../githubWorkflow.js");
 
 describe("GitHub workflow synchronization", () => {
   const originalFetch = global.fetch;
@@ -73,5 +87,43 @@ describe("GitHub workflow synchronization", () => {
 
     expect(listRepositoriesMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("GitHub workflow publication", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.stubEnv("API_BASE_URL", "http://localhost:3999");
+    vi.stubEnv("GIT_PROVIDER", "github");
+    vi.stubEnv("AIF_GITHUB_ISSUE_PR_ENABLED", "true");
+    findGitHubIssueMock.mockClear();
+    appendActivityLogMock.mockClear();
+    findTaskMock.mockClear();
+    ensureAutoQueueCommitMock.mockClear();
+    execFileSyncMock.mockClear();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("uses the configured publish timeout for the internal API call", async () => {
+    vi.stubEnv("AGENT_GIT_PUBLISH_TIMEOUT_MS", "45000");
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => new AbortController().signal);
+    findGitHubIssueMock.mockReturnValue({ projectId: "project-1", issueNumber: 154 });
+    findTaskMock.mockReturnValue({ projectId: "project-1", branchName: "feature/x" });
+    ensureAutoQueueCommitMock.mockResolvedValue({ commitSha: "abc" });
+    execFileSyncMock.mockReturnValue(Buffer.from(""));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as typeof fetch;
+
+    await publishGitHubTask("task-1", "/tmp/repo");
+
+    expect(timeoutSpy).toHaveBeenCalledWith(45000);
   });
 });

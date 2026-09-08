@@ -69,7 +69,10 @@ export async function synchronizeGitHubProjects(now = Date.now()): Promise<void>
         );
       }
     } catch (error) {
-      log.warn({ projectId: connection.projectId, error }, "GitHub repository sync unavailable");
+      log.warn(
+        { projectId: connection.projectId, err: error },
+        "GitHub repository sync unavailable",
+      );
     }
   }
 }
@@ -102,7 +105,7 @@ export async function publishGitHubTask(taskId: string, projectRoot: string): Pr
   try {
     pushBranch(executionRoot, task.branchName);
   } catch (error) {
-    log.error({ taskId, branch: task.branchName, error }, "GitHub task branch push failed");
+    log.error({ taskId, branch: task.branchName, err: error }, "GitHub task branch push failed");
     throw new StageManualBlockError(
       "GitHub branch push failed. Check repository access and Git credentials, then retry.",
     );
@@ -121,10 +124,13 @@ export async function publishGitHubTask(taskId: string, projectRoot: string): Pr
         implementationLog: refreshed?.implementationLog ?? null,
         reviewComments: refreshed?.reviewComments ?? null,
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(getEnv().AGENT_GIT_PUBLISH_TIMEOUT_MS),
     });
   } catch (error) {
-    log.error({ taskId, branch: task.branchName, error }, "GitHub pull request API unavailable");
+    log.error(
+      { taskId, branch: task.branchName, err: error },
+      "GitHub pull request API unavailable",
+    );
     throw new StageManualBlockError(
       "GitHub pull request publication is unavailable. Check the API service and retry.",
     );
