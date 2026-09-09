@@ -72,6 +72,16 @@ const ACTION_BUTTONS_BY_EVENT: Record<TaskEvent, TaskActionButton> = {
   accept_existing_plan: { label: "Use existing plan", event: "accept_existing_plan" },
   start_human_work: { label: "Start work", event: "start_human_work" },
   mark_plan_ready: { label: "Mark plan ready", event: "mark_plan_ready" },
+  // Plan-review gate events are VCS-driven: publishing/approving/requesting
+  // changes happens on the PR/MR, never through a header button.
+  publish_plan: { label: "Publish plan", event: "publish_plan", visible: () => false },
+  approve_plan: { label: "Approve plan", event: "approve_plan", visible: () => false },
+  request_plan_changes: {
+    label: "Request plan changes",
+    event: "request_plan_changes",
+    variant: "outline",
+    visible: () => false,
+  },
   start_implementation: { label: "Start implementation", event: "start_implementation" },
   submit_implementation: { label: "Submit implementation", event: "submit_implementation" },
   complete_review: { label: "Complete review", event: "complete_review" },
@@ -126,16 +136,29 @@ export function TaskDetailHeader({
   onOpenHandoff = () => undefined,
   onClose,
 }: TaskDetailHeaderProps) {
+  const planReviewTarget = (() => {
+    if (task.github?.prUrl) {
+      return { url: task.github.prUrl, kind: "pull request", number: task.github.prNumber };
+    }
+    if (task.gitlab?.mrUrl) {
+      return { url: task.gitlab.mrUrl, kind: "merge request", number: task.gitlab.mrIid };
+    }
+    return null;
+  })();
   const visibleActions = (
     task.permissions
-      ? task.permissions.permittedActions.map((event) => ACTION_BUTTONS_BY_EVENT[event])
-      : (LEGACY_ACTION_BUTTONS_BY_STATUS[task.status] ?? []).filter(
-          (action) => action.visible?.(task) ?? true,
-        )
+      ? task.permissions.permittedActions
+          .map((event) => ACTION_BUTTONS_BY_EVENT[event])
+          .filter((action): action is TaskActionButton => Boolean(action))
+      : (LEGACY_ACTION_BUTTONS_BY_STATUS[task.status] ?? [])
   ).filter(
     (action) =>
-      (!task.github && !task.gitlab) ||
-      (action.event !== "approve_done" && action.actionType !== "open_request_changes"),
+      (action.visible?.(task) ?? true) &&
+      // Implementation must not start while the plan PR/MR awaits human approval,
+      // even if the server reports the event (VCS approval is the only gate).
+      !(task.status === "plan_review" && action.event === "start_implementation") &&
+      ((!task.github && !task.gitlab) ||
+        (action.event !== "approve_done" && action.actionType !== "open_request_changes")),
   );
   const canManageOwnership = Boolean(
     task.permissions?.canAssign || task.permissions?.canHandoff || task.permissions?.canSelfAssign,
@@ -256,6 +279,37 @@ export function TaskDetailHeader({
           <span>{runtimeLimitDisplay.summary}</span>
           {runtimeLimitDisplay.resetText && <span>{runtimeLimitDisplay.resetText}</span>}
           {runtimeLimitDisplay.taskRetryText && <span>{runtimeLimitDisplay.taskRetryText}</span>}
+        </AlertBox>
+      )}
+
+      {task.status === "plan_review" && (
+        <AlertBox
+          variant="info"
+          className="mb-3 flex flex-col gap-1 px-3 py-2 text-xs"
+          icon={<Clock className="h-3.5 w-3.5 shrink-0" />}
+        >
+          <span className="font-medium">Waiting for plan approval</span>
+          <span>
+            Implementation starts only after the change plan is approved.
+            {planReviewTarget ? (
+              <>
+                {" "}
+                Approve or request changes on{" "}
+                <a
+                  href={planReviewTarget.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary underline underline-offset-2"
+                >
+                  {planReviewTarget.kind}
+                  {planReviewTarget.number ? ` #${planReviewTarget.number}` : ""}
+                </a>
+                .
+              </>
+            ) : (
+              " Approval happens through the linked pull request or merge request."
+            )}
+          </span>
         </AlertBox>
       )}
 

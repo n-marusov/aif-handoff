@@ -20,6 +20,7 @@ export const ORDERED_STATUSES: TaskStatus[] = [
   "planning",
   "improve",
   "plan_ready",
+  "plan_review",
   "implementing",
   "verify",
   "review",

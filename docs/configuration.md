@@ -135,6 +135,14 @@ assignee and milestone must match. With no filters, all open issues are eligible
 idempotent by project plus issue number and updates the existing task instead of importing
 duplicates.
 
+**GitHub git-prepare parity gap (not implemented):** unlike GitLab Connect / Sync now,
+the GitHub mode does **not** auto-prepare the local repository. There is no automatic
+`origin` add, credential-helper configuration, default-branch fetch, or AI Factory
+scaffold on GitHub Connect — GitHub Connect validates repository access via the REST API
+only. For GitHub mode, point the project at a normal clone of the GitHub repository with
+working Git credentials and a fetched default branch before enabling auto-queue. Parity
+with the GitLab auto git-prepare flow is a known gap.
+
 ## GitLab Issue-to-MR Mode
 
 Set `GIT_PROVIDER=gitlab` **and** `AIF_GITLAB_ISSUE_MR_ENABLED=true` to activate the GitLab
@@ -188,6 +196,68 @@ assignee and milestone must match. With no filters, all open issues are eligible
 idempotent by project plus issue IID and updates the existing task instead of importing
 duplicates. Review state is approvals-only (approved/pending); the coordinator never merges
 an MR.
+
+## Plan Review PR/MR Gate
+
+The plan-review gate adds a mandatory human approval step between `plan_ready` and
+`implementing` for GitHub/GitLab issue-linked tasks. Enable it in `.env`:
+
+```dotenv
+AIF_PLAN_REVIEW_PR_ENABLED=true
+```
+
+With the flag off (default), VCS tasks keep the legacy automatic `plan_ready →
+implementing` behavior. When enabled, the coordinator inserts a `plan-publisher` stage
+after the plan checker for VCS-linked tasks (`taskRequiresPlanReview` requires a live
+GitHub/GitLab issue link). The publisher:
+
+1. creates a **deterministic plan-only commit** (never product files) using the branch and
+   commit-message conventions resolved from the target project's RULES
+   (`packages/agent/src/gitConventions.ts`; default fallback: Handoff branch naming +
+   Conventional Commits-style imperative messages);
+2. pushes the branch and calls `POST /projects/:id/github/tasks/:taskId/publish-plan`
+   (GitLab: `.../gitlab/tasks/:taskId/publish-plan`) — the PR/MR body carries a
+   `<!-- aif:pr-mode=plan_review -->` / `<!-- aif:mr-mode=plan_review -->` marker and
+   deliberately **omits `Closes #...`**;
+3. records `planReviewState=published` and transitions the task `plan_ready → plan_review`
+   (`markTaskPlanPublished`), where it waits for the human.
+
+The task leaves `plan_review` only through VCS sync:
+
+- **Approval** — a GitHub review with state `approved` (or GitLab MR approvals reporting
+  `approved=true`) transitions the task `plan_review → implementing` with
+  `planReviewState=approved`; the coordinator then starts implementation.
+- **Changes requested / comments** — a `changes_requested` GitHub review or a GitLab
+  request-changes note transitions the task back to `planning` with
+  `planReviewState=changes_requested`; the review/comment text is persisted as
+  `planReviewFeedback` and fed to the planner. Replanning reuses the same branch/worktree
+  and plan path, and the next publish updates the **same** PR/MR body.
+
+After implementation and review, the final publish converts that same PR/MR to
+`implementation` mode (marker, implementation log, test evidence, approved-plan summary)
+and only then appends `Closes #...`.
+
+**Guard:** implementation cannot start before approval. The coordinator never claims a
+plan-review task for the implementer unless `planReviewState === "approved"`, and
+`runImplementer` repeats the check before touching product files. The Web UI hides
+`Start implementation` and shows a `Waiting for plan approval` banner with the PR/MR link
+while the task is in `plan_review`.
+
+**Deployment caveats:**
+
+- VCS sync is pull-based and periodic — no inbound webhooks are required, so an IP-only
+  production deployment (no public domain) works as long as the API has outbound HTTPS
+  access and DNS for the GitHub/GitLab instance.
+- When Participants Mode is enabled, the agent's internal calls (sync, publish, and the
+  publish-plan routes) must carry `INTERNAL_BROADCAST_TOKEN` via
+  `Authorization: Bearer <token>` or `X-Internal-Broadcast-Token` (trusted-internal
+  bypass). Keep the value consistent across the `api` and `agent` services.
+
+**Logging:** plan publication uses the `plan-review:publisher` logger (INFO on push and
+PR/MR publication); VCS approval/replanning is logged by the API GitHub/GitLab sync
+routes (INFO on transitions, DEBUG for deduped review/note ids); blocked implementation
+is a WARN from the coordinator/implementer with `taskId`, `status`, and
+`planReviewState`.
 
 ## Runtime Profile Bootstrap
 
@@ -340,13 +410,19 @@ ALL_PROXY=socks5://proxy.example.com:1080
 NO_PROXY=localhost,127.0.0.1,::1,api,agent,web,mcp
 ```
 
-### Runtime Readiness Check
+### Health and Readiness Endpoints
 
-API exposes `GET /agent/readiness` to verify auth state at runtime:
+The current HTTP health/readiness surfaces are:
 
-- `ready=true`: runtime registry is available and at least one execution path is configured (enabled profile, usable auth, or Codex CLI path).
-- `ready=false`: no usable runtime execution path detected.
-- Response includes runtime descriptor list, enabled profile count, and auth source diagnostics.
+- `GET /health` — API liveness (`{ "status": "ok", "uptime" }`).
+- `GET /settings` — system configuration plus the `runtimeReadiness` block
+  (`availableRuntimeCount`, `runtimeProfileCount`, `enabledRuntimeProfileCount`).
+  End-to-end LLM readiness is exercised with `POST /runtime-profiles/validate`.
+- `GET /agent/status` — agent/coordinator-facing status: active in-progress tasks with
+  heartbeat/lag metadata, stale-task counts, and uptime.
+
+There is no `GET /agent/readiness` route; legacy references to it should use `/settings`
+(`runtimeReadiness`) and `/agent/status`.
 
 ## Runtime Profile Defaults
 

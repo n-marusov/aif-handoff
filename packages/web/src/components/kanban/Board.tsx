@@ -191,18 +191,9 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
   }, [activeAssigneeIds, activeFilters, activeRoadmapAliases, currentParticipantId, tasks]);
 
   const tasksByStatus = useMemo(() => {
-    const grouped: Record<TaskStatus, TaskListItem[]> = {
-      backlog: [],
-      planning: [],
-      improve: [],
-      plan_ready: [],
-      implementing: [],
-      review: [],
-      verify: [],
-      blocked_external: [],
-      done: [],
-      verified: [],
-    };
+    const grouped = Object.fromEntries(
+      ORDERED_STATUSES.map((status) => [status, [] as TaskListItem[]]),
+    ) as Record<TaskStatus, TaskListItem[]>;
 
     for (const task of filteredTasks) {
       grouped[task.status]?.push(task);

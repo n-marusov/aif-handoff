@@ -225,7 +225,7 @@ describe("plan review gate transitions", () => {
       taskId,
       commitSha: "deadbeef",
       actor: agentActor,
-      now: new Date("2026-09-09T10:00:00.000Z"),
+      now: new Date("2030-01-01T10:00:00.000Z"),
     });
 
     expect(result).toMatchObject({ ok: true, fromStatus: "plan_ready", toStatus: "plan_review" });
@@ -234,7 +234,7 @@ describe("plan review gate transitions", () => {
       status: "plan_review",
       planReviewState: "published",
       planReviewCommitSha: "deadbeef",
-      planReviewPublishedAt: "2026-09-09T10:00:00.000Z",
+      planReviewPublishedAt: "2030-01-01T10:00:00.000Z",
       planReviewApprovedAt: null,
       planReviewFeedback: null,
     });

@@ -113,6 +113,7 @@ describe("Board", () => {
     expect(screen.getByText("Backlog")).toBeDefined();
     expect(screen.getByText("Planning")).toBeDefined();
     expect(screen.getByText("Plan Ready")).toBeDefined();
+    expect(screen.getByText("Plan Review")).toBeDefined();
     expect(screen.getByText("Implementing")).toBeDefined();
     expect(screen.getByText("Review")).toBeDefined();
     expect(screen.getByText("Blocked")).toBeDefined();
@@ -129,6 +130,28 @@ describe("Board", () => {
     expect(screen.getByText("Test Task 2")).toBeDefined();
   });
 
+  it("should group plan_review tasks into the Plan Review column", () => {
+    const originalLength = mockTasks.length;
+    mockTasks.push(
+      makeTask({
+        id: "plan-review-1",
+        title: "Plan Review Task",
+        description: "Awaiting human approval",
+        status: "plan_review",
+      }),
+    );
+
+    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
+      wrapper: Wrapper,
+    });
+
+    const planReviewColumn = getColumn("Plan Review");
+    expect(within(planReviewColumn).getByText("Plan Review Task")).toBeDefined();
+    expect(screen.getByText("Plan Review")).toBeDefined();
+
+    mockTasks.splice(originalLength);
+  });
+
   it("should bound every card list to the viewport with independent vertical scrolling", () => {
     render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
       wrapper: Wrapper,
@@ -139,6 +162,7 @@ describe("Board", () => {
       "Planning",
       "Improve",
       "Plan Ready",
+      "Plan Review",
       "Implementing",
       "Verify",
       "Review",

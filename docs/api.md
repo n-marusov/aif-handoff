@@ -23,29 +23,33 @@ GET /health
 }
 ```
 
-### Agent Readiness
+### Agent Status
 
 ```
-GET /agent/readiness
+GET /agent/status
 ```
 
-Checks whether agent authentication is configured via `ANTHROPIC_API_KEY` and/or Claude profile auth (`~/.claude`).
-
-**Response:** `200 OK`
+Returns coordinator-facing agent status: active in-progress tasks with heartbeat/lag
+metadata, stale-task counts, and uptime.
 
 ```json
 {
-  "ready": true,
-  "hasApiKey": false,
-  "hasClaudeAuth": true,
-  "authSource": "claude_profile",
-  "detectedPath": "/Users/you/.claude/auth.json",
-  "message": "Agent authentication is configured.",
-  "checkedAt": "2026-03-28T17:10:00.000Z"
+  "activeTasks": [
+    {
+      "id": "task-uuid",
+      "title": "Task title",
+      "status": "implementing",
+      "lagMs": 4200
+    }
+  ],
+  "activeTaskCount": 1,
+  "staleTasks": 0,
+  "uptime": 3600
 }
 ```
 
-`authSource` values: `api_key`, `claude_profile`, `both`, `none`.
+There is no `GET /agent/readiness` route; use `GET /settings` (block `runtimeReadiness`)
+together with `POST /runtime-profiles/validate` for LLM readiness.
 
 ### Runtime Settings
 
@@ -730,6 +734,14 @@ resumes at `implementing`. A closed issue pauses its task; an unmerged closed PR
 it. A later `changes_requested` review resumes the same task at `implementing`; a merged PR
 advances a PR-ready `done` task to `verified`.
 
+When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the linked PR
+is in `plan_review` mode (`prMode === "plan_review"`), sync also drives the gate: an
+`approved` review transitions the task `plan_review → implementing` with
+`planReviewState=approved`; a `changes_requested` review (or new review/comment feedback)
+transitions it back to `planning` with `planReviewState=changes_requested` and the review
+text persisted as `planReviewFeedback`. Review ids are deduped so repeated syncs do not
+bounce the task.
+
 ### Publish a Task Pull Request
 
 `POST /projects/:id/github/tasks/:taskId/publish` is used by the agent after pushing the
@@ -753,9 +765,28 @@ the agent may call them with the `INTERNAL_BROADCAST_TOKEN` via `Authorization: 
 or `X-Internal-Broadcast-Token` (trusted-internal bypass); in legacy mode these routes follow
 the app-wide open-access model alongside the rest of the UI.
 
----
+### Publish a Change Plan Pull Request
 
-## GitLab Issue-to-MR
+`POST /projects/:id/github/tasks/:taskId/publish-plan` is used by the agent's
+`plan-publisher` stage when `AIF_PLAN_REVIEW_PR_ENABLED=true`. It publishes or updates the
+plan-review PR for an issue-linked task whose plan is ready:
+
+```json
+{
+  "branch": "feature/github-issue-154"
+}
+```
+
+The PR body carries a `<!-- aif:pr-mode=plan_review -->` marker, the change plan,
+affected artifacts, open questions, and approval instructions, and deliberately **omits
+`Closes #<issue>`** so the issue stays open until the final implementation PR is
+published. The endpoint updates the existing PR by branch when one already exists
+(otherwise it creates one), records `planReviewState=published`, and leaves the task in
+`plan_review`. Task fields: `planReviewState` (`published` / `approved` /
+`changes_requested`), `planReviewCommitSha`, `planReviewPublishedAt`,
+`planReviewApprovedAt`, and `planReviewFeedback`.
+
+---
 
 All endpoints in this section return `403` with `code: "feature_disabled"` unless
 `GIT_PROVIDER=gitlab` **and** `AIF_GITLAB_ISSUE_MR_ENABLED=true`. This mirrors the GitHub
@@ -804,6 +835,14 @@ task directly in `done`. Review state is approvals-only: `approved` when
 issue pauses its task; a closed unmerged MR also pauses it. A merged MR advances a MR-ready
 `done` task to `verified`; the coordinator never merges an MR itself.
 
+When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the linked MR
+is in `plan_review` mode (`mrMode === "plan_review"`), sync drives the gate the same way:
+an approvals `approved=true` result transitions the task `plan_review → implementing` with
+`planReviewState=approved`; a request-changes note transitions it back to `planning` with
+`planReviewState=changes_requested` and `planReviewFeedback` populated. Note ids are
+deduped (`lastReviewNoteId`) so repeated syncs do not bounce the task. A plan-mode MR that
+is closed without merge pauses its task with a WARN.
+
 A GitLab "Request changes" review action is detected from the MR notes API
 (`GET /merge_requests/:iid/notes`): the signal is a system note whose body is
 `requested changes` (GitLab Free does not expose `requested_changes` in
@@ -838,9 +877,17 @@ the agent may call them with the `INTERNAL_BROADCAST_TOKEN` via `Authorization: 
 or `X-Internal-Broadcast-Token` (trusted-internal bypass); in legacy mode these routes follow
 the app-wide open-access model alongside the rest of the UI.
 
----
+### Publish a Change Plan Merge Request
 
-## Runtime Profiles
+`POST /projects/:id/gitlab/tasks/:taskId/publish-plan` is the GitLab mirror of the GitHub
+change-plan publish endpoint. The MR description carries a
+`<!-- aif:mr-mode=plan_review -->` marker, the change plan, affected artifacts, open
+questions, and approval instructions, and deliberately **omits `Closes #<iid>`**. It
+updates the existing MR by branch when one exists, records
+`planReviewState=published`, and leaves the task in `plan_review`. The response carries the
+current approvals-derived review state refreshed at publication time.
+
+---
 
 Runtime profiles carry non-secret transport/model config plus the latest persisted runtime-limit snapshot used by API, agent, and UI surfaces.
 For local Codex runtimes (`runtimeId=codex` with `sdk`/`cli` transport), `/runtime-profiles` and `/runtime-profiles/effective/*` now read limit overlays from the SQLite Codex index (`codex_limit_heads`) maintained by the background API indexer. Request handlers do not perform direct `~/.codex/sessions` scans.
@@ -1220,6 +1267,14 @@ Additional constraints:
 - `request_changes` transitions `done -> implementing`, sets `reworkRequested=true`, and resets watchdog retry state (`retryCount=0`).
 - With `autoMode=true`, coordinator can trigger this same `request_changes`-style rework loop automatically after review if blocking findings are extracted from `reviewComments`.
 - If auto-review stops converging, the coordinator leaves the task in `review`, hands it to a human (`executionOwner: "human"`), and sets `manualReviewRequired=true`. The human resolves it with `complete_review` (→ `done`) or `request_review_changes` (→ `implementing`) from the review status, or hands it back to AI via the handoff control.
+
+**Plan-review gate (VCS-linked tasks):** `publish_plan`, `approve_plan`, and
+`request_plan_changes` are agent/VCS-driven events for the plan-review gate and are **not**
+human actions exposed through this endpoint. Publishing runs from the coordinator's
+`plan-publisher` stage; approval and requested-changes arrive from PR/MR review state
+during GitHub/GitLab sync (see the GitHub/GitLab sections above). A task in `plan_review`
+waits for that sync — the web UI shows a `Waiting for plan approval` banner with the PR/MR
+link and hides implementation actions.
 
 **Response:** `200 OK` — the updated task object.
 

@@ -593,6 +593,41 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 
 ---
 
+## Приложение Г — План-ревью гейт (опционально)
+
+Основное демо выше описывает «быстрый» маршрут: после `plan_ready` агент сразу
+реализует и публикует финальный MR с `Closes #<iid>`. Если добавить в `.env` строку
+`AIF_PLAN_REVIEW_PR_ENABLED=true`, GitLab-задачи останавливаются на обязательном
+человеческом одобрении плана до начала реализации:
+
+1. **Шаг 1 (изменение):** добавьте `AIF_PLAN_REVIEW_PR_ENABLED=true` в `.env`.
+2. **После планирования** координатор запускает стадию `plan-publisher`: детерминированный
+   коммит **только плана** (файлы продукта до одобрения не коммитятся и не пушатся),
+   пуш ветки и публикацию MR. Описание MR содержит маркер
+   `<!-- aif:mr-mode=plan_review -->`, текст плана и инструкцию «как одобрить»;
+   `Closes #<iid>` в этой версии **нет**. Задача переходит в статус `plan_review`
+   (в Web UI — колонка **Plan Review**, бейдж `Waiting for plan approval`, ссылка на MR).
+3. **Approve на gitlab.com** → следующая синхронизация (≤ 60 с) переводит задачу
+   `plan_review → implementing` (`planReviewState=approved`), и агент начинает
+   реализацию.
+4. **Request changes на MR** → синк возвращает задачу в `planning`
+   (`planReviewState=changes_requested`), текст замечаний сохраняется как
+   `planReviewFeedback` и передаётся планировщику. Агент перепланирует на **той же**
+   ветке, коммитит новую версию плана и обновляет **тот же** MR.
+5. **Финальная публикация** после реализации/ревью конвертирует тот же MR: маркер
+   `implementation`, тело с логом реализации и evidence тестов, и только теперь
+   добавляется `Closes #<iid>`.
+
+**Где это в коде:** `packages/agent/src/planReviewPublisher.ts` (стадия),
+`packages/agent/src/planReviewCommit.ts` (план-коммит),
+`packages/agent/src/gitConventions.ts` (branch/commit-конвенции),
+`packages/agent/src/gitlabWorkflow.ts` → `publishGitLabPlanTask`,
+`packages/api/src/routes/gitlab.ts` (sync-переходы plan_review),
+`packages/web/src/components/task/TaskDetailHeader.tsx` (баннер ожидания),
+`packages/web/src/components/kanban/Board.tsx` (колонка Plan Review).
+
+---
+
 ## See Also
 
 - [API Reference](api.md) — контракты GitLab Issue-to-MR и runtime-профилей
