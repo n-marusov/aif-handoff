@@ -19,7 +19,10 @@ const {
   findGitLabIssue,
   findTaskById,
   importGitLabIssueTask,
+  markTaskPlanPublished,
   setTaskFields,
+  updateGitLabMergeRequest,
+  updateGitLabMergeRequestMode,
   updateTaskStatus,
   upsertGitLabRepository,
 } = await import("@aif/data");
@@ -1244,6 +1247,238 @@ describe("GitLab project routes", () => {
     expect(afterVariant?.status).toBe("implementing");
     expect(afterVariant?.reworkRequested).toBe(true);
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116799);
+  });
+
+  it("resumes a plan_review task at implementing on GitLab approval", async () => {
+    upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "namespace",
+      name: "repo",
+      webUrl: "https://gitlab.com/namespace/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+      gitPreparedAt: "2026-08-15T00:00:00.000Z",
+    });
+    const imported = importGitLabIssueTask({
+      projectId: "project-1",
+      namespace: "namespace",
+      repository: "repo",
+      iid: 154,
+      globalId: "gid://gitlab/Issue/154",
+      webUrl: "https://gitlab.com/namespace/repo/-/issues/154",
+      state: "open",
+      sourceUpdatedAt: "2026-08-13T00:00:00Z",
+      snapshot: {
+        title: "GitLab mode",
+        body: "Implement it",
+        author: "author",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        comments: [],
+      },
+      mergeRequest: {
+        iid: 200,
+        url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+        state: "open",
+      },
+    });
+    updateTaskStatus(imported.taskId, "plan_ready", {});
+    markTaskPlanPublished({ taskId: imported.taskId, commitSha: "feedface" });
+    updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 154,
+      mrIid: 200,
+      mrUrl: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+      mrState: "open",
+      reviewState: "pending",
+    });
+    updateGitLabMergeRequestMode("project-1", 154, "plan_review");
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              id: 154,
+              iid: 154,
+              global_id: "gid://gitlab/Issue/154",
+              web_url: "https://gitlab.com/namespace/repo/-/issues/154",
+              state: "opened",
+              title: "GitLab mode",
+              description: "Implement it",
+              author: { username: "author" },
+              labels: [],
+              assignees: [],
+              milestone: null,
+              updated_at: "2026-08-13T00:00:00Z",
+            },
+          ]),
+        ) // listIssues
+        .mockResolvedValueOnce(jsonResponse([])) // issue notes
+        .mockResolvedValueOnce(
+          jsonResponse({
+            iid: 200,
+            web_url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+            state: "opened",
+            merged_at: null,
+            source_branch: "feature/gitlab-issue-154",
+            sha: "0123456789abcdef",
+            description: "",
+          }),
+        ) // getMergeRequest
+        .mockResolvedValueOnce(
+          jsonResponse({ approved: true, approved_by: [{ user: { username: "reviewer" } }] }),
+        ) // approvals
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes
+    );
+
+    const response = await app.request("/projects/project-1/gitlab/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
+    expect(findTaskById(imported.taskId)).toMatchObject({
+      status: "implementing",
+      planReviewState: "approved",
+    });
+    expect(findGitLabIssue("project-1", 154)).toMatchObject({
+      mrMode: "plan_review",
+      reviewState: "approved",
+    });
+  });
+
+  it("returns a plan_review task to planning on a GitLab requested-changes note with feedback", async () => {
+    upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "namespace",
+      name: "repo",
+      webUrl: "https://gitlab.com/namespace/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+      gitPreparedAt: "2026-08-15T00:00:00.000Z",
+    });
+    const imported = importGitLabIssueTask({
+      projectId: "project-1",
+      namespace: "namespace",
+      repository: "repo",
+      iid: 154,
+      globalId: "gid://gitlab/Issue/154",
+      webUrl: "https://gitlab.com/namespace/repo/-/issues/154",
+      state: "open",
+      sourceUpdatedAt: "2026-08-13T00:00:00Z",
+      snapshot: {
+        title: "GitLab mode",
+        body: "Implement it",
+        author: "author",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        comments: [],
+      },
+      mergeRequest: {
+        iid: 200,
+        url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+        state: "open",
+      },
+    });
+    updateTaskStatus(imported.taskId, "plan_ready", {});
+    markTaskPlanPublished({ taskId: imported.taskId, commitSha: "feedface" });
+    updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 154,
+      mrIid: 200,
+      mrUrl: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+      mrState: "open",
+      reviewState: "pending",
+    });
+    updateGitLabMergeRequestMode("project-1", 154, "plan_review");
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+
+    const requestedChangesNote = {
+      id: 3691116788,
+      body: "requested changes",
+      author: { username: "nikomaru" },
+      created_at: "2026-08-16T07:42:03.778Z",
+      updated_at: "2026-08-16T07:42:03.778Z",
+      system: true,
+    };
+    const humanNote = {
+      id: 3691116790,
+      body: "Split the migration into two steps",
+      author: { username: "nikomaru" },
+      created_at: "2026-08-16T07:42:10.778Z",
+      updated_at: "2026-08-16T07:42:10.778Z",
+      system: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              id: 154,
+              iid: 154,
+              global_id: "gid://gitlab/Issue/154",
+              web_url: "https://gitlab.com/namespace/repo/-/issues/154",
+              state: "opened",
+              title: "GitLab mode",
+              description: "Implement it",
+              author: { username: "author" },
+              labels: [],
+              assignees: [],
+              milestone: null,
+              updated_at: "2026-08-13T00:00:00Z",
+            },
+          ]),
+        ) // listIssues
+        .mockResolvedValueOnce(jsonResponse([])) // issue notes
+        .mockResolvedValueOnce(
+          jsonResponse({
+            iid: 200,
+            web_url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+            state: "opened",
+            merged_at: null,
+            source_branch: "feature/gitlab-issue-154",
+            sha: "0123456789abcdef",
+            description: "",
+          }),
+        ) // getMergeRequest
+        .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] })) // approvals
+        .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+        .mockResolvedValueOnce(jsonResponse([requestedChangesNote, humanNote])), // MR notes
+    );
+
+    const response = await app.request("/projects/project-1/gitlab/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
+    expect(findTaskById(imported.taskId)).toMatchObject({
+      status: "planning",
+      planReviewState: "changes_requested",
+      planReviewFeedback: "[nikomaru] Split the migration into two steps",
+    });
+    expect(findGitLabIssue("project-1", 154)).toMatchObject({
+      mrMode: "plan_review",
+      reviewState: "pending",
+      lastReviewNoteId: 3691116788,
+    });
   });
 
   it("returns 404 when publishing for an unlinked task", async () => {

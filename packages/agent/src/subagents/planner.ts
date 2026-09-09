@@ -149,6 +149,20 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
   const taskAttachmentsForPrompt = formatAttachmentsForPrompt(task.attachments);
   const commentsForPrompt = formatCommentsForPrompt(comments);
 
+  // VCS plan-review feedback (GitHub review body / GitLab MR notes) is a
+  // first-class replanning input: when the published plan PR/MR was rejected,
+  // the planner must revise the same plan addressing the reviewer's comments.
+  const planReviewFeedback = task.planReviewFeedback?.trim();
+  if (planReviewFeedback) {
+    log.debug(
+      { taskId, feedbackLength: planReviewFeedback.length },
+      "Attached VCS plan review feedback to planner prompt",
+    );
+  }
+  const planReviewFeedbackSection = planReviewFeedback
+    ? `\nVCS plan review feedback (address every point in the revised plan):\n${planReviewFeedback}`
+    : "";
+
   const plannerMode = task.plannerMode || "full";
   const planPath = normalizePlanPath(task.planPath, executionRoot);
   const planDocs = task.planDocs ? "true" : "false";
@@ -259,7 +273,7 @@ Description: ${task.description}
 Task attachments:
 ${taskAttachmentsForPrompt}
 User comments and replanning feedback:
-${commentsForPrompt}`;
+${commentsForPrompt}${planReviewFeedbackSection}`;
   let prompt: string;
   let workflowSpec: ReturnType<typeof createRuntimeWorkflowSpec>;
   // HANDOFF_BRANCH_PREPARED=1 tells the aif-plan / plan-polisher skill that

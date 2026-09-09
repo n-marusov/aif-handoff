@@ -10,6 +10,8 @@ import {
   importGitLabIssueTask,
   listGitLabIssues,
   markGitLabIssueUnavailable,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
   recordGitLabRepositorySync,
   setTaskFields,
   updateGitLabMergeRequest,
@@ -28,6 +30,8 @@ import { callAgentGitPrepare } from "../services/gitlabPrepareBridge.js";
 import {
   GitLabApiError,
   GitLabClient,
+  collectMergeRequestHumanFeedback,
+  findLatestRequestChangesNote,
   findMergeRequestClosingIssue,
   issueIsEligible,
   reviewFingerprint,
@@ -270,11 +274,11 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           connection.name,
           mr.iid,
         );
-        const requestChangesNote = mrNotes
-          .filter(
-            (note) => note.system && note.body?.trim().toLowerCase().includes("requested changes"),
-          )
-          .sort((a, b) => b.id - a.id)[0];
+        // GitLab "Request changes" is not exposed via detailed_merge_status on
+        // Free; the signal is a system note ("requested changes") in the MR
+        // notes API. Detection lives in the service helper; the route only
+        // consumes the structured note identity for edge-triggered transitions.
+        const requestChangesNote = findLatestRequestChangesNote(mrNotes);
         const mergeRequestUpdate: Parameters<typeof updateGitLabMergeRequest>[0] = {
           projectId,
           iid: issue.iid,
@@ -302,6 +306,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           // requested-changes → implementing) see the post-transition status.
           task = findTaskById(result.taskId);
         }
+        const planReviewMode = existing?.mrMode === "plan_review";
         if (task && mrState === "merged" && task.status === "done") {
           updateTaskStatus(
             task.id,
@@ -311,6 +316,62 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           );
         } else if (task && mrState === "closed") {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
+          if (planReviewMode && task.status === "plan_review") {
+            log.warn(
+              { taskId: task.id, iid: issue.iid, mrIid: mr.iid },
+              "GitLab plan-mode merge request closed without merge; task paused",
+            );
+          }
+        } else if (
+          task &&
+          planReviewMode &&
+          task.status === "plan_review" &&
+          approvals.reviewState === "approved" &&
+          existing?.reviewState !== "approved"
+        ) {
+          markTaskPlanApproved({
+            taskId: task.id,
+            actor: {
+              kind: "system",
+              id: "gitlab-sync",
+              displayNameSnapshot: "GitLab Sync",
+            },
+          });
+          log.info(
+            { taskId: task.id, iid: issue.iid, mrIid: mr.iid },
+            "GitLab plan approved; task resumed at implementing",
+          );
+        } else if (
+          task &&
+          planReviewMode &&
+          task.status === "plan_review" &&
+          requestChangesNote &&
+          requestChangesNote.id > (existing?.lastReviewNoteId ?? 0)
+        ) {
+          const feedback = collectMergeRequestHumanFeedback(
+            mrNotes,
+            existing?.lastReviewNoteId ?? 0,
+            REVIEW_MARKER,
+          );
+          markTaskPlanChangesRequested({
+            taskId: task.id,
+            feedback,
+            actor: {
+              kind: "system",
+              id: "gitlab-review",
+              displayNameSnapshot: "GitLab Review",
+            },
+          });
+          log.info(
+            {
+              taskId: task.id,
+              iid: issue.iid,
+              mrIid: mr.iid,
+              noteId: requestChangesNote.id,
+              feedbackLength: feedback?.length ?? 0,
+            },
+            "GitLab plan review requested changes; task returned to planning",
+          );
         } else if (
           task &&
           requestChangesNote &&

@@ -10,6 +10,8 @@ import {
   importGitHubIssueTask,
   listGitHubIssues,
   markGitHubIssueUnavailable,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
   recordGitHubRepositorySync,
   setTaskFields,
   updateGitHubPullRequest,
@@ -276,6 +278,73 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
               autoQueueCommitCompletedAt: null,
             },
             { kind: "system", id: "github-review", displayNameSnapshot: "GitHub Review" },
+          );
+        } else if (
+          task &&
+          task.status === "plan_review" &&
+          existing?.prMode === "plan_review" &&
+          review.id !== null &&
+          review.id !== (existing?.lastReviewId ?? null)
+        ) {
+          // Plan-review gate: an approved plan PR/MR is the only event allowed
+          // to move the task into implementing; a changes-requested review
+          // sends it back to planning for replanning on the same branch/PR.
+          if (review.state === "approved") {
+            markTaskPlanApproved({
+              taskId: task.id,
+              actor: {
+                kind: "system",
+                id: "github-sync",
+                displayNameSnapshot: "GitHub Sync",
+              },
+            });
+            log.info(
+              {
+                taskId: task.id,
+                issueNumber: issue.number,
+                prNumber: pull.number,
+                reviewId: review.id,
+              },
+              "GitHub plan review approved; task resumed at implementing",
+            );
+          } else if (review.state === "changes_requested") {
+            const feedback =
+              review.body && review.body.trim().length > 0 ? review.body : task.planReviewFeedback;
+            markTaskPlanChangesRequested({
+              taskId: task.id,
+              feedback,
+              actor: {
+                kind: "system",
+                id: "github-review",
+                displayNameSnapshot: "GitHub Review",
+              },
+            });
+            log.info(
+              {
+                taskId: task.id,
+                issueNumber: issue.number,
+                prNumber: pull.number,
+                reviewId: review.id,
+                feedbackLength: feedback?.length ?? 0,
+              },
+              "GitHub plan review requested changes; task returned to planning",
+            );
+          }
+        } else if (
+          task &&
+          task.status === "plan_review" &&
+          review.id !== null &&
+          review.id === (existing?.lastReviewId ?? null)
+        ) {
+          log.debug(
+            {
+              taskId: task.id,
+              issueNumber: issue.number,
+              prNumber: pull.number,
+              reviewId: review.id,
+              reviewState: review.state,
+            },
+            "GitHub plan review event already processed; skipping",
           );
         }
       }

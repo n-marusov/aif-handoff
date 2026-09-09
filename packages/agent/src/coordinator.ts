@@ -506,12 +506,16 @@ function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow):
   // Only plan-review tasks should be claimed by the plan-publisher stage. Tasks
   // without a VCS issue link (or with the feature flag off) stay on the legacy
   // flow and must not be claimed by the publisher or auto-implemented by the
-  // implementer before plan approval.
+  // implementer before plan approval. An implementing task that still lacks an
+  // approved plan (e.g. a legacy VCS task after the flag was enabled, or a
+  // manual move) is also ineligible so the implementer never runs unapproved.
   if (stageLabel === "plan-publisher") {
     return !taskRequiresPlanReview(task.id);
   }
-  if (stageLabel === "implementer" && task.status === "plan_ready") {
-    return taskRequiresPlanReview(task.id);
+  if (stageLabel === "implementer") {
+    if (task.status === "plan_ready" || task.status === "implementing") {
+      return taskRequiresPlanReview(task.id) && task.planReviewState !== "approved";
+    }
   }
   return false;
 }

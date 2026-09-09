@@ -18,6 +18,7 @@ import {
 import { createRuntimeWorkflowSpec } from "@aif/runtime";
 import { logActivity } from "../hooks.js";
 import { executeSubagentQuery } from "../subagentQuery.js";
+import { taskRequiresPlanReview } from "../planReviewPublisher.js";
 import { computePendingPlanLayers, computePlanLayers } from "../planLayers.js";
 import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 
@@ -173,6 +174,19 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
   if (!task) {
     log.error({ taskId }, "Task not found for implementation");
     throw new Error(`Task ${taskId} not found`);
+  }
+
+  // Plan-review gate guard (defense in depth). The coordinator only routes
+  // approved plan-review tasks to the implementer stage, but a task can still
+  // reach this runner without an approved plan (a legacy VCS task after the
+  // feature flag was enabled, a manual status move, or a direct invocation).
+  // Refuse to touch product files until the plan PR/MR is approved.
+  if (taskRequiresPlanReview(taskId) && task.planReviewState !== "approved") {
+    log.warn(
+      { taskId, status: task.status, planReviewState: task.planReviewState ?? null },
+      "Implementation blocked before plan approval; task stays on the plan-review gate",
+    );
+    return;
   }
 
   // Branch restore MUST happen before any repo/config/plan read. If the

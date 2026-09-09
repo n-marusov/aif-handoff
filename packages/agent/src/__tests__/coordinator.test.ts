@@ -483,6 +483,48 @@ describe("coordinator", () => {
     expect(task!.status).toBe("done");
   });
 
+  it("never runs the implementer for a VCS-linked task before its plan is approved", async () => {
+    const coordinatorEnv = getEnv();
+    const previousPlanReviewFlag = coordinatorEnv.AIF_PLAN_REVIEW_PR_ENABLED;
+    coordinatorEnv.AIF_PLAN_REVIEW_PR_ENABLED = true;
+    try {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({
+          id: "task-vcs-plan-review",
+          projectId: "test-project",
+          title: "VCS task",
+          status: "plan_ready",
+          autoMode: true,
+          planPath: ".ai-factory/plans/vcs.md",
+        })
+        .run();
+      db.insert(githubIssues)
+        .values({
+          projectId: "test-project",
+          issueNumber: 8,
+          taskId: "task-vcs-plan-review",
+          nodeId: "node-8",
+          htmlUrl: "https://github.com/o/r/issues/8",
+          state: "open",
+          metadataJson: "{}",
+          sourceUpdatedAt: "2026-01-01T00:00:00.000Z",
+          lastSyncedAt: "2026-01-01T00:00:00.000Z",
+        })
+        .run();
+
+      await pollAndProcess();
+
+      // The plan-publisher stage defers (no persisted branch) but the
+      // implementer must not claim the task while it waits for VCS approval.
+      expect(runImplementer).not.toHaveBeenCalledWith("task-vcs-plan-review", "/tmp/test");
+      const task = db.select().from(tasks).where(eq(tasks.id, "task-vcs-plan-review")).get();
+      expect(task!.status).toBe("plan_ready");
+    } finally {
+      coordinatorEnv.AIF_PLAN_REVIEW_PR_ENABLED = previousPlanReviewFlag;
+    }
+  });
+
   it("should run optional verify stage only for skills-mode tasks", async () => {
     const db = testDb.current;
     db.insert(tasks)
