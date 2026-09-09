@@ -117,7 +117,11 @@ describe("GitHub workflow publication", () => {
     const timeoutSpy = vi
       .spyOn(AbortSignal, "timeout")
       .mockImplementation(() => new AbortController().signal);
-    findGitHubIssueMock.mockReturnValue({ projectId: "project-1", issueNumber: 154 });
+    findGitHubIssueMock.mockReturnValue({
+      projectId: "project-1",
+      issueNumber: 154,
+      prMode: "plan_review",
+    });
     findTaskMock.mockReturnValue({ projectId: "project-1", branchName: "feature/x" });
     ensureAutoQueueCommitMock.mockResolvedValue({ commitSha: "abc" });
     execFileSyncMock.mockReturnValue(Buffer.from(""));

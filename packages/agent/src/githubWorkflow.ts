@@ -167,6 +167,18 @@ export async function publishGitHubTask(taskId: string, projectRoot: string): Pr
   const issue = findGitHubIssueByTaskId(taskId);
   if (!issue) return false;
 
+  if (getEnv().AIF_PLAN_REVIEW_PR_ENABLED && issue.prMode !== "plan_review") {
+    log.warn(
+      {
+        taskId,
+        issueNumber: issue.issueNumber,
+        prNumber: issue.prNumber ?? null,
+        prMode: issue.prMode ?? null,
+      },
+      "Final GitHub publication started without a prior plan-review PR mode",
+    );
+  }
+
   const task = findTaskById(taskId);
   if (!task?.branchName) {
     throw new StageManualBlockError("GitHub pull request publication requires a task branch.");

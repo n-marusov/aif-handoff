@@ -1625,14 +1625,27 @@ describe("GitLab project routes", () => {
         }),
       });
 
-    expect(await (await publish()).json()).toMatchObject({ mrIid: 200, mrState: "open" });
-    expect(await (await publish()).json()).toMatchObject({ mrIid: 200, mrState: "open" });
+    expect(await (await publish()).json()).toMatchObject({
+      mrIid: 200,
+      mrState: "open",
+      mrMode: "implementation",
+    });
+    expect(await (await publish()).json()).toMatchObject({
+      mrIid: 200,
+      mrState: "open",
+      mrMode: "implementation",
+    });
     const createCalls = fetchMock.mock.calls.filter(
       ([url, init]) => String(url).endsWith("/merge_requests") && init?.method === "POST",
     );
     const noteCalls = fetchMock.mock.calls.filter(
       ([url, init]) => String(url).includes("/notes") && init?.method === "POST",
     );
+    const implementationBody = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/merge_requests") && init?.method === "POST",
+    )?.[1] as { body?: string } | undefined;
+    expect(implementationBody?.body).toContain("aif:mr-mode=implementation");
+    expect(implementationBody?.body).toContain("Closes #154");
     expect(createCalls).toHaveLength(1);
     expect(noteCalls).toHaveLength(1);
   });

@@ -490,8 +490,16 @@ describe("GitHub project routes", () => {
         }),
       });
 
-    expect(await (await publish()).json()).toMatchObject({ prNumber: 200, prState: "open" });
-    expect(await (await publish()).json()).toMatchObject({ prNumber: 200, prState: "open" });
+    expect(await (await publish()).json()).toMatchObject({
+      prNumber: 200,
+      prState: "open",
+      prMode: "implementation",
+    });
+    expect(await (await publish()).json()).toMatchObject({
+      prNumber: 200,
+      prState: "open",
+      prMode: "implementation",
+    });
     const createCalls = fetchMock.mock.calls.filter(
       ([url, init]) => String(url).endsWith("/pulls") && init?.method === "POST",
     );
@@ -500,6 +508,11 @@ describe("GitHub project routes", () => {
     );
     expect(createCalls).toHaveLength(1);
     expect(commentCalls).toHaveLength(1);
+    const implementationBody = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/pulls") && init?.method === "POST",
+    )?.[1] as { body?: string } | undefined;
+    expect(implementationBody?.body).toContain("aif:pr-mode=implementation");
+    expect(implementationBody?.body).toContain("Closes #154");
   });
 
   it("publishes a Change Plan PR without closing the issue and marks prMode plan_review", async () => {

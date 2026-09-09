@@ -172,6 +172,18 @@ export async function publishGitLabTask(taskId: string, projectRoot: string): Pr
   const issue = findGitLabIssueByTaskId(taskId);
   if (!issue) return false;
 
+  if (getEnv().AIF_PLAN_REVIEW_PR_ENABLED && issue.mrMode !== "plan_review") {
+    log.warn(
+      {
+        taskId,
+        iid: issue.iid,
+        mrIid: issue.mrIid ?? null,
+        mrMode: issue.mrMode ?? null,
+      },
+      "Final GitLab publication started without a prior plan-review MR mode",
+    );
+  }
+
   const task = findTaskById(taskId);
   if (!task?.branchName) {
     throw new StageManualBlockError("GitLab merge request publication requires a task branch.");

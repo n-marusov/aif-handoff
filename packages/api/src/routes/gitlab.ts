@@ -442,7 +442,21 @@ gitlabRouter.post(
       return c.json({ error: "GitLab task linkage not found" }, 404);
     }
     const body = c.req.valid("json");
+    const approvedPlanSummary = [
+      task.planReviewCommitSha
+        ? `Approved plan commit: ${task.planReviewCommitSha}`
+        : "Approved plan commit: not recorded",
+      task.planReviewPublishedAt
+        ? `Plan published at: ${task.planReviewPublishedAt}`
+        : "Plan published at: not recorded",
+      task.planReviewApprovedAt
+        ? `Plan approved at: ${task.planReviewApprovedAt}`
+        : "Plan approved at: not recorded",
+    ].join("\n");
     const mrDescription = [
+      "<!-- aif:mr-mode=implementation -->",
+      "## Approved plan",
+      approvedPlanSummary,
       `Closes #${issue.iid}`,
       "## Implementation",
       (body.implementationLog ?? "Implementation completed by AIF.").slice(-20_000),
@@ -508,7 +522,7 @@ gitlabRouter.post(
         client.getCommitChecks(connection.namespace, connection.name, mr.sha),
         client.getMergeRequestApprovals(connection.namespace, connection.name, mr.iid),
       ]);
-      const linked = updateGitLabMergeRequest({
+      const updated = updateGitLabMergeRequest({
         projectId,
         iid: issue.iid,
         mrIid: mr.iid,
@@ -518,6 +532,8 @@ gitlabRouter.post(
         reviewState: approvals.reviewState,
         reviewFingerprint: fingerprint,
       });
+      const linked =
+        updateGitLabMergeRequestMode(projectId, issue.iid, "implementation") ?? updated;
       return c.json(linked);
     } catch (error) {
       return gitlabErrorResponse(c, error);

@@ -124,7 +124,11 @@ describe("GitLab workflow publication", () => {
   });
 
   it("pushes the branch and publishes through the internal API with an activity log", async () => {
-    findGitLabIssueMock.mockReturnValue({ projectId: "project-1", iid: 154 });
+    findGitLabIssueMock.mockReturnValue({
+      projectId: "project-1",
+      iid: 154,
+      mrMode: "plan_review",
+    });
     findTaskMock.mockReturnValue({
       projectId: "project-1",
       branchName: "feature/gitlab-issue-154",

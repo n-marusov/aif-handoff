@@ -381,7 +381,21 @@ githubRouter.post(
       return c.json({ error: "GitHub task linkage not found" }, 404);
     }
     const body = c.req.valid("json");
+    const approvedPlanSummary = [
+      task.planReviewCommitSha
+        ? `Approved plan commit: ${task.planReviewCommitSha}`
+        : "Approved plan commit: not recorded",
+      task.planReviewPublishedAt
+        ? `Plan published at: ${task.planReviewPublishedAt}`
+        : "Plan published at: not recorded",
+      task.planReviewApprovedAt
+        ? `Plan approved at: ${task.planReviewApprovedAt}`
+        : "Plan approved at: not recorded",
+    ].join("\n");
     const prBody = [
+      "<!-- aif:pr-mode=implementation -->",
+      "## Approved plan",
+      approvedPlanSummary,
       `Closes #${issue.issueNumber}`,
       "## Implementation",
       (body.implementationLog ?? "Implementation completed by AIF.").slice(-20_000),
@@ -436,7 +450,7 @@ githubRouter.post(
         });
       }
       const checks = await client.getCommitChecks(connection.owner, connection.name, pull.head.sha);
-      const linked = updateGitHubPullRequest({
+      const updated = updateGitHubPullRequest({
         projectId,
         issueNumber: issue.issueNumber,
         prNumber: pull.number,
@@ -446,6 +460,8 @@ githubRouter.post(
         reviewState: "pending",
         reviewFingerprint: fingerprint,
       });
+      const linked =
+        updateGitHubPullRequestMode(projectId, issue.issueNumber, "implementation") ?? updated;
       return c.json(linked);
     } catch (error) {
       return githubErrorResponse(c, error);
