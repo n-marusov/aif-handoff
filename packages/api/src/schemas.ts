@@ -121,6 +121,16 @@ export const githubPublishSchema = z.object({
   reviewComments: z.string().max(100_000).nullable().optional(),
 });
 
+/**
+ * Body for publishing a Change Plan PR (plan-review mode). The plan body is
+ * assembled server-side from the stored plan; the agent only forwards the
+ * branch (and optionally the deterministic plan commit sha).
+ */
+export const githubPlanPublishSchema = z.object({
+  branch: z.string().trim().min(1).max(250),
+  commitSha: z.string().trim().min(7).max(64).nullable().optional(),
+});
+
 export const gitlabConnectSchema = z.object({
   repository: z
     .string()
@@ -154,6 +164,15 @@ export const gitlabPublishSchema = z.object({
   commitSha: z.string().trim().min(7).max(64).nullable().optional(),
   implementationLog: z.string().max(100_000).nullable().optional(),
   reviewComments: z.string().max(100_000).nullable().optional(),
+});
+
+/**
+ * Body for publishing a Change Plan MR (plan-review mode). The MR description
+ * is assembled server-side from the stored plan.
+ */
+export const gitlabPlanPublishSchema = z.object({
+  branch: z.string().trim().min(1).max(250),
+  commitSha: z.string().trim().min(7).max(64).nullable().optional(),
 });
 
 export const updateProjectOrganizationSchema = z

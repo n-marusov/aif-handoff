@@ -147,6 +147,10 @@ export {
 export {
   applyTaskAction,
   transitionTaskStatus,
+  markTaskPlanPublished,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
+  recordTaskPlanReviewFeedback,
   type ApplyTaskActionInput,
   type TaskTransitionConflictCode,
   type TaskTransitionExtra,
@@ -189,6 +193,7 @@ export type CoordinatorStage =
   | "planner"
   | "improver"
   | "plan-checker"
+  | "plan-publisher"
   | "implementer"
   | "reviewer"
   | "verifier";
@@ -2085,7 +2090,7 @@ function coordinatorStageFilter(stage: CoordinatorStage) {
       )
     : stage === "improver"
       ? inArray(tasks.status, ["improve"])
-      : stage === "plan-checker"
+      : stage === "plan-checker" || stage === "plan-publisher"
         ? and(eq(tasks.status, "plan_ready"), eq(tasks.autoMode, true))
         : stage === "planner"
           ? inArray(tasks.status, ["planning"])
@@ -2429,6 +2434,7 @@ export function countActivePipelineTasksForProject(projectId: string): number {
           "planning",
           "improve",
           "plan_ready",
+          "plan_review",
           "implementing",
           "review",
           "verify",
@@ -2464,6 +2470,7 @@ export function hasActiveBranchBoundTasksForProject(projectId: string): boolean 
           "planning",
           "improve",
           "plan_ready",
+          "plan_review",
           "implementing",
           "review",
           "verify",

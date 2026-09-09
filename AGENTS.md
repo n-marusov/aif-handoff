@@ -89,6 +89,9 @@ packages/
         ├── index.ts         # Agent entry point
         ├── coordinator.ts   # Polling coordinator (node-cron)
         ├── autoQueueCommit.ts # Awaited Git commit gate before auto-queue terminal states
+        ├── planReviewCommit.ts # Deterministic plan-only commit gate (plan review flow)
+        ├── planReviewPublisher.ts # Commits + pushes plan and publishes plan PR/MR (plan_review gate)
+        ├── gitConventions.ts   # Target-project branch/commit convention resolver
         ├── subagentQuery.ts # Universal runtime-backed query execution
         ├── reviewGate.ts    # Auto-review gate using adapter lightModel
         ├── hooks.ts         # Activity logging, project root
@@ -122,17 +125,18 @@ data/                    # SQLite database files (gitignored)
 
 ## Documentation
 
-| Document        | Path                    | Description                                    |
-| --------------- | ----------------------- | ---------------------------------------------- |
-| README          | README.md               | Project landing page                           |
-| Getting Started | docs/getting-started.md | Installation, setup, first steps               |
-| Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow       |
-| API Reference   | docs/api.md             | REST endpoints, WebSocket events               |
-| Configuration   | docs/configuration.md   | Environment variables, logging, auth           |
-| Providers       | docs/providers.md       | Runtime profiles and adapter capabilities      |
-| MCP Sync        | docs/mcp-sync.md        | MCP tools, transports, and authentication      |
-| GitLab Demo     | docs/gitlab-demo.md     | End-to-end GitLab.com + router.ai demo runbook |
-| Dev GUI Demo    | docs/dev-gui-demo.md    | Local dev + Web UI GitLab/router.ai runbook    |
+| Document        | Path                    | Description                                          |
+| --------------- | ----------------------- | ---------------------------------------------------- |
+| README          | README.md               | Project landing page                                 |
+| Getting Started | docs/getting-started.md | Installation, setup, first steps                     |
+| Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow             |
+| API Reference   | docs/api.md             | REST endpoints, WebSocket events                     |
+| Configuration   | docs/configuration.md   | Environment variables, logging, auth                 |
+| Providers       | docs/providers.md       | Runtime profiles and adapter capabilities            |
+| MCP Sync        | docs/mcp-sync.md        | MCP tools, transports, and authentication            |
+| GitHub Demo     | docs/github-demo.md     | GitHub.com + router.ai runbook (Plan Review PR Gate) |
+| GitLab Demo     | docs/gitlab-demo.md     | End-to-end GitLab.com + router.ai demo runbook       |
+| Dev GUI Demo    | docs/dev-gui-demo.md    | Local dev + Web UI GitLab/router.ai runbook          |
 
 ## AI Context Files
 

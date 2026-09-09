@@ -407,3 +407,142 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
     throw error;
   }
 }
+
+const AGENT_ACTOR_DEFAULTS = {
+  kind: "agent",
+  id: "plan-review-gate",
+  displayNameSnapshot: "Plan Review Gate",
+} as const;
+
+function resolvePlanReviewActor(actor: AuditActor | undefined): AuditActor {
+  return actor ?? { ...AGENT_ACTOR_DEFAULTS };
+}
+
+/**
+ * Move a VCS-linked task from `plan_ready` into `plan_review` and record that
+ * the Change Plan was committed and published. Re-publishing after replanning
+ * overwrites the previous plan commit and clears stale approval/feedback.
+ */
+export function markTaskPlanPublished(input: {
+  taskId: string;
+  commitSha: string | null;
+  actor?: AuditActor;
+  now?: Date;
+}): TaskTransitionResult {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  log.info(
+    {
+      taskId: input.taskId,
+      commitSha: input.commitSha,
+      action: "task.plan_review.published",
+    },
+    "Marking task plan published",
+  );
+  return transitionTaskStatus({
+    taskId: input.taskId,
+    status: "plan_review",
+    expectedStatus: "plan_ready",
+    actor: resolvePlanReviewActor(input.actor),
+    action: "task.plan_review.published",
+    reason: "Change plan committed and published for plan review",
+    extra: {
+      planReviewState: "published",
+      planReviewCommitSha: input.commitSha,
+      planReviewPublishedAt: nowIso,
+      planReviewApprovedAt: null,
+      planReviewFeedback: null,
+    },
+    now,
+  });
+}
+
+/**
+ * Accept an approved plan: move the task from `plan_review` into `implementing`
+ * and record the approval timestamp.
+ */
+export function markTaskPlanApproved(input: {
+  taskId: string;
+  actor?: AuditActor;
+  now?: Date;
+}): TaskTransitionResult {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  log.info({ taskId: input.taskId, action: "task.plan_review.approved" }, "Marking task plan approved");
+  return transitionTaskStatus({
+    taskId: input.taskId,
+    status: "implementing",
+    expectedStatus: "plan_review",
+    actor: resolvePlanReviewActor(input.actor),
+    action: "task.plan_review.approved",
+    reason: "Change plan approved in VCS; implementation may start",
+    extra: {
+      planReviewState: "approved",
+      planReviewApprovedAt: nowIso,
+    },
+    now,
+  });
+}
+
+/**
+ * Route VCS "changes requested" back into `planning` for replanning while
+ * keeping the branch/PR linkage. Persists the reviewer feedback for the next
+ * planner run; logs only the feedback length, never the body.
+ */
+export function markTaskPlanChangesRequested(input: {
+  taskId: string;
+  feedback: string | null;
+  actor?: AuditActor;
+  now?: Date;
+}): TaskTransitionResult {
+  const now = input.now ?? new Date();
+  log.info(
+    {
+      taskId: input.taskId,
+      feedbackLength: input.feedback?.length ?? 0,
+      action: "task.plan_review.changes_requested",
+    },
+    "Plan changes requested; returning task to planning",
+  );
+  return transitionTaskStatus({
+    taskId: input.taskId,
+    status: "planning",
+    expectedStatus: "plan_review",
+    actor: resolvePlanReviewActor(input.actor),
+    action: "task.plan_review.changes_requested",
+    reason: "VCS reviewer requested plan changes",
+    extra: {
+      planReviewState: "changes_requested",
+      planReviewApprovedAt: null,
+      planReviewFeedback: input.feedback,
+    },
+    now,
+  });
+}
+
+/**
+ * Persist accumulated plan review feedback without changing task status.
+ * Used when a plan-mode PR/MR receives new review comments that do not yet
+ * flip the gate decision. Returns the refreshed task row.
+ */
+export function recordTaskPlanReviewFeedback(input: {
+  taskId: string;
+  feedback: string | null;
+  now?: Date;
+}): TaskRow | undefined {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  getDb()
+    .update(tasks)
+    .set({ planReviewFeedback: input.feedback, updatedAt: nowIso })
+    .where(eq(tasks.id, input.taskId))
+    .run();
+  log.info(
+    {
+      taskId: input.taskId,
+      feedbackLength: input.feedback?.length ?? 0,
+      action: "task.plan_review.feedback_recorded",
+    },
+    "Plan review feedback recorded",
+  );
+  return getDb().select().from(tasks).where(eq(tasks.id, input.taskId)).get();
+}

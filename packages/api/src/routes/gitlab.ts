@@ -10,18 +10,28 @@ import {
   importGitLabIssueTask,
   listGitLabIssues,
   markGitLabIssueUnavailable,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
   recordGitLabRepositorySync,
   setTaskFields,
   updateGitLabMergeRequest,
+  updateGitLabMergeRequestMode,
   updateTaskStatus,
   upsertGitLabRepository,
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
-import { gitlabConnectSchema, gitlabPublishSchema, gitlabSyncSchema } from "../schemas.js";
+import {
+  gitlabConnectSchema,
+  gitlabPlanPublishSchema,
+  gitlabPublishSchema,
+  gitlabSyncSchema,
+} from "../schemas.js";
 import { callAgentGitPrepare } from "../services/gitlabPrepareBridge.js";
 import {
   GitLabApiError,
   GitLabClient,
+  collectMergeRequestHumanFeedback,
+  findLatestRequestChangesNote,
   findMergeRequestClosingIssue,
   issueIsEligible,
   reviewFingerprint,
@@ -264,11 +274,11 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           connection.name,
           mr.iid,
         );
-        const requestChangesNote = mrNotes
-          .filter(
-            (note) => note.system && note.body?.trim().toLowerCase().includes("requested changes"),
-          )
-          .sort((a, b) => b.id - a.id)[0];
+        // GitLab "Request changes" is not exposed via detailed_merge_status on
+        // Free; the signal is a system note ("requested changes") in the MR
+        // notes API. Detection lives in the service helper; the route only
+        // consumes the structured note identity for edge-triggered transitions.
+        const requestChangesNote = findLatestRequestChangesNote(mrNotes);
         const mergeRequestUpdate: Parameters<typeof updateGitLabMergeRequest>[0] = {
           projectId,
           iid: issue.iid,
@@ -296,6 +306,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           // requested-changes → implementing) see the post-transition status.
           task = findTaskById(result.taskId);
         }
+        const planReviewMode = existing?.mrMode === "plan_review";
         if (task && mrState === "merged" && task.status === "done") {
           updateTaskStatus(
             task.id,
@@ -305,6 +316,62 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           );
         } else if (task && mrState === "closed") {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
+          if (planReviewMode && task.status === "plan_review") {
+            log.warn(
+              { taskId: task.id, iid: issue.iid, mrIid: mr.iid },
+              "GitLab plan-mode merge request closed without merge; task paused",
+            );
+          }
+        } else if (
+          task &&
+          planReviewMode &&
+          task.status === "plan_review" &&
+          approvals.reviewState === "approved" &&
+          existing?.reviewState !== "approved"
+        ) {
+          markTaskPlanApproved({
+            taskId: task.id,
+            actor: {
+              kind: "system",
+              id: "gitlab-sync",
+              displayNameSnapshot: "GitLab Sync",
+            },
+          });
+          log.info(
+            { taskId: task.id, iid: issue.iid, mrIid: mr.iid },
+            "GitLab plan approved; task resumed at implementing",
+          );
+        } else if (
+          task &&
+          planReviewMode &&
+          task.status === "plan_review" &&
+          requestChangesNote &&
+          requestChangesNote.id > (existing?.lastReviewNoteId ?? 0)
+        ) {
+          const feedback = collectMergeRequestHumanFeedback(
+            mrNotes,
+            existing?.lastReviewNoteId ?? 0,
+            REVIEW_MARKER,
+          );
+          markTaskPlanChangesRequested({
+            taskId: task.id,
+            feedback,
+            actor: {
+              kind: "system",
+              id: "gitlab-review",
+              displayNameSnapshot: "GitLab Review",
+            },
+          });
+          log.info(
+            {
+              taskId: task.id,
+              iid: issue.iid,
+              mrIid: mr.iid,
+              noteId: requestChangesNote.id,
+              feedbackLength: feedback?.length ?? 0,
+            },
+            "GitLab plan review requested changes; task returned to planning",
+          );
         } else if (
           task &&
           requestChangesNote &&
@@ -375,7 +442,21 @@ gitlabRouter.post(
       return c.json({ error: "GitLab task linkage not found" }, 404);
     }
     const body = c.req.valid("json");
+    const approvedPlanSummary = [
+      task.planReviewCommitSha
+        ? `Approved plan commit: ${task.planReviewCommitSha}`
+        : "Approved plan commit: not recorded",
+      task.planReviewPublishedAt
+        ? `Plan published at: ${task.planReviewPublishedAt}`
+        : "Plan published at: not recorded",
+      task.planReviewApprovedAt
+        ? `Plan approved at: ${task.planReviewApprovedAt}`
+        : "Plan approved at: not recorded",
+    ].join("\n");
     const mrDescription = [
+      "<!-- aif:mr-mode=implementation -->",
+      "## Approved plan",
+      approvedPlanSummary,
       `Closes #${issue.iid}`,
       "## Implementation",
       (body.implementationLog ?? "Implementation completed by AIF.").slice(-20_000),
@@ -441,7 +522,7 @@ gitlabRouter.post(
         client.getCommitChecks(connection.namespace, connection.name, mr.sha),
         client.getMergeRequestApprovals(connection.namespace, connection.name, mr.iid),
       ]);
-      const linked = updateGitLabMergeRequest({
+      const updated = updateGitLabMergeRequest({
         projectId,
         iid: issue.iid,
         mrIid: mr.iid,
@@ -451,6 +532,98 @@ gitlabRouter.post(
         reviewState: approvals.reviewState,
         reviewFingerprint: fingerprint,
       });
+      const linked =
+        updateGitLabMergeRequestMode(projectId, issue.iid, "implementation") ?? updated;
+      return c.json(linked);
+    } catch (error) {
+      return gitlabErrorResponse(c, error);
+    }
+  },
+);
+
+/**
+ * Publish (or update) the Change Plan MR for an issue-linked task. The task is
+ * left in plan_review until a human approves the MR. Description carries the
+ * plan review marker and deliberately omits `Closes #...` — the issue must
+ * stay open until the final implementation MR is published.
+ */
+gitlabRouter.post(
+  "/:id/gitlab/tasks/:taskId/publish-plan",
+  jsonValidator(gitlabPlanPublishSchema),
+  async (c) => {
+    const projectId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+    const connection = findGitLabRepository(projectId);
+    const task = findTaskById(taskId);
+    const issue = findGitLabIssueByTaskId(taskId);
+    if (!connection || !task || !issue || task.projectId !== projectId) {
+      return c.json({ error: "GitLab task linkage not found" }, 404);
+    }
+    const body = c.req.valid("json");
+    const planText = (task.plan ?? "").trim();
+    const mrDescription = [
+      "<!-- aif:mr-mode=plan_review -->",
+      "## Change Plan",
+      planText.length > 0 ? planText.slice(-50_000) : "_No plan text recorded._",
+      "## How to approve",
+      "Approve this merge request to start implementation. Request changes to ask the agent to revise the plan — comments are fed back to the planner.",
+      "_AIF never merges this merge request; a human owns the final decision._",
+    ].join("\n\n");
+    try {
+      const client = clientFor(connection);
+      let mr = issue.mrIid
+        ? await client.getMergeRequest(connection.namespace, connection.name, issue.mrIid)
+        : await client.findMergeRequest(connection.namespace, connection.name, body.branch);
+      if (mr) {
+        mr = await client.updateMergeRequest({
+          namespace: connection.namespace,
+          name: connection.name,
+          mrIid: mr.iid,
+          title: task.title,
+          description: mrDescription,
+        });
+      } else {
+        try {
+          mr = await client.createMergeRequest({
+            namespace: connection.namespace,
+            name: connection.name,
+            sourceBranch: body.branch,
+            targetBranch: connection.defaultBranch,
+            title: task.title,
+            description: mrDescription,
+          });
+        } catch (error) {
+          if (!(error instanceof GitLabApiError) || error.httpStatus !== 422) throw error;
+          const found = await client.findMergeRequest(
+            connection.namespace,
+            connection.name,
+            body.branch,
+          );
+          if (!found) throw error;
+          mr = await client.updateMergeRequest({
+            namespace: connection.namespace,
+            name: connection.name,
+            mrIid: found.iid,
+            title: task.title,
+            description: mrDescription,
+          });
+        }
+      }
+
+      const [checks, approvals] = await Promise.all([
+        client.getCommitChecks(connection.namespace, connection.name, mr.sha),
+        client.getMergeRequestApprovals(connection.namespace, connection.name, mr.iid),
+      ]);
+      updateGitLabMergeRequest({
+        projectId,
+        iid: issue.iid,
+        mrIid: mr.iid,
+        mrUrl: mr.web_url,
+        mrState: mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed",
+        mrChecksStatus: checks,
+        reviewState: approvals.reviewState,
+      });
+      const linked = updateGitLabMergeRequestMode(projectId, issue.iid, "plan_review");
       return c.json(linked);
     } catch (error) {
       return gitlabErrorResponse(c, error);

@@ -463,6 +463,7 @@ describe("TaskDetailHeader", () => {
             prUrl: "https://github.com/lee-to/aif-handoff/pull/200",
             prState: "open",
             prChecksStatus: "success",
+            prMode: "implementation",
             reviewState: "pending",
             lastReviewId: null,
             createdAt: "2026-08-08T00:00:00.000Z",
@@ -514,6 +515,7 @@ describe("TaskDetailHeader", () => {
             mrUrl: "https://gitlab.com/lee-to/aif-handoff/-/merge_requests/200",
             mrState: "open",
             mrChecksStatus: "success",
+            mrMode: "implementation",
             reviewState: "pending",
             lastReviewNoteId: null,
             createdAt: "2026-08-13T00:00:00.000Z",
@@ -534,6 +536,173 @@ describe("TaskDetailHeader", () => {
     expect(screen.getByText("GITLAB #154")).toBeDefined();
     expect(screen.queryByText("Approve")).toBeNull();
     expect(screen.queryByText("Request changes")).toBeNull();
+  });
+
+  it("shows waiting-for-approval guidance with a GitHub pull request link for a plan_review task", () => {
+    render(
+      <TaskDetailHeader
+        task={{
+          ...baseTask,
+          status: "plan_review",
+          github: {
+            projectId: "proj-1",
+            issueNumber: 154,
+            taskId: baseTask.id,
+            nodeId: "issue-node",
+            htmlUrl: "https://github.com/lee-to/aif-handoff/issues/154",
+            state: "open",
+            metadata: {
+              title: "GitHub mode",
+              body: "",
+              author: "lee-to",
+              labels: [],
+              assignees: [],
+              milestone: null,
+              comments: [],
+            },
+            sourceUpdatedAt: "2026-08-08T00:00:00.000Z",
+            lastSyncedAt: "2026-08-08T00:00:00.000Z",
+            syncError: null,
+            prNumber: 200,
+            prUrl: "https://github.com/lee-to/aif-handoff/pull/200",
+            prState: "open",
+            prChecksStatus: "success",
+            prMode: "plan_review",
+            reviewState: "pending",
+            lastReviewId: null,
+            createdAt: "2026-08-08T00:00:00.000Z",
+            updatedAt: "2026-08-08T00:00:00.000Z",
+          },
+        }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for plan approval")).toBeDefined();
+    expect(screen.getByRole("link", { name: "pull request #200" }).getAttribute("href")).toBe(
+      "https://github.com/lee-to/aif-handoff/pull/200",
+    );
+    expect(screen.queryByText("Start implementation")).toBeNull();
+  });
+
+  it("keeps VCS plan-gate events out of the action bar for a server-permitted plan_review task", () => {
+    render(
+      <TaskDetailHeader
+        task={{
+          ...baseTask,
+          status: "plan_review",
+          github: {
+            projectId: "proj-1",
+            issueNumber: 154,
+            taskId: baseTask.id,
+            nodeId: "issue-node",
+            htmlUrl: "https://github.com/lee-to/aif-handoff/issues/154",
+            state: "open",
+            metadata: {
+              title: "GitHub mode",
+              body: "",
+              author: "lee-to",
+              labels: [],
+              assignees: [],
+              milestone: null,
+              comments: [],
+            },
+            sourceUpdatedAt: "2026-08-08T00:00:00.000Z",
+            lastSyncedAt: "2026-08-08T00:00:00.000Z",
+            syncError: null,
+            prNumber: 200,
+            prUrl: "https://github.com/lee-to/aif-handoff/pull/200",
+            prState: "open",
+            prChecksStatus: "success",
+            prMode: "plan_review",
+            reviewState: "pending",
+            lastReviewId: null,
+            createdAt: "2026-08-08T00:00:00.000Z",
+            updatedAt: "2026-08-08T00:00:00.000Z",
+          },
+          permissions: {
+            canAssign: false,
+            canHandoff: false,
+            canSelfAssign: false,
+            canAct: true,
+            canComment: true,
+            permittedActions: ["approve_plan", "request_plan_changes", "start_implementation"],
+          },
+        }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for plan approval")).toBeDefined();
+    expect(screen.queryByText("Approve plan")).toBeNull();
+    expect(screen.queryByText("Request plan changes")).toBeNull();
+    expect(screen.queryByText("Start implementation")).toBeNull();
+  });
+
+  it("links the linked merge request while a GitLab plan review is pending", () => {
+    render(
+      <TaskDetailHeader
+        task={{
+          ...baseTask,
+          status: "plan_review",
+          gitlab: {
+            projectId: "proj-1",
+            iid: 154,
+            taskId: baseTask.id,
+            globalId: "gid://gitlab/Issue/154",
+            webUrl: "https://gitlab.com/lee-to/aif-handoff/-/issues/154",
+            state: "open",
+            metadata: {
+              title: "GitLab mode",
+              body: "",
+              author: "lee-to",
+              labels: [],
+              assignees: [],
+              milestone: null,
+              comments: [],
+            },
+            sourceUpdatedAt: "2026-08-13T00:00:00.000Z",
+            lastSyncedAt: "2026-08-13T00:00:00.000Z",
+            syncError: null,
+            mrIid: 200,
+            mrUrl: "https://gitlab.com/lee-to/aif-handoff/-/merge_requests/200",
+            mrState: "open",
+            mrChecksStatus: "success",
+            mrMode: "plan_review",
+            reviewState: "pending",
+            lastReviewNoteId: null,
+            createdAt: "2026-08-13T00:00:00.000Z",
+            updatedAt: "2026-08-13T00:00:00.000Z",
+          },
+        }}
+        activeTab="implementation"
+        onTabChange={vi.fn()}
+        onActionClick={vi.fn()}
+        onTogglePaused={vi.fn()}
+        isDisabled={false}
+        isCheckingStartAi={false}
+        planChangeSuccess={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "merge request #200" }).getAttribute("href")).toBe(
+      "https://gitlab.com/lee-to/aif-handoff/-/merge_requests/200",
+    );
   });
 
   it("should render Resume button and PAUSED badge when task is paused", () => {

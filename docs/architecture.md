@@ -127,13 +127,21 @@ Planning ──[runPlanImprove]──► Improve ──► Plan Ready
 Implementing ──[runPostVerify]──► Verify ──► Review
 ```
 
-| Stage Transition                                                                                 | Agent                                                                     | Description                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backlog → Planning → Plan Ready                                                                  | `plan-coordinator`                                                        | Iterative plan refinement via `plan-polisher`                                                                                                            |
-| Planning → Improve → Plan Ready                                                                  | `/aif-improve`                                                            | Optional skills-mode plan refinement. Enabled per task with `runPlanImprove`; ignored when `useSubagents=true`                                           |
-| Plan Ready → Implementing → Review                                                               | `implement-coordinator`                                                   | Parallel execution with worktrees + quality sidecars                                                                                                     |
-| Implementing → Verify → Review / Done                                                            | `/aif-verify`                                                             | Optional skills-mode implementation verification against the plan before review. Enabled per task with `runPostVerify`; ignored when `useSubagents=true` |
-| Review → Done / Review → request_changes → Implementing / Review → Done + manual review required | `review-sidecar` + `security-sidecar` (+ auto review gate in coordinator) | Code review and security audit in parallel; in auto mode, structured blocking findings drive automatic rework until success or explicit manual handoff   |
+When `AIF_PLAN_REVIEW_PR_ENABLED=true`, VCS-issue-linked tasks (GitHub or GitLab
+mode) additionally stop at a mandatory `plan_review` gate between `plan_ready` and
+`implementing`. The coordinator inserts a `plan-publisher` stage after the plan
+checker; the publisher commits only the plan file(s), pushes the branch, publishes a
+plan-only PR/MR, and leaves the task in `plan_review` until a human approves it in the
+VCS (see [Plan Review PR/MR Gate](#plan-review-prmr-gate)).
+
+| Stage Transition                                                                                 | Agent                                                                     | Description                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backlog → Planning → Plan Ready                                                                  | `plan-coordinator`                                                        | Iterative plan refinement via `plan-polisher`                                                                                                                         |
+| Planning → Improve → Plan Ready                                                                  | `/aif-improve`                                                            | Optional skills-mode plan refinement. Enabled per task with `runPlanImprove`; ignored when `useSubagents=true`                                                        |
+| Plan Ready → Implementing → Review                                                               | `implement-coordinator`                                                   | Parallel execution with worktrees + quality sidecars                                                                                                                  |
+| Plan Ready → Plan Review → Implementing (plan-review gate)                                       | `plan-publisher` → VCS approval (sync) → `implement-coordinator`          | Optional `AIF_PLAN_REVIEW_PR_ENABLED` gate: plan-only commit + plan PR/MR published, then implementation only after human approval (GitHub/GitLab-issue-linked tasks) |
+| Implementing → Verify → Review / Done                                                            | `/aif-verify`                                                             | Optional skills-mode implementation verification against the plan before review. Enabled per task with `runPostVerify`; ignored when `useSubagents=true`              |
+| Review → Done / Review → request_changes → Implementing / Review → Done + manual review required | `review-sidecar` + `security-sidecar` (+ auto review gate in coordinator) | Code review and security audit in parallel; in auto mode, structured blocking findings drive automatic rework until success or explicit manual handoff                |
 
 ### GitHub Issue-to-PR Workflow
 
@@ -211,6 +219,68 @@ with `reworkRequested=true` (edge-triggered, so repeated syncs do not bounce the
 Authentication/access failures, rate limits, push failures, closed issues,
 and unavailable API services are surfaced or paused without creating a second task or MR.
 
+### Plan Review PR/MR Gate
+
+The plan-review gate is an optional hard gate between `plan_ready` and `implementing`
+for VCS-issue-linked tasks, enabled by `AIF_PLAN_REVIEW_PR_ENABLED=true`. It is
+designed to match the hand-off contract: the agent never starts implementation until a
+human approves the scope on the pull/merge request. Off by default, it leaves the
+legacy local auto-implement flow untouched for tasks without VCS linkage.
+
+Flow (one Issue = one branch = one PR/MR):
+
+```text
+plan_ready ──[plan-publisher]──► plan_review ──[PR/MR approved]──► implementing ──► review ──► done
+                 │  deterministic plan-only commit (never product files)
+                 │  push branch + publish/update plan PR/MR (`plan_review` mode)
+                 ▼
+            plan_review  (planReviewState=published; waits for the human)
+                 │
+                 ├─[PR/MR approval]──────────────► implementing (planReviewState=approved)
+                 └─[changes requested / comments] ► planning (planReviewState=changes_requested,
+                                                     feedback persisted) → same branch → new plan
+                                                     commit → PR/MR body updated → plan_review again
+```
+
+Mechanics:
+
+- **Plan-only commit.** `ensurePlanReviewCommit` (in `planReviewCommit.ts`) stages only
+  the task's plan paths and **rejects a dirty work tree with product files** before
+  approval; the commit subject is deterministic (never LLM-generated). Branch naming and
+  commit-message format are resolved from the target project's RULES by
+  `gitConventions.ts` when explicit conventions exist, falling back to the default
+  Handoff branch naming and Conventional Commits-style messages.
+- **Plan PR/MR publication.** `runPlanReviewPublisher` (in `planReviewPublisher.ts`)
+  runs as the `plan-publisher` pipeline stage, then delegates to
+  `publishGitHubPlanTask` / `publishGitLabPlanTask`, which create or update the PR/MR
+  with a body marker `<!-- aif:pr-mode=plan_review -->` (GitHub) or
+  `<!-- aif:mr-mode=plan_review -->` (GitLab). The plan PR/MR deliberately omits
+  `Closes #...` — the issue must stay open until final implementation.
+- **Approval and replanning are sync-driven.** GitHub sync (`routes/github.ts`) moves a
+  `plan_review` task to `implementing` when the latest review is `approved`, and back to
+  `planning` (with `planReviewState=changes_requested` and the review text persisted as
+  `planReviewFeedback`) when changes are requested or new feedback arrives. GitLab sync
+  mirrors this with the MR approvals endpoint and the request-changes note signal
+  (`mrMode === "plan_review"`). Review/note identities are deduped so repeated syncs do
+  not bounce the task.
+- **Replanning reuses the same branch.** Replanning keeps the persisted branch/worktree
+  and plan path; the next `plan-publisher` run commits the revised plan and updates the
+  same PR/MR body.
+- **Implementation guard.** The coordinator never claims a plan-review task for the
+  implementer unless `planReviewState === "approved"`; `runImplementer` repeats the same
+  defensive check before touching product files. The web UI hides `Start implementation`
+  while the task is in `plan_review`.
+- **Final PR/MR conversion.** After implementation/review, the final publish updates the
+  **same** PR/MR: the marker flips to `implementation`, the body adds the implementation
+  log and test evidence, preserves the approved-plan summary, and only then appends
+  `Closes #...`.
+
+Logging: plan publication appears under the `plan-review:publisher` logger (INFO on
+push/PR-MR publication and on transition to `plan_review`); VCS approval/replanning is
+logged by the API sync routes (INFO on approval/replan transitions); blocked
+implementation is a WARN with `taskId`, `status`, and `planReviewState` from the
+coordinator/implementer — no stack trace for the expected waiting state.
+
 ### Reliability Guards
 
 The pipeline includes four reliability layers for long-running autonomous execution:
@@ -247,12 +317,18 @@ Defined in `packages/shared/src/stateMachine.ts`. Human actions available per st
 | `planning`         | _(none — agent working)_                                 |
 | `improve`          | _(none — agent working)_                                 |
 | `plan_ready`       | `start_implementation`, `request_replanning`, `fast_fix` |
+| `plan_review`      | _(none — waits for human approval on the plan PR/MR)_    |
 | `implementing`     | _(none — agent working)_                                 |
 | `review`           | _(none — agent working)_                                 |
 | `verify`           | _(none — agent working)_                                 |
 | `blocked_external` | `retry_from_blocked`                                     |
 | `done`             | `approve_done`, `request_changes`                        |
 | `verified`         | _(terminal state)_                                       |
+
+`publish_plan`, `approve_plan`, and `request_plan_changes` are agent/VCS-driven events
+for the plan-review gate and are **not** human actions in the UI: publishing happens via
+the coordinator's `plan-publisher` stage, and approval/requested-changes arrive from PR/MR
+review state during VCS sync (see [Plan Review PR/MR Gate](#plan-review-prmr-gate)).
 
 Tasks have an `autoMode` flag. When `true`, the agent automatically transitions through all stages. This includes an automatic post-review gate: reviewer output is stored in a structured format, parsed deterministically, and converted into blocking findings for the next cycle. When blockers remain, the coordinator applies a `request_changes`-style transition (`done -> implementing`) with an agent comment containing required fixes. When `false`, the user must manually trigger `start_implementation` from `plan_ready`.
 

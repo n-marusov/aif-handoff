@@ -109,6 +109,31 @@ describe("runPlanner comment selection", () => {
     expect(call.prompt).not.toContain("message: comment-01");
   });
 
+  it("attaches VCS plan review feedback to the replanning prompt", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({
+        id: "task-replan-1",
+        projectId: "project-1",
+        title: "Task",
+        description: "Desc",
+        status: "planning",
+        plan: "Old plan",
+        useSubagents: true,
+        planReviewFeedback: "Split the migration into two steps",
+        planReviewState: "changes_requested",
+      })
+      .run();
+
+    await runPlanner("task-replan-1", "/tmp/planner-test");
+
+    const call = queryMock.mock.calls[0]?.[0] as { prompt: string };
+    expect(call.prompt).toContain(
+      "VCS plan review feedback (address every point in the revised plan):",
+    );
+    expect(call.prompt).toContain("Split the migration into two steps");
+  });
+
   it("breaks same-timestamp ties by id and still uses one latest comment", async () => {
     const db = testDb.current;
     db.insert(tasks)

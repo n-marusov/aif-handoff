@@ -42,7 +42,7 @@ interface GitLabIssueResponse {
   updated_at: string;
 }
 
-interface GitLabNoteResponse {
+export interface GitLabNoteResponse {
   id: number;
   body: string | null;
   author: { username: string } | null;
@@ -446,4 +446,56 @@ export function latestReviewState(approvals: GitLabApprovalResponse): {
   state: "pending" | "approved";
 } {
   return { state: approvals.approved ? "approved" : "pending" };
+}
+
+export interface GitLabRequestChangesNote {
+  id: number;
+  body: string | null;
+  authorUsername: string | null;
+  createdAt: string;
+}
+
+/**
+ * Locate the most recent GitLab system note recording a "requested changes"
+ * review action. Detection lives in the service layer so route logic never
+ * spreads text-pattern checks over note payloads (structured classification
+ * rule). Returns null when no such note exists.
+ */
+export function findLatestRequestChangesNote(
+  notes: GitLabNoteResponse[],
+): GitLabRequestChangesNote | null {
+  const latest = notes
+    .filter((note) => note.system && note.body?.trim().toLowerCase().includes("requested changes"))
+    .sort((a, b) => b.id - a.id)[0];
+  if (!latest) return null;
+  return {
+    id: latest.id,
+    body: latest.body,
+    authorUsername: latest.author?.username ?? null,
+    createdAt: latest.created_at,
+  };
+}
+
+/**
+ * Compose human (non-system) MR note bodies newer than `sinceNoteId` into a
+ * single planner feedback string. Notes containing `excludeBodyContaining`
+ * (e.g. the AIF marker prefix) are skipped so the bot never feeds its own
+ * comments back into replanning. Returns null when there is no new feedback.
+ */
+export function collectMergeRequestHumanFeedback(
+  notes: GitLabNoteResponse[],
+  sinceNoteId: number,
+  excludeBodyContaining: string,
+): string | null {
+  const parts: string[] = [];
+  for (const note of notes) {
+    if (note.system) continue;
+    if (note.id <= sinceNoteId) continue;
+    const body = (note.body ?? "").trim();
+    if (!body) continue;
+    if (excludeBodyContaining.length > 0 && body.includes(excludeBodyContaining)) continue;
+    parts.push(`[${note.author?.username ?? "unknown"}] ${body.slice(0, 2000)}`);
+  }
+  const feedback = parts.join("\n\n").trim().slice(0, 20_000);
+  return feedback.length > 0 ? feedback : null;
 }

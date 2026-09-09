@@ -10,14 +10,22 @@ import {
   importGitHubIssueTask,
   listGitHubIssues,
   markGitHubIssueUnavailable,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
   recordGitHubRepositorySync,
   setTaskFields,
   updateGitHubPullRequest,
+  updateGitHubPullRequestMode,
   updateTaskStatus,
   upsertGitHubRepository,
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
-import { githubConnectSchema, githubPublishSchema, githubSyncSchema } from "../schemas.js";
+import {
+  githubConnectSchema,
+  githubPlanPublishSchema,
+  githubPublishSchema,
+  githubSyncSchema,
+} from "../schemas.js";
 import {
   GitHubApiError,
   GitHubClient,
@@ -271,6 +279,73 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
             },
             { kind: "system", id: "github-review", displayNameSnapshot: "GitHub Review" },
           );
+        } else if (
+          task &&
+          task.status === "plan_review" &&
+          existing?.prMode === "plan_review" &&
+          review.id !== null &&
+          review.id !== (existing?.lastReviewId ?? null)
+        ) {
+          // Plan-review gate: an approved plan PR/MR is the only event allowed
+          // to move the task into implementing; a changes-requested review
+          // sends it back to planning for replanning on the same branch/PR.
+          if (review.state === "approved") {
+            markTaskPlanApproved({
+              taskId: task.id,
+              actor: {
+                kind: "system",
+                id: "github-sync",
+                displayNameSnapshot: "GitHub Sync",
+              },
+            });
+            log.info(
+              {
+                taskId: task.id,
+                issueNumber: issue.number,
+                prNumber: pull.number,
+                reviewId: review.id,
+              },
+              "GitHub plan review approved; task resumed at implementing",
+            );
+          } else if (review.state === "changes_requested") {
+            const feedback =
+              review.body && review.body.trim().length > 0 ? review.body : task.planReviewFeedback;
+            markTaskPlanChangesRequested({
+              taskId: task.id,
+              feedback,
+              actor: {
+                kind: "system",
+                id: "github-review",
+                displayNameSnapshot: "GitHub Review",
+              },
+            });
+            log.info(
+              {
+                taskId: task.id,
+                issueNumber: issue.number,
+                prNumber: pull.number,
+                reviewId: review.id,
+                feedbackLength: feedback?.length ?? 0,
+              },
+              "GitHub plan review requested changes; task returned to planning",
+            );
+          }
+        } else if (
+          task &&
+          task.status === "plan_review" &&
+          review.id !== null &&
+          review.id === (existing?.lastReviewId ?? null)
+        ) {
+          log.debug(
+            {
+              taskId: task.id,
+              issueNumber: issue.number,
+              prNumber: pull.number,
+              reviewId: review.id,
+              reviewState: review.state,
+            },
+            "GitHub plan review event already processed; skipping",
+          );
         }
       }
     }
@@ -306,7 +381,21 @@ githubRouter.post(
       return c.json({ error: "GitHub task linkage not found" }, 404);
     }
     const body = c.req.valid("json");
+    const approvedPlanSummary = [
+      task.planReviewCommitSha
+        ? `Approved plan commit: ${task.planReviewCommitSha}`
+        : "Approved plan commit: not recorded",
+      task.planReviewPublishedAt
+        ? `Plan published at: ${task.planReviewPublishedAt}`
+        : "Plan published at: not recorded",
+      task.planReviewApprovedAt
+        ? `Plan approved at: ${task.planReviewApprovedAt}`
+        : "Plan approved at: not recorded",
+    ].join("\n");
     const prBody = [
+      "<!-- aif:pr-mode=implementation -->",
+      "## Approved plan",
+      approvedPlanSummary,
       `Closes #${issue.issueNumber}`,
       "## Implementation",
       (body.implementationLog ?? "Implementation completed by AIF.").slice(-20_000),
@@ -361,7 +450,7 @@ githubRouter.post(
         });
       }
       const checks = await client.getCommitChecks(connection.owner, connection.name, pull.head.sha);
-      const linked = updateGitHubPullRequest({
+      const updated = updateGitHubPullRequest({
         projectId,
         issueNumber: issue.issueNumber,
         prNumber: pull.number,
@@ -371,6 +460,84 @@ githubRouter.post(
         reviewState: "pending",
         reviewFingerprint: fingerprint,
       });
+      const linked =
+        updateGitHubPullRequestMode(projectId, issue.issueNumber, "implementation") ?? updated;
+      return c.json(linked);
+    } catch (error) {
+      return githubErrorResponse(c, error);
+    }
+  },
+);
+
+/**
+ * Publish (or update) the Change Plan PR for an issue-linked task. The task is
+ * left in plan_review until a human approves the PR. Body carries the plan
+ * review marker and deliberately omits `Closes #...` — the issue must stay
+ * open until the final implementation PR is published.
+ */
+githubRouter.post(
+  "/:id/github/tasks/:taskId/publish-plan",
+  jsonValidator(githubPlanPublishSchema),
+  async (c) => {
+    const projectId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+    const connection = findGitHubRepository(projectId);
+    const task = findTaskById(taskId);
+    const issue = findGitHubIssueByTaskId(taskId);
+    if (!connection || !task || !issue || task.projectId !== projectId) {
+      return c.json({ error: "GitHub task linkage not found" }, 404);
+    }
+    const body = c.req.valid("json");
+    const planText = (task.plan ?? "").trim();
+    const prBody = [
+      "<!-- aif:pr-mode=plan_review -->",
+      "## Change Plan",
+      planText.length > 0 ? planText.slice(-50_000) : "_No plan text recorded._",
+      "## How to approve",
+      "Approve this pull request to start implementation. Request changes to ask the agent to revise the plan — comments are fed back to the planner.",
+      "_AIF never merges this pull request; a human owns the final decision._",
+    ].join("\n\n");
+    try {
+      const client = new GitHubClient(tokenFor(connection.tokenEnvVar));
+      let pull = issue.prNumber
+        ? await client.getPullRequest(connection.owner, connection.name, issue.prNumber)
+        : await client.findPullRequest(connection.owner, connection.name, body.branch);
+      if (pull) {
+        pull = await client.updatePullRequest({
+          owner: connection.owner,
+          repository: connection.name,
+          prNumber: pull.number,
+          title: task.title,
+          body: prBody,
+        });
+      } else {
+        try {
+          pull = await client.createPullRequest({
+            owner: connection.owner,
+            repository: connection.name,
+            title: task.title,
+            body: prBody,
+            head: body.branch,
+            base: connection.defaultBranch,
+          });
+        } catch (error) {
+          if (!(error instanceof GitHubApiError) || error.httpStatus !== 422) throw error;
+          pull = await client.findPullRequest(connection.owner, connection.name, body.branch);
+          if (!pull) throw error;
+        }
+      }
+
+      const checks = await client.getCommitChecks(connection.owner, connection.name, pull.head.sha);
+      updateGitHubPullRequest({
+        projectId,
+        issueNumber: issue.issueNumber,
+        prNumber: pull.number,
+        prUrl: pull.html_url,
+        prState: pull.merged_at ? "merged" : pull.state,
+        prChecksStatus: checks,
+        reviewState: "pending",
+      });
+      const linked = updateGitHubPullRequestMode(projectId, issue.issueNumber, "plan_review");
       return c.json(linked);
     } catch (error) {
       return githubErrorResponse(c, error);

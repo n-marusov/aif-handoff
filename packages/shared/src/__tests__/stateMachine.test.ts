@@ -225,6 +225,74 @@ describe("task state machine", () => {
     }
   });
 
+  it("allows publish_plan from plan_ready into plan_review", () => {
+    const result = applyHumanTaskEvent(makeTask("plan_ready"), "publish_plan");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("plan_review");
+    }
+  });
+
+  it("denies publish_plan unless the plan is ready", () => {
+    expect(applyHumanTaskEvent(makeTask("planning"), "publish_plan").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("backlog"), "publish_plan").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("implementing"), "publish_plan").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("done"), "publish_plan").ok).toBe(false);
+  });
+
+  it("allows approve_plan from plan_review into implementing", () => {
+    const result = applyHumanTaskEvent(makeTask("plan_review"), "approve_plan");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("implementing");
+    }
+  });
+
+  it("denies approve_plan until the plan is under review", () => {
+    expect(applyHumanTaskEvent(makeTask("plan_ready"), "approve_plan").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("planning"), "approve_plan").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("done"), "approve_plan").ok).toBe(false);
+  });
+
+  it("allows request_plan_changes from plan_review back to planning", () => {
+    const result = applyHumanTaskEvent(makeTask("plan_review"), "request_plan_changes");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("planning");
+    }
+  });
+
+  it("denies request_plan_changes outside plan_review", () => {
+    expect(applyHumanTaskEvent(makeTask("plan_ready"), "request_plan_changes").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("implementing"), "request_plan_changes").ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("done"), "request_plan_changes").ok).toBe(false);
+  });
+
+  it("keeps plan review gate events behind an AI handoff for human-owned tasks", () => {
+    const task = {
+      ...makeTask("plan_review"),
+      executionOwner: "human" as const,
+      assignees: [],
+    };
+    const context = {
+      participantsModeEnabled: true,
+      actor: { kind: "participant" as const, id: "admin-1", displayNameSnapshot: "Admin" },
+      participantRole: "admin" as const,
+    };
+    expect(resolveTaskAction(task, "publish_plan", context)).toMatchObject({
+      ok: false,
+      code: "ai_handoff_required",
+    });
+    expect(resolveTaskAction(task, "approve_plan", context)).toMatchObject({
+      ok: false,
+      code: "ai_handoff_required",
+    });
+    expect(resolveTaskAction(task, "request_plan_changes", context)).toMatchObject({
+      ok: false,
+      code: "ai_handoff_required",
+    });
+  });
+
   it.each([
     ["backlog", "start_human_work", "planning"],
     ["planning", "mark_plan_ready", "plan_ready"],

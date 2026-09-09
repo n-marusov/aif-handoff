@@ -17,6 +17,7 @@ const {
   listGitHubIssues,
   markGitHubIssueUnavailable,
   updateGitHubPullRequest,
+  updateGitHubPullRequestMode,
   upsertGitHubRepository,
 } = await import("../index.js");
 
@@ -159,5 +160,46 @@ describe("GitHub issue import", () => {
       "Issue is no longer available",
     );
     expect(testDb.current.select().from(tasks).get()?.paused).toBe(true);
+  });
+});
+
+describe("GitHub pull request mode", () => {
+  const issueInput = {
+    projectId: "project-1",
+    owner: "openai",
+    repository: "example",
+    issueNumber: 42,
+    nodeId: "I_42",
+    htmlUrl: "https://github.com/openai/example/issues/42",
+    state: "open" as const,
+    sourceUpdatedAt: "2026-08-08T10:00:00Z",
+    snapshot: {
+      title: "Add GitHub mode",
+      body: "Issue body",
+      author: "octocat",
+      labels: ["aif"],
+      assignees: [],
+      milestone: null,
+      comments: [],
+    },
+  };
+
+  it("starts unset and switches between plan_review and implementation", () => {
+    importGitHubIssueTask(issueInput);
+    const linked = updateGitHubPullRequest({
+      projectId: "project-1",
+      issueNumber: 42,
+      prNumber: 7,
+      prUrl: "https://github.com/openai/example/pull/7",
+      prState: "open",
+    });
+    expect(linked?.prMode).toBeNull();
+
+    expect(
+      updateGitHubPullRequestMode("project-1", 42, "plan_review")?.prMode,
+    ).toBe("plan_review");
+    expect(
+      updateGitHubPullRequestMode("project-1", 42, "implementation")?.prMode,
+    ).toBe("implementation");
   });
 });

@@ -14,6 +14,7 @@ import {
   type GitLabIssueRow,
   type GitLabIssueSnapshot,
   type GitLabRepositoryConnection,
+  type PullRequestMode,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { createAuditEventValues } from "./audit.js";
@@ -90,6 +91,7 @@ function toIssueLink(row: GitLabIssueRow): GitLabIssueLink {
     mrUrl: row.mrUrl,
     mrState: row.mrState,
     mrChecksStatus: row.mrChecksStatus,
+    mrMode: row.mrMode,
     reviewState: row.reviewState,
     lastReviewNoteId: row.lastReviewNoteId,
     createdAt: row.createdAt,
@@ -513,6 +515,26 @@ export function updateGitLabMergeRequest(input: {
     .where(and(eq(gitlabIssues.projectId, input.projectId), eq(gitlabIssues.iid, input.iid)))
     .run();
   return findGitLabIssue(input.projectId, input.iid);
+}
+
+/**
+ * Switch the published MR for a linked GitLab issue between plan-review and
+ * final implementation mode. The MR stays on the same issue branch; only the
+ * description semantics change.
+ */
+export function updateGitLabMergeRequestMode(
+  projectId: string,
+  iid: number,
+  mode: PullRequestMode,
+): GitLabIssueLink | undefined {
+  const now = new Date().toISOString();
+  log.info({ projectId, iid, mrMode: mode }, "GitLab merge request mode updated");
+  getDb()
+    .update(gitlabIssues)
+    .set({ mrMode: mode, updatedAt: now })
+    .where(and(eq(gitlabIssues.projectId, projectId), eq(gitlabIssues.iid, iid)))
+    .run();
+  return findGitLabIssue(projectId, iid);
 }
 
 export function getGitLabIssueReviewFingerprint(projectId: string, iid: number): string | null {

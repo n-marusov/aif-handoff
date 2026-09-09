@@ -4,7 +4,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projects, taskComments, taskExecutorHistory, tasks } from "@aif/shared";
+import {
+  githubIssues,
+  projects,
+  resetEnvCache,
+  taskComments,
+  taskExecutorHistory,
+  tasks,
+} from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
@@ -452,6 +459,88 @@ describe("runImplementer rework behavior", () => {
 
     // Stored session must NOT be resumed for rework, even in skill mode
     expect(call.options.resume).toBeUndefined();
+  });
+
+  it("blocks implementation for a VCS-linked task whose plan review is not approved", async () => {
+    process.env.AIF_PLAN_REVIEW_PR_ENABLED = "true";
+    process.env.AIF_GITHUB_ISSUE_PR_ENABLED = "true";
+    resetEnvCache();
+    try {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({
+          id: "task-plan-gate",
+          projectId: "project-1",
+          title: "Gate",
+          description: "Desc",
+          status: "implementing",
+          planReviewState: "published",
+          plan: "## Plan\n- [ ] work",
+        })
+        .run();
+      db.insert(githubIssues)
+        .values({
+          projectId: "project-1",
+          issueNumber: 9,
+          taskId: "task-plan-gate",
+          nodeId: "node-9",
+          htmlUrl: "https://github.com/o/r/issues/9",
+          state: "open",
+          metadataJson: "{}",
+          sourceUpdatedAt: "2026-01-01T00:00:00.000Z",
+          lastSyncedAt: "2026-01-01T00:00:00.000Z",
+        })
+        .run();
+
+      await runImplementer("task-plan-gate", projectRoot);
+
+      expect(queryMock).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.AIF_PLAN_REVIEW_PR_ENABLED;
+      delete process.env.AIF_GITHUB_ISSUE_PR_ENABLED;
+      resetEnvCache();
+    }
+  });
+
+  it("allows implementation for an approved plan-review task", async () => {
+    process.env.AIF_PLAN_REVIEW_PR_ENABLED = "true";
+    process.env.AIF_GITHUB_ISSUE_PR_ENABLED = "true";
+    resetEnvCache();
+    try {
+      const db = testDb.current;
+      db.insert(tasks)
+        .values({
+          id: "task-plan-approved",
+          projectId: "project-1",
+          title: "Approved",
+          description: "Desc",
+          status: "implementing",
+          planReviewState: "approved",
+          plan: "## Plan\n- [ ] work",
+        })
+        .run();
+      db.insert(githubIssues)
+        .values({
+          projectId: "project-1",
+          issueNumber: 10,
+          taskId: "task-plan-approved",
+          nodeId: "node-10",
+          htmlUrl: "https://github.com/o/r/issues/10",
+          state: "open",
+          metadataJson: "{}",
+          sourceUpdatedAt: "2026-01-01T00:00:00.000Z",
+          lastSyncedAt: "2026-01-01T00:00:00.000Z",
+        })
+        .run();
+
+      await runImplementer("task-plan-approved", projectRoot);
+
+      expect(queryMock).toHaveBeenCalledTimes(1);
+    } finally {
+      delete process.env.AIF_PLAN_REVIEW_PR_ENABLED;
+      delete process.env.AIF_GITHUB_ISSUE_PR_ENABLED;
+      resetEnvCache();
+    }
   });
 });
 
