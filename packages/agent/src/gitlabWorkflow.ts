@@ -89,6 +89,78 @@ function pushBranch(projectRoot: string, branch: string): void {
   });
 }
 
+export async function publishGitLabPlanTask(taskId: string, projectRoot: string): Promise<boolean> {
+  if (!gitLabModeActive()) {
+    log.debug(
+      { taskId, gitProvider: getEnv().GIT_PROVIDER },
+      "GitLab plan MR publication skipped because provider selector or rollout flag is disabled",
+    );
+    return false;
+  }
+  const issue = findGitLabIssueByTaskId(taskId);
+  if (!issue) return false;
+
+  const task = findTaskById(taskId);
+  if (!task?.branchName) {
+    throw new StageManualBlockError("GitLab plan MR publication requires a task branch.");
+  }
+  const executionRoot = task.worktreePath ?? projectRoot;
+
+  try {
+    pushBranch(executionRoot, task.branchName);
+  } catch (error) {
+    log.error({ taskId, branch: task.branchName, err: error }, "GitLab plan branch push failed");
+    throw new StageManualBlockError(
+      "GitLab branch push failed. Check repository access and Git credentials, then retry.",
+    );
+  }
+
+  const url = `${getEnv().API_BASE_URL}/projects/${task.projectId}/gitlab/tasks/${taskId}/publish-plan`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: internalApiHeaders(),
+      body: JSON.stringify({ branch: task.branchName }),
+      signal: AbortSignal.timeout(getEnv().AGENT_GIT_PUBLISH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    log.error({ taskId, branch: task.branchName, err: error }, "GitLab plan MR API unavailable");
+    throw new StageManualBlockError(
+      "GitLab plan MR publication is unavailable. Check the API service and retry.",
+    );
+  }
+  if (!response.ok) {
+    const failure = await readFailure(response);
+    log.warn(
+      {
+        taskId,
+        branch: task.branchName,
+        status: response.status,
+        code: failure.code ?? "gitlab_plan_publish_failed",
+        retryAt: failure.retryAt ?? null,
+      },
+      "GitLab plan MR publication failed",
+    );
+    throw new StageManualBlockError(
+      failure.retryAt
+        ? `GitLab rate limit reached until ${failure.retryAt}. Retry after that time.`
+        : "GitLab plan MR publication failed. Check repository permissions and retry.",
+    );
+  }
+
+  const completedAt = new Date().toISOString();
+  appendTaskActivityLog(
+    taskId,
+    `[${completedAt}] [gitlab] Published plan MR for ${task.branchName} (issue #${issue.iid})`,
+  );
+  log.info(
+    { taskId, iid: issue.iid, branch: task.branchName },
+    "GitLab plan merge request published",
+  );
+  return true;
+}
+
 export async function publishGitLabTask(taskId: string, projectRoot: string): Promise<boolean> {
   if (!gitLabModeActive()) {
     log.debug(

@@ -31,7 +31,9 @@ vi.mock("../autoQueueCommit.js", () => ({
   ensureAutoQueueTaskCommit: (...args: unknown[]) => ensureAutoQueueCommitMock(...args),
 }));
 
-const { synchronizeGitHubProjects, publishGitHubTask } = await import("../githubWorkflow.js");
+const { synchronizeGitHubProjects, publishGitHubTask, publishGitHubPlanTask } =
+  await import("../githubWorkflow.js");
+const { StageManualBlockError } = await import("../stageErrorHandler.js");
 
 describe("GitHub workflow synchronization", () => {
   const originalFetch = global.fetch;
@@ -125,5 +127,78 @@ describe("GitHub workflow publication", () => {
     await publishGitHubTask("task-1", "/tmp/repo");
 
     expect(timeoutSpy).toHaveBeenCalledWith(45000);
+  });
+});
+
+describe("GitHub plan PR publication", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.stubEnv("API_BASE_URL", "http://localhost:3999");
+    vi.stubEnv("GIT_PROVIDER", "github");
+    vi.stubEnv("AIF_GITHUB_ISSUE_PR_ENABLED", "true");
+    findGitHubIssueMock.mockClear();
+    appendActivityLogMock.mockClear();
+    findTaskMock.mockClear();
+    execFileSyncMock.mockClear();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("pushes the branch and calls the publish-plan endpoint with an activity log", async () => {
+    findGitHubIssueMock.mockReturnValue({ projectId: "project-1", issueNumber: 154 });
+    findTaskMock.mockReturnValue({ projectId: "project-1", branchName: "feature/plan-154" });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await publishGitHubPlanTask("task-1", "/tmp/repo");
+
+    expect(result).toBe(true);
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      "git",
+      ["push", "--set-upstream", "origin", "feature/plan-154"],
+      expect.objectContaining({ cwd: "/tmp/repo" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3999/projects/project-1/github/tasks/task-1/publish-plan",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ branch: "feature/plan-154" }),
+      }),
+    );
+    expect(appendActivityLogMock).toHaveBeenCalledWith(
+      "task-1",
+      expect.stringContaining("[github] Published plan PR for feature/plan-154 (issue #154)"),
+    );
+  });
+
+  it("throws StageManualBlockError when the plan branch push fails", async () => {
+    findGitHubIssueMock.mockReturnValue({ projectId: "project-1", issueNumber: 154 });
+    findTaskMock.mockReturnValue({ projectId: "project-1", branchName: "feature/plan-154" });
+    execFileSyncMock.mockImplementation(() => {
+      throw new Error("push rejected");
+    });
+
+    await expect(publishGitHubPlanTask("task-1", "/tmp/repo")).rejects.toThrow(/push failed/i);
+  });
+
+  it("throws StageManualBlockError on a non-OK publish-plan response", async () => {
+    findGitHubIssueMock.mockReturnValue({ projectId: "project-1", issueNumber: 154 });
+    findTaskMock.mockReturnValue({ projectId: "project-1", branchName: "feature/plan-154" });
+    execFileSyncMock.mockReturnValue(Buffer.from(""));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({}),
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(publishGitHubPlanTask("task-1", "/tmp/repo")).rejects.toBeInstanceOf(
+      StageManualBlockError,
+    );
   });
 });

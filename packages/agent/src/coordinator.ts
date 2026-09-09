@@ -44,6 +44,7 @@ import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
 import { runVerifier } from "./subagents/verifier.js";
+import { runPlanReviewPublisher, taskRequiresPlanReview } from "./planReviewPublisher.js";
 import {
   describeDirtyWorkingTree,
   isGitRepo,
@@ -118,6 +119,13 @@ const PIPELINE: StatusTransition[] = [
     onSuccess: "plan_ready",
     runner: runPlanChecker,
     label: "plan-checker",
+  },
+  {
+    from: ["plan_ready"],
+    inProgress: "plan_ready",
+    onSuccess: "plan_review",
+    runner: runPlanReviewPublisher,
+    label: "plan-publisher",
   },
   {
     from: ["plan_ready", "implementing"],
@@ -494,7 +502,26 @@ function proactivelyBlockTaskForRuntimeGate(
   );
 }
 
+function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow): boolean {
+  // Only plan-review tasks should be claimed by the plan-publisher stage. Tasks
+  // without a VCS issue link (or with the feature flag off) stay on the legacy
+  // flow and must not be claimed by the publisher or auto-implemented by the
+  // implementer before plan approval.
+  if (stageLabel === "plan-publisher") {
+    return !taskRequiresPlanReview(task.id);
+  }
+  if (stageLabel === "implementer" && task.status === "plan_ready") {
+    return taskRequiresPlanReview(task.id);
+  }
+  return false;
+}
+
 function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition): boolean {
+  // The plan publisher is a deterministic git + HTTP operation — it never
+  // consumes runtime tokens, so provider usage limits must not defer it.
+  if (stage.label === "plan-publisher") {
+    return false;
+  }
   const runtimeSelection = resolveEffectiveRuntimeProfile({
     taskId: task.id,
     projectId: task.projectId,
@@ -594,6 +621,40 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     await runStageWithTimeout(stage.runner, task.id, executionRoot, stage.label);
 
     flushActivityQueue(task.id);
+
+    if (stage.label === "plan-publisher") {
+      // The publisher runner transitions plan_ready -> plan_review itself via
+      // markTaskPlanPublished once the plan PR/MR is actually published. When
+      // publishing is deferred (missing branch or plan file) it must stay at
+      // plan_ready so the next poll retries — never move it to plan_review
+      // without a successful publish.
+      const current = findTaskById(task.id);
+      const published =
+        current?.planReviewState === "published" && current.status === "plan_review";
+      clearTaskActiveRuntimeSelection(task.id);
+      clearTaskRuntimeLimitSnapshot(task.id);
+      if (published) {
+        void notifyTaskBroadcast(task.id, "task:moved", {
+          title: taskTitle,
+          fromStatus: stage.inProgress,
+          toStatus: "plan_review",
+        });
+        log.info(
+          { taskId: task.id, from: stage.inProgress, to: "plan_review" },
+          "Change plan published; task waiting for approval",
+        );
+      } else {
+        log.info(
+          {
+            taskId: task.id,
+            status: current?.status ?? task.status,
+            planReviewState: current?.planReviewState ?? null,
+          },
+          "Plan review publish deferred; task remains plan ready",
+        );
+      }
+      return true;
+    }
 
     if (stage.label === "implementer") {
       await publishGitHubTask(task.id, project.rootPath);
@@ -1131,7 +1192,9 @@ async function runPollCycle(): Promise<void> {
         projectId,
         stage.label,
         candidateWindow,
-      ).filter((t) => !failedInCycle.has(t.id));
+      )
+        .filter((t) => !failedInCycle.has(t.id))
+        .filter((t) => !planReviewStageIneligible(stage.label, t));
 
       if (candidates.length === 0) {
         log.debug({ stage: stage.label, projectId }, "No tasks to process in project lane");

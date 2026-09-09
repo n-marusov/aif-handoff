@@ -11,8 +11,14 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
 
 const { githubRouter } = await import("../routes/github.js");
 const { GitHubClient, issueIsEligible } = await import("../services/github.js");
-const { deleteTask, findGitHubIssue, findTaskById, importGitHubIssueTask, upsertGitHubRepository } =
-  await import("@aif/data");
+const {
+  deleteTask,
+  findGitHubIssue,
+  findTaskById,
+  importGitHubIssueTask,
+  setTaskFields,
+  upsertGitHubRepository,
+} = await import("@aif/data");
 
 function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(value), {
@@ -491,4 +497,78 @@ describe("GitHub project routes", () => {
     expect(createCalls).toHaveLength(1);
     expect(commentCalls).toHaveLength(1);
   });
+
+  it("publishes a Change Plan PR without closing the issue and marks prMode plan_review", async () => {
+    upsertGitHubRepository({
+      projectId: "project-1",
+      owner: "owner",
+      name: "repo",
+      htmlUrl: "https://github.com/owner/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITHUB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+    });
+    const imported = importGitHubIssueTask({
+      projectId: "project-1",
+      owner: "owner",
+      repository: "repo",
+      issueNumber: 154,
+      nodeId: "I_154",
+      htmlUrl: "https://github.com/owner/repo/issues/154",
+      state: "open",
+      sourceUpdatedAt: "2026-08-08T00:00:00Z",
+      snapshot: {
+        title: "GitHub mode",
+        body: "Implement it",
+        author: "author",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        comments: [],
+      },
+    });
+    setTaskPlan(imported.taskId, "# Change Plan\n- [ ] do work");
+    const pull = {
+      number: 200,
+      html_url: "https://github.com/owner/repo/pull/200",
+      state: "open",
+      merged_at: null,
+      head: { sha: "0123456789abcdef" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([])) // findPullRequest
+      .mockResolvedValueOnce(jsonResponse(pull)) // createPullRequest
+      .mockResolvedValueOnce(jsonResponse({ state: "success", total_count: 1, statuses: [{}] }))
+      .mockResolvedValueOnce(jsonResponse({ total_count: 0, check_runs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", githubRouter);
+
+    const response = await app.request(
+      `/projects/project-1/github/tasks/${imported.taskId}/publish-plan`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: "feature/github-issue-154" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      prNumber: 200,
+      prState: "open",
+      prMode: "plan_review",
+    });
+    const createBody = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/pulls") && init?.method === "POST",
+    )?.[1] as { body?: string } | undefined;
+    expect(createBody?.body).toContain("aif:pr-mode=plan_review");
+    expect(createBody?.body).not.toContain("Closes #154");
+  });
 });
+
+function setTaskPlan(taskId: string, plan: string): void {
+  setTaskFields(taskId, { plan, updatedAt: new Date().toISOString() });
+}

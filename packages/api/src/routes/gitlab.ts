@@ -13,11 +13,17 @@ import {
   recordGitLabRepositorySync,
   setTaskFields,
   updateGitLabMergeRequest,
+  updateGitLabMergeRequestMode,
   updateTaskStatus,
   upsertGitLabRepository,
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
-import { gitlabConnectSchema, gitlabPublishSchema, gitlabSyncSchema } from "../schemas.js";
+import {
+  gitlabConnectSchema,
+  gitlabPlanPublishSchema,
+  gitlabPublishSchema,
+  gitlabSyncSchema,
+} from "../schemas.js";
 import { callAgentGitPrepare } from "../services/gitlabPrepareBridge.js";
 import {
   GitLabApiError,
@@ -451,6 +457,96 @@ gitlabRouter.post(
         reviewState: approvals.reviewState,
         reviewFingerprint: fingerprint,
       });
+      return c.json(linked);
+    } catch (error) {
+      return gitlabErrorResponse(c, error);
+    }
+  },
+);
+
+/**
+ * Publish (or update) the Change Plan MR for an issue-linked task. The task is
+ * left in plan_review until a human approves the MR. Description carries the
+ * plan review marker and deliberately omits `Closes #...` — the issue must
+ * stay open until the final implementation MR is published.
+ */
+gitlabRouter.post(
+  "/:id/gitlab/tasks/:taskId/publish-plan",
+  jsonValidator(gitlabPlanPublishSchema),
+  async (c) => {
+    const projectId = c.req.param("id");
+    const taskId = c.req.param("taskId");
+    const connection = findGitLabRepository(projectId);
+    const task = findTaskById(taskId);
+    const issue = findGitLabIssueByTaskId(taskId);
+    if (!connection || !task || !issue || task.projectId !== projectId) {
+      return c.json({ error: "GitLab task linkage not found" }, 404);
+    }
+    const body = c.req.valid("json");
+    const planText = (task.plan ?? "").trim();
+    const mrDescription = [
+      "<!-- aif:mr-mode=plan_review -->",
+      "## Change Plan",
+      planText.length > 0 ? planText.slice(-50_000) : "_No plan text recorded._",
+      "## How to approve",
+      "Approve this merge request to start implementation. Request changes to ask the agent to revise the plan — comments are fed back to the planner.",
+      "_AIF never merges this merge request; a human owns the final decision._",
+    ].join("\n\n");
+    try {
+      const client = clientFor(connection);
+      let mr = issue.mrIid
+        ? await client.getMergeRequest(connection.namespace, connection.name, issue.mrIid)
+        : await client.findMergeRequest(connection.namespace, connection.name, body.branch);
+      if (mr) {
+        mr = await client.updateMergeRequest({
+          namespace: connection.namespace,
+          name: connection.name,
+          mrIid: mr.iid,
+          title: task.title,
+          description: mrDescription,
+        });
+      } else {
+        try {
+          mr = await client.createMergeRequest({
+            namespace: connection.namespace,
+            name: connection.name,
+            sourceBranch: body.branch,
+            targetBranch: connection.defaultBranch,
+            title: task.title,
+            description: mrDescription,
+          });
+        } catch (error) {
+          if (!(error instanceof GitLabApiError) || error.httpStatus !== 422) throw error;
+          const found = await client.findMergeRequest(
+            connection.namespace,
+            connection.name,
+            body.branch,
+          );
+          if (!found) throw error;
+          mr = await client.updateMergeRequest({
+            namespace: connection.namespace,
+            name: connection.name,
+            mrIid: found.iid,
+            title: task.title,
+            description: mrDescription,
+          });
+        }
+      }
+
+      const [checks, approvals] = await Promise.all([
+        client.getCommitChecks(connection.namespace, connection.name, mr.sha),
+        client.getMergeRequestApprovals(connection.namespace, connection.name, mr.iid),
+      ]);
+      updateGitLabMergeRequest({
+        projectId,
+        iid: issue.iid,
+        mrIid: mr.iid,
+        mrUrl: mr.web_url,
+        mrState: mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed",
+        mrChecksStatus: checks,
+        reviewState: approvals.reviewState,
+      });
+      const linked = updateGitLabMergeRequestMode(projectId, issue.iid, "plan_review");
       return c.json(linked);
     } catch (error) {
       return gitlabErrorResponse(c, error);

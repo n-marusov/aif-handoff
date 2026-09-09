@@ -84,6 +84,78 @@ function pushBranch(projectRoot: string, branch: string): void {
   });
 }
 
+export async function publishGitHubPlanTask(taskId: string, projectRoot: string): Promise<boolean> {
+  if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
+    log.debug(
+      { taskId },
+      "GitHub plan PR publication skipped because provider selector or rollout flag is disabled",
+    );
+    return false;
+  }
+  const issue = findGitHubIssueByTaskId(taskId);
+  if (!issue) return false;
+
+  const task = findTaskById(taskId);
+  if (!task?.branchName) {
+    throw new StageManualBlockError("GitHub plan PR publication requires a task branch.");
+  }
+  const executionRoot = task.worktreePath ?? projectRoot;
+
+  try {
+    pushBranch(executionRoot, task.branchName);
+  } catch (error) {
+    log.error({ taskId, branch: task.branchName, err: error }, "GitHub plan branch push failed");
+    throw new StageManualBlockError(
+      "GitHub branch push failed. Check repository access and Git credentials, then retry.",
+    );
+  }
+
+  const url = `${getEnv().API_BASE_URL}/projects/${task.projectId}/github/tasks/${taskId}/publish-plan`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: internalApiHeaders(),
+      body: JSON.stringify({ branch: task.branchName }),
+      signal: AbortSignal.timeout(getEnv().AGENT_GIT_PUBLISH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    log.error({ taskId, branch: task.branchName, err: error }, "GitHub plan PR API unavailable");
+    throw new StageManualBlockError(
+      "GitHub plan PR publication is unavailable. Check the API service and retry.",
+    );
+  }
+  if (!response.ok) {
+    const failure = await readFailure(response);
+    log.warn(
+      {
+        taskId,
+        branch: task.branchName,
+        status: response.status,
+        code: failure.code ?? "github_plan_publish_failed",
+        retryAt: failure.retryAt ?? null,
+      },
+      "GitHub plan PR publication failed",
+    );
+    throw new StageManualBlockError(
+      failure.retryAt
+        ? `GitHub rate limit reached until ${failure.retryAt}. Retry after that time.`
+        : "GitHub plan PR publication failed. Check repository permissions and retry.",
+    );
+  }
+
+  const completedAt = new Date().toISOString();
+  appendTaskActivityLog(
+    taskId,
+    `[${completedAt}] [github] Published plan PR for ${task.branchName} (issue #${issue.issueNumber})`,
+  );
+  log.info(
+    { taskId, issueNumber: issue.issueNumber, branch: task.branchName },
+    "GitHub plan pull request published",
+  );
+  return true;
+}
+
 export async function publishGitHubTask(taskId: string, projectRoot: string): Promise<boolean> {
   if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
     log.debug(

@@ -283,6 +283,11 @@ const envSchema = z.object({
   AIF_GITHUB_ISSUE_PR_ENABLED: booleanEnvSchema.default(false),
   GIT_PROVIDER: z.enum(["github", "gitlab"]).default("github"),
   AIF_GITLAB_ISSUE_MR_ENABLED: booleanEnvSchema.default(false),
+  // Plan-review gate: when enabled, VCS-issue-linked tasks pause in
+  // plan_review after a plan-only PR/MR is published, and only start
+  // implementation after human approval in the VCS. Off by default so the
+  // legacy auto-implement flow is preserved for existing deployments.
+  AIF_PLAN_REVIEW_PR_ENABLED: booleanEnvSchema.default(false),
   AIF_GITLAB_BASE_URL: z.string().default("https://gitlab.com/api/v4"),
   // Runtime-profile bootstrap: auto-provision a global runtime profile (and
   // optionally app-wide defaults) from env at API startup. Off by default so

@@ -85,6 +85,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     AIF_GITHUB_ISSUE_PR_ENABLED: false,
     GIT_PROVIDER: "github" as const,
     AIF_GITLAB_ISSUE_MR_ENABLED: false,
+    AIF_PLAN_REVIEW_PR_ENABLED: false,
     AIF_GITLAB_BASE_URL: "https://gitlab.com/api/v4",
     AIF_STAGE_RUNTIME_PIN_ENABLED: false,
     AIF_WARMUP_ENABLED: false,

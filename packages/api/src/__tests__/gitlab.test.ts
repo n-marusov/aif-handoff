@@ -19,6 +19,7 @@ const {
   findGitLabIssue,
   findTaskById,
   importGitLabIssueTask,
+  setTaskFields,
   updateTaskStatus,
   upsertGitLabRepository,
 } = await import("@aif/data");
@@ -1399,5 +1400,76 @@ describe("GitLab project routes", () => {
     );
     expect(createCalls).toHaveLength(1);
     expect(noteCalls).toHaveLength(1);
+  });
+
+  it("publishes a Change Plan MR without closing the issue and marks mrMode plan_review", async () => {
+    upsertGitLabRepository({
+      projectId: "project-1",
+      namespace: "namespace",
+      name: "repo",
+      webUrl: "https://gitlab.com/namespace/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITLAB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+    });
+    const imported = importGitLabIssueTask({
+      projectId: "project-1",
+      namespace: "namespace",
+      repository: "repo",
+      iid: 154,
+      globalId: "gid://gitlab/Issue/154",
+      webUrl: "https://gitlab.com/namespace/repo/-/issues/154",
+      state: "open",
+      sourceUpdatedAt: "2026-08-13T00:00:00Z",
+      snapshot: {
+        title: "GitLab mode",
+        body: "Implement it",
+        author: "author",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        comments: [],
+      },
+    });
+    setTaskFields(imported.taskId, { plan: "# Change Plan\n- [ ] do work" });
+    const mergeRequest = {
+      iid: 200,
+      web_url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+      state: "opened",
+      merged_at: null,
+      source_branch: "feature/gitlab-issue-154",
+      sha: "0123456789abcdef",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([])) // listMergeRequests (find existing)
+      .mockResolvedValueOnce(jsonResponse(mergeRequest)) // createMergeRequest
+      .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }])) // statuses
+      .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] })); // approvals
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", gitlabRouter);
+
+    const response = await app.request(
+      `/projects/project-1/gitlab/tasks/${imported.taskId}/publish-plan`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: "feature/gitlab-issue-154" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      mrIid: 200,
+      mrState: "open",
+      mrMode: "plan_review",
+    });
+    const createBody = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/merge_requests") && init?.method === "POST",
+    )?.[1] as { body?: string } | undefined;
+    expect(createBody?.body).toContain("aif:mr-mode=plan_review");
+    expect(createBody?.body).not.toContain("Closes #154");
   });
 });
