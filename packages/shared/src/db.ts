@@ -1147,6 +1147,19 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE gitlab_issues ADD COLUMN last_review_note_id INTEGER;
     `,
   },
+  {
+    version: 33,
+    description: "Add plan review gate columns to tasks and PR/MR mode to VCS issue links",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN plan_review_state TEXT;
+      ALTER TABLE tasks ADD COLUMN plan_review_commit_sha TEXT;
+      ALTER TABLE tasks ADD COLUMN plan_review_published_at TEXT;
+      ALTER TABLE tasks ADD COLUMN plan_review_approved_at TEXT;
+      ALTER TABLE tasks ADD COLUMN plan_review_feedback TEXT;
+      ALTER TABLE github_issues ADD COLUMN pr_mode TEXT DEFAULT 'implementation';
+      ALTER TABLE gitlab_issues ADD COLUMN mr_mode TEXT DEFAULT 'implementation';
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

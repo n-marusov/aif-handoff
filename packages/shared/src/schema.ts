@@ -5,6 +5,8 @@ import type {
   AutoQueueCommitStatus,
   ExecutionOwner,
   ParticipantRole,
+  PlanReviewState,
+  PullRequestMode,
   TaskStatus,
 } from "./types.js";
 
@@ -175,6 +177,11 @@ export const tasks = sqliteTable("tasks", {
   commitSha: text("commit_sha"),
   autoQueueCommitError: text("auto_queue_commit_error"),
   autoQueueCommitCompletedAt: text("auto_queue_commit_completed_at"),
+  planReviewState: text("plan_review_state").$type<PlanReviewState | null>(),
+  planReviewCommitSha: text("plan_review_commit_sha"),
+  planReviewPublishedAt: text("plan_review_published_at"),
+  planReviewApprovedAt: text("plan_review_approved_at"),
+  planReviewFeedback: text("plan_review_feedback"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
@@ -321,6 +328,7 @@ export const githubIssues = sqliteTable(
     prUrl: text("pr_url"),
     prState: text("pr_state").$type<"open" | "closed" | "merged" | null>(),
     prChecksStatus: text("pr_checks_status").$type<"pending" | "success" | "failure" | null>(),
+    prMode: text("pr_mode").$type<PullRequestMode | null>(),
     reviewState: text("review_state").$type<"pending" | "approved" | "changes_requested" | null>(),
     lastReviewId: integer("last_review_id"),
     reviewFingerprint: text("review_fingerprint"),
@@ -383,6 +391,7 @@ export const gitlabIssues = sqliteTable(
     mrUrl: text("mr_url"),
     mrState: text("mr_state").$type<"open" | "closed" | "merged" | null>(),
     mrChecksStatus: text("mr_checks_status").$type<"pending" | "success" | "failure" | null>(),
+    mrMode: text("mr_mode").$type<PullRequestMode | null>(),
     reviewState: text("review_state").$type<"pending" | "approved" | null>(),
     reviewFingerprint: text("review_fingerprint"),
     lastReviewNoteId: integer("last_review_note_id"),

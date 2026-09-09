@@ -3,6 +3,7 @@ export const TASK_STATUSES = [
   "planning",
   "improve",
   "plan_ready",
+  "plan_review",
   "implementing",
   "review",
   "verify",
@@ -56,6 +57,16 @@ export interface AutoReviewState {
   iteration: number;
   findings: AutoReviewFinding[];
 }
+
+/** Lifecycle of the plan-review gate for VCS-linked tasks. */
+export const PLAN_REVIEW_STATES = ["published", "approved", "changes_requested"] as const;
+
+export type PlanReviewState = (typeof PLAN_REVIEW_STATES)[number];
+
+/** PR/MR body mode: plan review draft vs final implementation summary. */
+export const PULL_REQUEST_MODES = ["plan_review", "implementation"] as const;
+
+export type PullRequestMode = (typeof PULL_REQUEST_MODES)[number];
 
 export interface Project {
   id: string;
@@ -138,6 +149,7 @@ export interface GitHubIssueLink {
   prUrl: string | null;
   prState: "open" | "closed" | "merged" | null;
   prChecksStatus: "pending" | "success" | "failure" | null;
+  prMode: PullRequestMode | null;
   reviewState: "pending" | "approved" | "changes_requested" | null;
   lastReviewId: number | null;
   createdAt: string;
@@ -201,6 +213,7 @@ export interface GitLabIssueLink {
   mrUrl: string | null;
   mrState: "open" | "closed" | "merged" | null;
   mrChecksStatus: "pending" | "success" | "failure" | null;
+  mrMode: PullRequestMode | null;
   reviewState: "pending" | "approved" | null;
   lastReviewNoteId: number | null;
   createdAt: string;
@@ -441,6 +454,11 @@ export interface Task {
   commitSha?: string | null;
   autoQueueCommitError?: string | null;
   autoQueueCommitCompletedAt?: string | null;
+  planReviewState?: PlanReviewState | null;
+  planReviewCommitSha?: string | null;
+  planReviewPublishedAt?: string | null;
+  planReviewApprovedAt?: string | null;
+  planReviewFeedback?: string | null;
   createdAt: string;
   updatedAt: string;
   github?: GitHubIssueLink | null;
@@ -631,6 +649,9 @@ export const TASK_EVENTS = [
   "start_human_work",
   "mark_plan_ready",
   "start_implementation",
+  "publish_plan",
+  "approve_plan",
+  "request_plan_changes",
   "submit_implementation",
   "complete_review",
   "request_review_changes",

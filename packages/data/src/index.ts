@@ -147,6 +147,10 @@ export {
 export {
   applyTaskAction,
   transitionTaskStatus,
+  markTaskPlanPublished,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
+  recordTaskPlanReviewFeedback,
   type ApplyTaskActionInput,
   type TaskTransitionConflictCode,
   type TaskTransitionExtra,

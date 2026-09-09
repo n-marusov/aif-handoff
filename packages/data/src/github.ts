@@ -14,6 +14,7 @@ import {
   type GitHubIssueRow,
   type GitHubIssueSnapshot,
   type GitHubRepositoryConnection,
+  type PullRequestMode,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { createAuditEventValues } from "./audit.js";
@@ -90,6 +91,7 @@ function toIssueLink(row: GitHubIssueRow): GitHubIssueLink {
     prUrl: row.prUrl,
     prState: row.prState,
     prChecksStatus: row.prChecksStatus,
+    prMode: row.prMode,
     reviewState: row.reviewState,
     lastReviewId: row.lastReviewId,
     createdAt: row.createdAt,
@@ -491,6 +493,26 @@ export function updateGitHubPullRequest(input: {
     .where(and(eq(githubIssues.projectId, input.projectId), eq(githubIssues.issueNumber, input.issueNumber)))
     .run();
   return findGitHubIssue(input.projectId, input.issueNumber);
+}
+
+/**
+ * Switch the published PR for a linked GitHub issue between plan-review and
+ * final implementation mode. The PR stays on the same issue branch; only the
+ * review body semantics change.
+ */
+export function updateGitHubPullRequestMode(
+  projectId: string,
+  issueNumber: number,
+  mode: PullRequestMode,
+): GitHubIssueLink | undefined {
+  const now = new Date().toISOString();
+  log.info({ projectId, issueNumber, prMode: mode }, "GitHub pull request mode updated");
+  getDb()
+    .update(githubIssues)
+    .set({ prMode: mode, updatedAt: now })
+    .where(and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)))
+    .run();
+  return findGitHubIssue(projectId, issueNumber);
 }
 
 export function getGitHubIssueReviewFingerprint(projectId: string, issueNumber: number): string | null {

@@ -5,12 +5,14 @@ export const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; o
   planning: { label: "Planning", color: "#F59E0B", order: 1 },
   improve: { label: "Improve", color: "#D97706", order: 2 },
   plan_ready: { label: "Plan Ready", color: "#3B82F6", order: 3 },
-  implementing: { label: "Implementing", color: "#8B5CF6", order: 4 },
-  verify: { label: "Verify", color: "#0EA5E9", order: 5 },
-  review: { label: "Review", color: "#EC4899", order: 6 },
-  blocked_external: { label: "Blocked", color: "#EF4444", order: 7 },
-  done: { label: "Done", color: "#10B981", order: 8 },
-  verified: { label: "Verified", color: "#14B8A6", order: 9 },
+  // Plan PR/MR is published and awaits human approval before implementation starts.
+  plan_review: { label: "Plan Review", color: "#6366F1", order: 4 },
+  implementing: { label: "Implementing", color: "#8B5CF6", order: 5 },
+  verify: { label: "Verify", color: "#0EA5E9", order: 6 },
+  review: { label: "Review", color: "#EC4899", order: 7 },
+  blocked_external: { label: "Blocked", color: "#EF4444", order: 8 },
+  done: { label: "Done", color: "#10B981", order: 9 },
+  verified: { label: "Verified", color: "#14B8A6", order: 10 },
 };
 
 export const ORDERED_STATUSES: TaskStatus[] = [

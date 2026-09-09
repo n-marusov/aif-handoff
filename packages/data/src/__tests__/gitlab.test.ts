@@ -19,6 +19,7 @@ const {
   markGitLabIssueUnavailable,
   markGitLabRepositoryPrepared,
   updateGitLabMergeRequest,
+  updateGitLabMergeRequestMode,
   upsertGitLabRepository,
 } = await import("../index.js");
 
@@ -255,5 +256,46 @@ describe("GitLab issue import", () => {
       lastReviewNoteId: null,
     });
     expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBeNull();
+  });
+});
+
+describe("GitLab merge request mode", () => {
+  const issueInput = {
+    projectId: "project-1",
+    namespace: "gitlab-org",
+    repository: "example",
+    iid: 42,
+    globalId: "gid://gitlab/Issue/123",
+    webUrl: "https://gitlab.com/gitlab-org/example/-/issues/42",
+    state: "open" as const,
+    sourceUpdatedAt: "2026-08-13T10:00:00Z",
+    snapshot: {
+      title: "Add GitLab mode",
+      body: "Issue body",
+      author: "alice",
+      labels: ["aif"],
+      assignees: [],
+      milestone: null,
+      comments: [],
+    },
+  };
+
+  it("starts unset and switches between plan_review and implementation", () => {
+    importGitLabIssueTask(issueInput);
+    const linked = updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 42,
+      mrIid: 7,
+      mrUrl: "https://gitlab.com/gitlab-org/example/-/merge_requests/7",
+      mrState: "open",
+    });
+    expect(linked?.mrMode).toBeNull();
+
+    expect(updateGitLabMergeRequestMode("project-1", 42, "plan_review")?.mrMode).toBe(
+      "plan_review",
+    );
+    expect(updateGitLabMergeRequestMode("project-1", 42, "implementation")?.mrMode).toBe(
+      "implementation",
+    );
   });
 });

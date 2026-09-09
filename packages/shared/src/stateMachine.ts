@@ -90,6 +90,18 @@ function resolveLegacyAction(
       return task.autoMode
         ? denied("action_not_allowed", "start_implementation is not needed when autoMode=true")
         : { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } };
+    case "publish_plan":
+      return task.status === "plan_ready"
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_review" } }
+        : denied("action_not_allowed", "publish_plan is only allowed from plan_ready");
+    case "approve_plan":
+      return task.status === "plan_review"
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } }
+        : denied("action_not_allowed", "approve_plan is only allowed from plan_review");
+    case "request_plan_changes":
+      return task.status === "plan_review"
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
+        : denied("action_not_allowed", "request_plan_changes is only allowed from plan_review");
     case "request_replanning":
       return task.status === "plan_ready"
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
@@ -236,6 +248,9 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
     case "accept_existing_plan":
     case "request_replanning":
     case "fast_fix":
+    case "publish_plan":
+    case "approve_plan":
+    case "request_plan_changes":
       return denied("ai_handoff_required", `${event} requires the task to be handed to AI`);
     default:
       return denied("action_not_allowed", "Unknown task event");
@@ -345,6 +360,9 @@ const TASK_ACTION_LOOKUP: Record<TaskEvent, true> = {
   start_human_work: true,
   mark_plan_ready: true,
   start_implementation: true,
+  publish_plan: true,
+  approve_plan: true,
+  request_plan_changes: true,
   submit_implementation: true,
   complete_review: true,
   request_review_changes: true,
@@ -363,6 +381,8 @@ export const HUMAN_ACTIONS_BY_STATUS: Record<TaskStatus, TaskEvent[]> = {
   planning: [],
   improve: [],
   plan_ready: ["start_implementation", "request_replanning", "fast_fix"],
+  // Waiting on human approval of the published plan PR/MR; approval is VCS-driven.
+  plan_review: [],
   implementing: [],
   review: [],
   verify: [],

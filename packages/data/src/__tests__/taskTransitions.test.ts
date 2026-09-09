@@ -18,6 +18,10 @@ const {
   createTask,
   findTaskById,
   listAuditEvents,
+  markTaskPlanApproved,
+  markTaskPlanChangesRequested,
+  markTaskPlanPublished,
+  recordTaskPlanReviewFeedback,
   transitionTaskStatus,
 } = await import("../index.js");
 
@@ -184,5 +188,138 @@ describe("atomic task transitions", () => {
     ).toThrow("forced audit failure");
     expect(findTaskById(task.id)?.status).toBe("backlog");
     expect(listAuditEvents({ taskId: task.id })).toHaveLength(1);
+  });
+});
+
+describe("plan review gate transitions", () => {
+  const agentActor = {
+    kind: "agent" as const,
+    id: "plan-review-test",
+    displayNameSnapshot: "Plan Review Test",
+  };
+
+  function createReadyAiTask(title: string): string {
+    const task = createTask({
+      projectId: "project-1",
+      title,
+      description: "",
+      autoMode: true,
+      executionOwner: "ai",
+      actor: agentActor,
+    });
+    if (!task) throw new Error("expected task");
+    const ready = transitionTaskStatus({
+      taskId: task.id,
+      status: "plan_ready",
+      expectedStatus: "backlog",
+      actor: agentActor,
+      action: "task.status_changed",
+    });
+    if (!ready.ok) throw new Error("expected plan_ready transition");
+    return task.id;
+  }
+
+  it("publishes a ready plan into plan_review with commit metadata", () => {
+    const taskId = createReadyAiTask("Publish plan");
+    const result = markTaskPlanPublished({
+      taskId,
+      commitSha: "deadbeef",
+      actor: agentActor,
+      now: new Date("2026-09-09T10:00:00.000Z"),
+    });
+
+    expect(result).toMatchObject({ ok: true, fromStatus: "plan_ready", toStatus: "plan_review" });
+    const row = findTaskById(taskId);
+    expect(row).toMatchObject({
+      status: "plan_review",
+      planReviewState: "published",
+      planReviewCommitSha: "deadbeef",
+      planReviewPublishedAt: "2026-09-09T10:00:00.000Z",
+      planReviewApprovedAt: null,
+      planReviewFeedback: null,
+    });
+    expect(listAuditEvents({ taskId }).at(-1)).toMatchObject({
+      action: "task.plan_review.published",
+      statusSnapshot: "plan_review",
+    });
+  });
+
+  it("denies publishing when the task is not plan_ready", () => {
+    const task = createTask({
+      projectId: "project-1",
+      title: "Not ready",
+      description: "",
+      actor: agentActor,
+    });
+    if (!task) throw new Error("expected task");
+    expect(
+      markTaskPlanPublished({ taskId: task.id, commitSha: "abc", actor: agentActor }),
+    ).toMatchObject({ ok: false, code: "status_conflict", currentStatus: "backlog" });
+    expect(findTaskById(task.id)?.status).toBe("backlog");
+  });
+
+  it("approves a published plan into implementing", () => {
+    const taskId = createReadyAiTask("Approve plan");
+    markTaskPlanPublished({ taskId, commitSha: "abc123", actor: agentActor });
+
+    const result = markTaskPlanApproved({
+      taskId,
+      actor: agentActor,
+      now: new Date("2026-09-09T11:00:00.000Z"),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      fromStatus: "plan_review",
+      toStatus: "implementing",
+    });
+    const row = findTaskById(taskId);
+    expect(row).toMatchObject({
+      status: "implementing",
+      planReviewState: "approved",
+      planReviewApprovedAt: "2026-09-09T11:00:00.000Z",
+    });
+  });
+
+  it("denies approval before the plan has been published", () => {
+    const taskId = createReadyAiTask("Approve too early");
+    expect(markTaskPlanApproved({ taskId, actor: agentActor })).toMatchObject({
+      ok: false,
+      code: "status_conflict",
+      currentStatus: "plan_ready",
+    });
+  });
+
+  it("routes changes requested back to planning and persists feedback", () => {
+    const taskId = createReadyAiTask("Request plan changes");
+    markTaskPlanPublished({ taskId, commitSha: "abc123", actor: agentActor });
+
+    const result = markTaskPlanChangesRequested({
+      taskId,
+      feedback: "Please split the migration into two steps",
+      actor: agentActor,
+    });
+    expect(result).toMatchObject({ ok: true, fromStatus: "plan_review", toStatus: "planning" });
+    expect(findTaskById(taskId)).toMatchObject({
+      status: "planning",
+      planReviewState: "changes_requested",
+      planReviewFeedback: "Please split the migration into two steps",
+      planReviewApprovedAt: null,
+    });
+  });
+
+  it("records feedback on a published task without changing status", () => {
+    const taskId = createReadyAiTask("Record feedback");
+    markTaskPlanPublished({ taskId, commitSha: "abc123", actor: agentActor });
+
+    const row = recordTaskPlanReviewFeedback({
+      taskId,
+      feedback: "See inline comments on the plan",
+      now: new Date("2026-09-09T12:00:00.000Z"),
+    });
+    expect(row).toMatchObject({
+      status: "plan_review",
+      planReviewState: "published",
+      planReviewFeedback: "See inline comments on the plan",
+    });
   });
 });
