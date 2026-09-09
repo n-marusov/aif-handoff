@@ -89,6 +89,8 @@ packages/
         ├── index.ts         # Agent entry point
         ├── coordinator.ts   # Polling coordinator (node-cron)
         ├── autoQueueCommit.ts # Awaited Git commit gate before auto-queue terminal states
+        ├── planReviewCommit.ts # Deterministic plan-only commit gate (plan review flow)
+        ├── gitConventions.ts   # Target-project branch/commit convention resolver
         ├── subagentQuery.ts # Universal runtime-backed query execution
         ├── reviewGate.ts    # Auto-review gate using adapter lightModel
         ├── hooks.ts         # Activity logging, project root
