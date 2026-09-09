@@ -81,6 +81,9 @@ docs-html/
 .projects
 /projects/
 
+# Local scratch
+flow.md
+
 # Attachment files (stored inside project .ai-factory/files/)
 .ai-factory/files/
 .ai-factory/PLAN.md

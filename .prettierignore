@@ -11,3 +11,4 @@ packages/web/.perf-project/
 *SFConflict*
 playwright-report/
 test-results/
+flow.md
