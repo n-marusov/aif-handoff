@@ -248,6 +248,7 @@ export {
   getHeadCommitSha,
   isBranchIsolationError,
   isGitRepo,
+  listChangedFiles,
   listWorktrees,
   projectSupportsTaskWorktrees,
   projectUsesSharedBranchIsolation,

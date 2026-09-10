@@ -8,6 +8,11 @@ const BOOLEAN_FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
 const ACTIVITY_LOG_MODES = ["sync", "batch"] as const;
 
+/** Accepted fan-out width for intra-issue implement workers. */
+export const IMPLEMENT_MAX_WORKERS_MIN = 1;
+export const IMPLEMENT_MAX_WORKERS_MAX = 10;
+export const IMPLEMENT_MAX_WORKERS_DEFAULT = 2;
+
 function parseRuntimeModules(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -274,6 +279,34 @@ const envSchema = z.object({
   // uses `<dirname(projectRoot)>/.worktrees`. Deployments that mount a separate
   // volume for worktrees set this to that mount (e.g. /home/www/.worktrees).
   AIF_WORKTREE_ROOT: z.string().min(1).max(4096).optional(),
+  // Bounded intra-issue worker fan-out width. The container is CPU/memory
+  // constrained (cpus: 2 / memory: 1G), so out-of-range values fall back to
+  // the default with a WARN rather than failing env validation.
+  AIF_IMPLEMENT_MAX_WORKERS: z
+    .preprocess((value) => {
+      if (value === undefined || value === null || value === "") {
+        return IMPLEMENT_MAX_WORKERS_DEFAULT;
+      }
+      const parsed = typeof value === "number" ? value : Number.parseInt(String(value).trim(), 10);
+      if (
+        !Number.isInteger(parsed) ||
+        parsed < IMPLEMENT_MAX_WORKERS_MIN ||
+        parsed > IMPLEMENT_MAX_WORKERS_MAX
+      ) {
+        log.warn(
+          {
+            value,
+            fallback: IMPLEMENT_MAX_WORKERS_DEFAULT,
+            min: IMPLEMENT_MAX_WORKERS_MIN,
+            max: IMPLEMENT_MAX_WORKERS_MAX,
+          },
+          "Invalid AIF_IMPLEMENT_MAX_WORKERS value, falling back to default",
+        );
+        return IMPLEMENT_MAX_WORKERS_DEFAULT;
+      }
+      return parsed;
+    }, z.number().int().min(IMPLEMENT_MAX_WORKERS_MIN).max(IMPLEMENT_MAX_WORKERS_MAX))
+    .default(IMPLEMENT_MAX_WORKERS_DEFAULT),
   AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {

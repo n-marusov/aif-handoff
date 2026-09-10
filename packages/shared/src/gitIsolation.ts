@@ -385,6 +385,38 @@ export function describeDirtyWorkingTree(projectRoot: string): string | null {
   return lines.length > 5 ? `${summary}, +${lines.length - 5} more` : summary;
 }
 
+/**
+ * Repo-relative files changed since `sinceRef` (committed AND uncommitted).
+ * With no ref, lists the current dirty working tree. Used to validate that an
+ * implementer run stayed inside its declared change scope.
+ */
+export function listChangedFiles(projectRoot: string, sinceRef?: string | null): string[] {
+  const ref = sinceRef?.trim();
+  if (ref) {
+    const { stdout, status } = runGit(projectRoot, ["diff", "--name-only", ref], {
+      ignoreExit: true,
+    });
+    if (status !== 0 || !stdout) return [];
+    return Array.from(
+      new Set(
+        stdout
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+      ),
+    ).sort();
+  }
+
+  const { stdout, status } = runGit(projectRoot, ["status", "--porcelain"], { ignoreExit: true });
+  if (status !== 0 || !stdout) return [];
+  const files = stdout
+    .split("\n")
+    .map((line) => line.slice(3).trim())
+    .map((entry) => (entry.includes(" -> ") ? entry.split(" -> ").at(-1)! : entry))
+    .filter(Boolean);
+  return Array.from(new Set(files)).sort();
+}
+
 export function assertWorkingTreeClean(projectRoot: string, branchName: string | null): void {
   const dirty = describeDirtyWorkingTree(projectRoot);
   if (dirty) {

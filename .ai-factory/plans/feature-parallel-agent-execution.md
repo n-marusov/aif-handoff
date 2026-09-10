@@ -313,7 +313,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
 ### Phase 3: Intra-Issue Fan-Out (Level 2)
 
-- [ ] **Task 10: `AIF_IMPLEMENT_MAX_WORKERS` env + fan-out bound**
+- [x] **Task 10: `AIF_IMPLEMENT_MAX_WORKERS` env + fan-out bound**
 
   Deliverable: new validated env var (integer, default 2, range 1-10) exposed to the implementer stage and included in the coordinator prompt.
 
@@ -335,7 +335,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: none.
 
-- [ ] **Task 11: Inject the layer summary + worker contract into the implementer prompt**
+- [x] **Task 11: Inject the layer summary + worker contract into the implementer prompt**
 
   Deliverable: the implementer prompt contains the plan's execution layers and explicit worker rules (edit-only, no git writes, coordinator owns the plan file and git, repo-wide builds/tests run once per layer, per-layer checkpoint for rollback).
 
@@ -357,7 +357,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: Task 10.
 
-- [ ] **Task 12: Plan change-scope contract + disjointness validation + post-layer enforcement**
+- [x] **Task 12: Plan change-scope contract + disjointness validation + post-layer enforcement**
 
   Deliverable: plan tasks declare their change scope (target files, purpose, new vs modified artifacts); the parser extracts it; before fan-out the orchestrator validates that tasks in the same layer touch disjoint file sets, sequences any overlapping tasks, and validates actual touched files after each layer against the allowed scope.
 
@@ -386,7 +386,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: Task 11.
 
-- [ ] **Task 13: Fresh agent session on task restart**
+- [x] **Task 13: Fresh agent session on task restart**
 
   Deliverable: the implementer starts a NEW session on every run instead of resuming the previous one.
 

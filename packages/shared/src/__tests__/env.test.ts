@@ -312,3 +312,26 @@ describe("git provider selector env", () => {
     expect(result.GIT_PROVIDER).toBe("github");
   });
 });
+
+describe("implement fan-out env", () => {
+  it("defaults AIF_IMPLEMENT_MAX_WORKERS to 2", () => {
+    expect(validateEnv({}).AIF_IMPLEMENT_MAX_WORKERS).toBe(2);
+  });
+
+  it("accepts an in-range worker count", () => {
+    expect(validateEnv({ AIF_IMPLEMENT_MAX_WORKERS: "5" }).AIF_IMPLEMENT_MAX_WORKERS).toBe(5);
+  });
+
+  it("falls back to the default for out-of-range or non-numeric values", () => {
+    expect(validateEnv({ AIF_IMPLEMENT_MAX_WORKERS: "0" }).AIF_IMPLEMENT_MAX_WORKERS).toBe(2);
+    expect(validateEnv({ AIF_IMPLEMENT_MAX_WORKERS: "99" }).AIF_IMPLEMENT_MAX_WORKERS).toBe(2);
+    expect(validateEnv({ AIF_IMPLEMENT_MAX_WORKERS: "abc" }).AIF_IMPLEMENT_MAX_WORKERS).toBe(2);
+  });
+
+  it("accepts an optional AIF_WORKTREE_ROOT", () => {
+    expect(validateEnv({}).AIF_WORKTREE_ROOT).toBeUndefined();
+    expect(validateEnv({ AIF_WORKTREE_ROOT: "/home/www/.worktrees" }).AIF_WORKTREE_ROOT).toBe(
+      "/home/www/.worktrees",
+    );
+  });
+});

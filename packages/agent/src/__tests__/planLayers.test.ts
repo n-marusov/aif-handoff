@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { computePendingPlanLayers, computePlanLayers, formatLayerSummary } from "../planLayers.js";
+import {
+  analyzeLayerDisjointness,
+  collectDeclaredFiles,
+  computePendingPlanLayers,
+  computePlanLayers,
+  formatLayerDecisions,
+  formatLayerSummary,
+  isOutsideDeclaredScope,
+} from "../planLayers.js";
 
 describe("plan layer parsing", () => {
   it("computes parallel layer for dependency fan-out", () => {
@@ -91,5 +99,108 @@ describe("plan layer parsing", () => {
 `;
     const { layers } = computePendingPlanLayers(plan);
     expect(layers).toEqual([[2]]);
+  });
+});
+
+describe("plan change scope + layer disjointness", () => {
+  const plan = `
+### Phase 1
+- [ ] **Task 1: Add model**
+
+  Files:
+  - Modify: \`packages/api/src/model.ts\`
+  - Test: \`packages/api/src/__tests__/model.test.ts\`
+
+  Change scope:
+  - New artifacts (code): none.
+  - Modified artifacts (code): model field.
+
+- [ ] **Task 2: Add service**
+
+  Files:
+  - Modify: \`packages/api/src/service.ts\`
+
+  Change scope:
+  - Modified artifacts (code): service call.
+
+### Phase 2
+- [ ] **Task 3: Docs**
+
+  Files:
+  - Modify: \`packages/api/src/service.ts\`
+
+  Change scope:
+  - Modified artifacts (docs): doc note.
+`;
+
+  it("parses declared files and artifact types per task", () => {
+    const { tasks } = computePlanLayers(plan);
+    const taskOne = tasks.find((task) => task.number === 1);
+    expect(taskOne?.changeScope.files).toEqual([
+      "packages/api/src/__tests__/model.test.ts",
+      "packages/api/src/model.ts",
+    ]);
+    expect(taskOne?.changeScope.declared).toBe(true);
+    expect(taskOne?.changeScope.artifactTypes).toEqual(["code"]);
+  });
+
+  it("allows parallel fan-out when a layer's declared file sets are disjoint", () => {
+    const { tasks, layers } = computePlanLayers(plan);
+    const analyses = analyzeLayerDisjointness(layers, tasks);
+    expect(analyses[0]).toMatchObject({
+      tasks: [1, 2],
+      decision: "parallel",
+      overlappingFiles: [],
+      undeclaredTasks: [],
+    });
+  });
+
+  it("downgrades a layer to sequential when two tasks declare the same file", () => {
+    const overlapping = `
+### Phase 1
+- [ ] **Task 1: A**
+
+  Files:
+  - Modify: \`src/shared.ts\`
+
+- [ ] **Task 2: B**
+
+  Files:
+  - Modify: \`src/shared.ts\`
+`;
+    const { tasks, layers } = computePlanLayers(overlapping);
+    const analyses = analyzeLayerDisjointness(layers, tasks);
+    expect(analyses[0]?.decision).toBe("sequential");
+    expect(analyses[0]?.overlappingFiles).toEqual(["src/shared.ts"]);
+  });
+
+  it("downgrades a layer to sequential when a task declares no change scope", () => {
+    const undeclared = `
+### Phase 1
+- [ ] **Task 1: A**
+
+  Files:
+  - Modify: \`src/a.ts\`
+
+- [ ] **Task 2: B**
+`;
+    const { tasks, layers } = computePlanLayers(undeclared);
+    const analyses = analyzeLayerDisjointness(layers, tasks);
+    expect(analyses[0]?.decision).toBe("sequential");
+    expect(analyses[0]?.undeclaredTasks).toEqual([2]);
+  });
+
+  it("collects the declared file union and detects out-of-scope paths", () => {
+    const { tasks } = computePlanLayers(plan);
+    const files = collectDeclaredFiles(tasks);
+    expect(files).toContain("packages/api/src/service.ts");
+    expect(isOutsideDeclaredScope("./packages/api/src/model.ts", files)).toBe(false);
+    expect(isOutsideDeclaredScope("packages/api/src/unrelated.ts", files)).toBe(true);
+  });
+
+  it("formats layer decisions for prompt injection", () => {
+    const { tasks, layers } = computePlanLayers(plan);
+    const text = formatLayerDecisions(analyzeLayerDisjointness(layers, tasks));
+    expect(text).toContain("Layer 1 (parallel): tasks 1, 2");
   });
 });

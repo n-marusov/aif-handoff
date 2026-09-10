@@ -12,6 +12,7 @@ export {
   getCurrentBranch,
   isBranchIsolationError,
   isGitRepo,
+  listChangedFiles,
   listWorktrees,
   projectSupportsTaskWorktrees,
   projectUsesSharedBranchIsolation,

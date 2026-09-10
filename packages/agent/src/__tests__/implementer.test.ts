@@ -235,7 +235,7 @@ describe("runImplementer rework behavior", () => {
     expect(call.options.resume).toBeUndefined();
   });
 
-  it("resumes a stored session in the standard (non-rework) implement flow", async () => {
+  it("starts a fresh session in the standard (non-rework) implement flow", async () => {
     const db = testDb.current;
     db.insert(tasks)
       .values({
@@ -257,7 +257,47 @@ describe("runImplementer rework behavior", () => {
       prompt: string;
       options: { resume?: string };
     };
-    expect(call.options.resume).toBe("session-xyz");
+    // Restart reuses the worktree but never the previous model context.
+    expect(call.options.resume).toBeUndefined();
+  });
+
+  it("injects the layer plan and worker contract for a parallel-capable plan", async () => {
+    const db = testDb.current;
+    const plan = [
+      "### Phase 1",
+      "- [ ] **Task 1: Add model**",
+      "",
+      "  Files:",
+      "  - Modify: `packages/api/src/model.ts`",
+      "",
+      "- [ ] **Task 2: Add service**",
+      "",
+      "  Files:",
+      "  - Modify: `packages/api/src/service.ts`",
+      "",
+    ].join("\n");
+    db.insert(tasks)
+      .values({
+        id: "task-layer-plan",
+        projectId: "project-1",
+        title: "Layer plan",
+        description: "Desc",
+        status: "implementing",
+        plan,
+        useSubagents: true,
+        reworkRequested: false,
+      })
+      .run();
+
+    await runImplementer("task-layer-plan", projectRoot);
+
+    expect(queryMock).toHaveBeenCalled();
+    const call = queryMock.mock.calls[0]?.[0] as { prompt: string };
+    expect(call.prompt).toContain("Execution layers (from the plan):");
+    expect(call.prompt).toContain("Layer 1 (parallel): tasks 1, 2");
+    expect(call.prompt).toContain("Layer decisions (AUTHORITATIVE");
+    expect(call.prompt).toContain("Parallel worker contract");
+    expect(call.prompt).toMatch(/at most \d+ implement-worker/);
   });
 
   it("does not skip when checkbox Task checklist has pending items", async () => {

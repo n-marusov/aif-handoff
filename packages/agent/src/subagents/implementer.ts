@@ -13,13 +13,24 @@ import {
   logger,
   formatAttachmentsForPrompt,
   looksLikeFullPlanUpdate,
+  getEnv,
+  getHeadCommitSha,
   getProjectConfig,
+  listChangedFiles,
 } from "@aif/shared";
 import { createRuntimeWorkflowSpec } from "@aif/runtime";
 import { logActivity } from "../hooks.js";
 import { executeSubagentQuery } from "../subagentQuery.js";
 import { taskRequiresPlanReview } from "../planReviewPublisher.js";
-import { computePendingPlanLayers, computePlanLayers } from "../planLayers.js";
+import {
+  analyzeLayerDisjointness,
+  collectDeclaredFiles,
+  computePendingPlanLayers,
+  computePlanLayers,
+  formatLayerDecisions,
+  formatLayerSummary,
+  isOutsideDeclaredScope,
+} from "../planLayers.js";
 import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 
 const log = logger("implementer");
@@ -270,6 +281,72 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
 
   log.info({ taskId, title: task.title, useSubagents }, "Starting implementation stage");
 
+  // Level 2 planning: validate that each execution layer's tasks touch
+  // disjoint files before allowing fan-out, and surface the worker contract.
+  const layerAnalyses = analyzeLayerDisjointness(layerComputation.layers, layerComputation.tasks);
+  const declaredFiles = collectDeclaredFiles(layerComputation.tasks);
+  const maxWorkers = getEnv().AIF_IMPLEMENT_MAX_WORKERS;
+  const maxWorkersSource = process.env.AIF_IMPLEMENT_MAX_WORKERS?.trim() ? "env" : "default";
+  const hasParallelLayer = layerAnalyses.some((layer) => layer.decision === "parallel");
+  // Baseline for post-run scope validation (declared-vs-actual touched files).
+  const layerBaselineSha = task.branchName && !task.isFix ? getHeadCommitSha(projectRoot) : null;
+  log.debug(
+    {
+      taskId,
+      layers: layerComputation.layers,
+      maxWorkers,
+      maxWorkersSource,
+      declaredFiles,
+    },
+    "Resolved implementer fan-out plan",
+  );
+  for (const layer of layerAnalyses) {
+    if (layer.tasks.length <= 1) continue;
+    if (layer.decision === "parallel") {
+      log.info(
+        { taskId, layerIndex: layer.layerIndex + 1, tasks: layer.tasks, maxWorkers },
+        "Implementer layer scheduled for parallel fan-out",
+      );
+    } else {
+      log.info(
+        {
+          taskId,
+          layerIndex: layer.layerIndex + 1,
+          tasks: layer.tasks,
+          overlappingFiles: layer.overlappingFiles,
+          undeclaredTasks: layer.undeclaredTasks,
+        },
+        "Implementer layer reduced to sequential execution",
+      );
+    }
+  }
+
+  const layerPlanSection =
+    layerAnalyses.length > 0
+      ? `
+
+Execution layers (from the plan):
+${formatLayerSummary(layerComputation.layers)}
+
+Layer decisions (AUTHORITATIVE — obey them):
+${formatLayerDecisions(layerAnalyses)}`
+      : "\n\nExecution layers: none parsed from the plan — run the checklist sequentially.";
+
+  const fanOutLine = `- Worker fan-out: at most ${maxWorkers} implement-worker subagent(s) per parallel layer (AIF_IMPLEMENT_MAX_WORKERS).`;
+
+  const workerContractBlock = hasParallelLayer
+    ? `
+
+Parallel worker contract (mandatory for layers marked "parallel"):
+- Workers are EDIT-ONLY: no git commands (checkout/commit/push/worktree), and never write the plan file.
+- The coordinator owns git writes and the plan checklist; workers report changed files instead of committing.
+- A worker may only edit the files declared for its own task: ${
+        declaredFiles.length > 0 ? declaredFiles.join(", ") : "(none declared)"
+      }.
+- Run repo-wide builds/tests ONCE per layer, after all of the layer's workers finish.
+- Take one checkpoint per layer so a failed layer can be rolled back before the next one starts.`
+    : "";
+
   const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}
 All files must be created and modified inside this directory. Do NOT create files outside of it.`;
   const implementSlashCommand = `/aif-implement ${planSection}`;
@@ -359,7 +436,7 @@ Execution rules:
 - Respect task dependencies and checklist state from the plan file.
 - Keep plan checklist state accurate while implementing.
 - Run tests/lint/verification relevant to the changes.
-- IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.${reworkProtocolBlock}`;
+- IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.${fanOutLine}${layerPlanSection}${workerContractBlock}${reworkProtocolBlock}`;
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "implementer",
     prompt,
@@ -368,16 +445,27 @@ Execution rules:
     fallbackSlashCommand: implementSlashCommand,
     fallbackStrategy: useSubagents ? "slash_command" : "none",
     executionMode: useSubagents ? "native_subagents" : "standard",
-    // Rework must always start a fresh session — resuming an old thread
-    // leads Claude to treat the completed work as authoritative and ignore
-    // the new rework request.
-    sessionReusePolicy: isRework ? "never" : "resume_if_available",
+    // A restarted task reuses the same worktree but must NOT carry stale model
+    // context from the previous attempt — always start a fresh session.
+    sessionReusePolicy: "never",
     systemPromptAppend: effectiveSystemAppend,
     metadata: {
       reworkRequested: task.reworkRequested,
       skipReview: task.skipReview ?? false,
+      maxWorkers,
+      parallelLayers: layerAnalyses.filter((layer) => layer.decision === "parallel").length,
+      layerBaselineSha,
     },
   });
+
+  log.info(
+    {
+      taskId,
+      previousSessionId: null,
+      reason: isRework ? "rework_requested" : "fresh_session_on_restart",
+    },
+    "Implementer starting a fresh session",
+  );
 
   const { resultText } = await executeSubagentQuery({
     taskId,
@@ -439,6 +527,34 @@ Execution rules:
     assertCurrentBranch(projectRoot, task.branchName);
   }
 
+  // Scope enforcement (Level 2 safety). When a layer actually fanned out, the
+  // run's touched files must stay inside the union of declared change scopes.
+  // The coordinator cannot attribute individual files to individual workers, so
+  // a violation is surfaced loudly (log + reviewer note) instead of being
+  // committed silently.
+  const scopeViolations: string[] = [];
+  if (hasParallelLayer && declaredFiles.length > 0 && layerBaselineSha) {
+    const touchedFiles = listChangedFiles(projectRoot, layerBaselineSha);
+    scopeViolations.push(
+      ...touchedFiles.filter((file) => isOutsideDeclaredScope(file, declaredFiles)),
+    );
+    if (scopeViolations.length > 0) {
+      log.warn(
+        {
+          taskId,
+          baselineSha: layerBaselineSha,
+          outOfScopeFiles: scopeViolations.slice(0, 20),
+        },
+        "Implementer touched files outside the layer's declared change scope",
+      );
+    } else {
+      log.debug(
+        { taskId, touchedFileCount: touchedFiles.length },
+        "Implementer stayed inside the declared change scope",
+      );
+    }
+  }
+
   const checklistAfterSync = getChecklistProgress(syncedPlan);
   const checklistWarning =
     syncedPlan && checklistAfterSync.parsedTaskCount > 0 && checklistAfterSync.pendingTaskCount > 0
@@ -457,6 +573,13 @@ Execution rules:
   }
   if (checklistWarning) {
     finalResultNotes.push(checklistWarning);
+  }
+  if (scopeViolations.length > 0) {
+    const shown = scopeViolations.slice(0, 20).join(", ");
+    const suffix = scopeViolations.length > 20 ? ` (+${scopeViolations.length - 20} more)` : "";
+    finalResultNotes.push(
+      `[warning] Files changed outside the declared layer scope: ${shown}${suffix}. The layer was scheduled for parallel fan-out — review before merging.`,
+    );
   }
   const enrichedResult =
     finalResultNotes.length > 0
