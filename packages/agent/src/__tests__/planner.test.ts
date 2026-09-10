@@ -31,7 +31,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: queryMock,
 }));
 
-const { runPlanner } = await import("../subagents/planner.js");
+const { runPlanner, shouldProvisionWorktree } = await import("../subagents/planner.js");
 
 function streamSuccess(result: string): AsyncIterable<{
   type: "result";
@@ -44,6 +44,60 @@ function streamSuccess(result: string): AsyncIterable<{
     },
   };
 }
+
+describe("shouldProvisionWorktree", () => {
+  it("requires the rollout flag (issue tasks are not exempt)", () => {
+    expect(
+      shouldProvisionWorktree({
+        hasVcsIssue: true,
+        flagEnabled: false,
+        parallelEnabled: true,
+        supportsTaskWorktrees: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("requires a worktree-capable project", () => {
+    expect(
+      shouldProvisionWorktree({
+        hasVcsIssue: true,
+        flagEnabled: true,
+        parallelEnabled: true,
+        supportsTaskWorktrees: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("isolates issue tasks even when the project is not parallel", () => {
+    expect(
+      shouldProvisionWorktree({
+        hasVcsIssue: true,
+        flagEnabled: true,
+        parallelEnabled: false,
+        supportsTaskWorktrees: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("only isolates non-issue tasks when the project is parallel", () => {
+    expect(
+      shouldProvisionWorktree({
+        hasVcsIssue: false,
+        flagEnabled: true,
+        parallelEnabled: false,
+        supportsTaskWorktrees: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldProvisionWorktree({
+        hasVcsIssue: false,
+        flagEnabled: true,
+        parallelEnabled: true,
+        supportsTaskWorktrees: true,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("runPlanner comment selection", () => {
   beforeEach(() => {
@@ -380,8 +434,10 @@ describe("runPlanner comment selection", () => {
 
     expect(sharedBranch).toBe("main");
     expect(updatedTask?.branchName).toMatch(/^feature\/parallel-worktree-/);
-    expect(updatedTask?.worktreePath).toContain("planner-worktree-");
-    expect(updatedTask?.worktreePath).toContain("task-worktree-1");
+    // Branch-scoped path: project segment + branch segment, never the task id.
+    expect(updatedTask?.worktreePath).toContain("project-worktree");
+    expect(updatedTask?.worktreePath).toContain("feature-parallel-worktree-");
+    expect(updatedTask?.worktreePath).not.toContain("task-worktree-1");
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: updatedTask?.worktreePath ?? projectRoot,

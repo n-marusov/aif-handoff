@@ -270,6 +270,10 @@ const envSchema = z.object({
       return value;
     }, z.boolean())
     .default(false),
+  // Root folder that hosts branch-scoped task worktrees. When unset the agent
+  // uses `<dirname(projectRoot)>/.worktrees`. Deployments that mount a separate
+  // volume for worktrees set this to that mount (e.g. /home/www/.worktrees).
+  AIF_WORKTREE_ROOT: z.string().min(1).max(4096).optional(),
   AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {

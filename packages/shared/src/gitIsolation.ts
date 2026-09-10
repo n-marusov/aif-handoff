@@ -1,4 +1,5 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -8,7 +9,7 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { logger } from "./logger.js";
 import { getProjectConfig, type AifProjectGit } from "./projectConfig.js";
 
@@ -69,6 +70,25 @@ export interface EnsureTaskWorktreeInput {
   title: string;
   explicitBranchName?: string | null;
   explicitWorktreePath?: string | null;
+  /**
+   * Stable project identity used to build the worktree project segment.
+   * When absent the segment falls back to a deterministic
+   * `<basename>-<shortHash(projectRoot)>` derived from the filesystem path.
+   */
+  projectId?: string | null;
+}
+
+/** A single entry from `git worktree list --porcelain`. */
+export interface WorktreeEntry {
+  /** Absolute path of the worktree checkout. */
+  path: string;
+  /** Commit currently checked out in the worktree (null when unknown). */
+  head: string | null;
+  /** Short branch name, without the `refs/heads/` prefix (null when detached/bare). */
+  branch: string | null;
+  bare: boolean;
+  detached: boolean;
+  prunable: boolean;
 }
 
 export interface EnsureTaskWorktreeResult {
@@ -106,15 +126,149 @@ function sanitizeWorktreeSegment(value: string): string {
   return sanitized || "task";
 }
 
-export function buildTaskWorktreePath(
+const WORKTREE_ROOT_DIR_NAME = ".worktrees";
+const PROJECT_SEGMENT_HASH_LENGTH = 8;
+
+/**
+ * Deterministic per-project worktree segment. Prefers the persisted project id
+ * so two projects with the same basename never collide; otherwise derives a
+ * stable `<basename>-<shortHash(projectRoot)>` from the filesystem path.
+ */
+export function buildProjectWorktreeSegment(
   projectRoot: string,
-  branchName: string,
-  taskId: string,
+  projectId?: string | null,
 ): string {
-  const projectName = basename(projectRoot);
+  const trimmedId = projectId?.trim();
+  if (trimmedId) return sanitizeWorktreeSegment(trimmedId);
+  const hash = createHash("sha1")
+    .update(resolve(projectRoot))
+    .digest("hex")
+    .slice(0, PROJECT_SEGMENT_HASH_LENGTH);
+  return sanitizeWorktreeSegment(`${basename(projectRoot)}-${hash}`);
+}
+
+/**
+ * Resolve the root folder that hosts task worktrees. Precedence:
+ * explicit override → `AIF_WORKTREE_ROOT` → `<dirname(projectRoot)>/.worktrees`.
+ */
+export function resolveWorktreeRoot(
+  projectRoot: string,
+  explicitRoot?: string | null,
+): { worktreeRoot: string; source: "explicit" | "env" | "default" } {
+  const explicit = explicitRoot?.trim();
+  if (explicit) return { worktreeRoot: resolve(explicit), source: "explicit" };
+  const fromEnv = process.env.AIF_WORKTREE_ROOT?.trim();
+  if (fromEnv) return { worktreeRoot: resolve(fromEnv), source: "env" };
+  return {
+    worktreeRoot: resolve(dirname(projectRoot), WORKTREE_ROOT_DIR_NAME),
+    source: "default",
+  };
+}
+
+function isWithinProjectMount(candidate: string, projectRoot: string): boolean {
+  const mount = resolve(dirname(projectRoot));
+  const normalizedCandidate = resolve(candidate);
+  return normalizedCandidate === mount || normalizedCandidate.startsWith(`${mount}${sep}`);
+}
+
+export interface BuildTaskWorktreePathInput {
+  projectRoot: string;
+  branchName: string;
+  projectId?: string | null;
+  worktreeRoot?: string | null;
+}
+
+/**
+ * Branch-scoped task worktree path. The path is a pure function of the BRANCH
+ * (plus the project segment), never of the task id — re-running the same issue
+ * must land on the same folder so a retained worktree can be adopted instead of
+ * triggering `git worktree add` conflicts.
+ */
+export function buildTaskWorktreePath(input: BuildTaskWorktreePathInput): string {
+  const { projectRoot, branchName } = input;
+  const { worktreeRoot, source } = resolveWorktreeRoot(projectRoot, input.worktreeRoot);
+  const projectSegment = buildProjectWorktreeSegment(projectRoot, input.projectId);
   const branchSegment = sanitizeWorktreeSegment(branchName.replace(/\//g, "-"));
-  const taskSegment = sanitizeWorktreeSegment(taskId);
-  return resolve(dirname(projectRoot), `${projectName}-${branchSegment}-${taskSegment}`);
+  const worktreePath = resolve(worktreeRoot, projectSegment, branchSegment);
+
+  if (source !== "default" && !isWithinProjectMount(worktreeRoot, projectRoot)) {
+    log.warn(
+      { projectRoot, worktreeRoot, source, branchName, projectSegment },
+      "Configured worktree root is outside the project mount; task worktrees will be created on an external path",
+    );
+  }
+  log.debug(
+    { projectRoot, branchName, worktreeRoot, worktreePath, projectSegment, source },
+    "Resolved branch-scoped task worktree path",
+  );
+  return worktreePath;
+}
+
+function normalizeWorktreeEntry(partial: Partial<WorktreeEntry>): WorktreeEntry {
+  // Git reports worktree paths with POSIX separators even on Windows; resolve
+  // them to native form so callers can compare against `path.join` results.
+  const rawPath = partial.path ?? "";
+  return {
+    path: rawPath ? resolve(rawPath) : rawPath,
+    head: partial.head ?? null,
+    branch: partial.branch ?? null,
+    bare: partial.bare ?? false,
+    detached: partial.detached ?? false,
+    prunable: partial.prunable ?? false,
+  };
+}
+
+function normalizePathForCompare(path: string): string {
+  return resolve(path)
+    .replace(/[\\/]+$/, "")
+    .toLowerCase();
+}
+
+/**
+ * Parse `git worktree list --porcelain` into structured entries. Returns an
+ * empty array when the project is not a git work tree (never throws).
+ */
+export function listWorktrees(projectRoot: string): WorktreeEntry[] {
+  const { stdout, status } = runGit(projectRoot, ["worktree", "list", "--porcelain"], {
+    ignoreExit: true,
+  });
+  if (status !== 0 || !stdout) return [];
+
+  const entries: WorktreeEntry[] = [];
+  let current: Partial<WorktreeEntry> | null = null;
+
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      if (current?.path) entries.push(normalizeWorktreeEntry(current));
+      current = null;
+      continue;
+    }
+    if (line.startsWith("worktree ")) {
+      if (current?.path) entries.push(normalizeWorktreeEntry(current));
+      current = { path: line.slice("worktree ".length).trim() };
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length).trim();
+    } else if (line.startsWith("branch ")) {
+      const ref = line.slice("branch ".length).trim();
+      current.branch = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
+    } else if (line === "bare") {
+      current.bare = true;
+    } else if (line === "detached") {
+      current.detached = true;
+    } else if (line === "prunable") {
+      current.prunable = true;
+    }
+  }
+  if (current?.path) entries.push(normalizeWorktreeEntry(current));
+  return entries;
+}
+
+function findWorktreeForBranch(entries: WorktreeEntry[], branchName: string): WorktreeEntry | null {
+  return entries.find((entry) => !entry.bare && entry.branch === branchName) ?? null;
 }
 
 function runGit(
@@ -536,8 +690,11 @@ function copyProjectContextToWorktree(projectRoot: string, worktreePath: string)
   excludeWorktreePath(worktreePath, cfg.paths.patches);
 }
 
+const WORKTREE_CREATE_MAX_ATTEMPTS = 3;
+const STDERR_LOG_MAX = 2_000;
+
 export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWorktreeResult {
-  const { projectRoot, taskId, title, explicitBranchName, explicitWorktreePath } = input;
+  const { projectRoot, taskId, title, explicitBranchName, explicitWorktreePath, projectId } = input;
   const config = resolveGitConfig(projectRoot);
 
   if (!config.enabled) {
@@ -565,18 +722,47 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     : buildBranchName(config.branch_prefix, title, taskId);
   validateBranchName(projectRoot, branchName);
 
-  const worktreePath = explicitWorktreePath?.trim()
+  const expectedWorktreePath = explicitWorktreePath?.trim()
     ? resolve(explicitWorktreePath.trim())
-    : buildTaskWorktreePath(projectRoot, branchName, taskId);
+    : buildTaskWorktreePath({ projectRoot, branchName, projectId });
 
-  if (existsSync(worktreePath)) {
-    if (isGitRepo(worktreePath) && getCurrentBranch(worktreePath) === branchName) {
-      copyProjectContextToWorktree(projectRoot, worktreePath);
-      return { action: "reused", branchName, worktreePath };
+  // Adopt-don't-fail: when the branch is ALREADY checked out in some worktree,
+  // reuse that checkout instead of attempting `git worktree add` on a path that
+  // git will refuse (a branch can only be checked out in one worktree). This is
+  // what converts the retained-worktree incident into a no-op resume.
+  const existingEntries = listWorktrees(projectRoot);
+  const occupant = findWorktreeForBranch(existingEntries, branchName);
+  if (occupant) {
+    if (normalizePathForCompare(occupant.path) !== normalizePathForCompare(expectedWorktreePath)) {
+      log.info(
+        {
+          taskId,
+          branchName,
+          worktreePath: occupant.path,
+          expectedWorktreePath,
+        },
+        "Adopted existing worktree for branch",
+      );
     }
+    copyProjectContextToWorktree(projectRoot, occupant.path);
+    return { action: "reused", branchName, worktreePath: occupant.path };
+  }
+
+  if (existsSync(expectedWorktreePath)) {
+    if (isGitRepo(expectedWorktreePath) && getCurrentBranch(expectedWorktreePath) === branchName) {
+      copyProjectContextToWorktree(projectRoot, expectedWorktreePath);
+      return { action: "reused", branchName, worktreePath: expectedWorktreePath };
+    }
+    const occupantAtPath = existingEntries.find(
+      (entry) =>
+        normalizePathForCompare(entry.path) === normalizePathForCompare(expectedWorktreePath),
+    );
+    const boundTo = occupantAtPath?.branch ?? null;
     throw new BranchIsolationError(
       "worktree_path_collision",
-      `Worktree path ${worktreePath} already exists and is not bound to ${branchName}.`,
+      `Worktree path ${expectedWorktreePath} already exists${
+        boundTo ? ` and is bound to ${boundTo}` : ""
+      }, not ${branchName}. Remove or prune the stale worktree before retrying.`,
       projectRoot,
       branchName,
     );
@@ -611,22 +797,73 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     });
   }
 
-  const args = branchExists(projectRoot, branchName)
-    ? ["worktree", "add", worktreePath, branchName]
-    : ["worktree", "add", "-b", branchName, worktreePath, baseRef];
-  const { status, stderr } = runGit(projectRoot, args, { ignoreExit: true });
-  if (status !== 0) {
-    throw new BranchIsolationError(
-      "worktree_create_failed",
-      `git ${args.join(" ")} failed: ${stderr || "unknown error"}`,
-      projectRoot,
-      branchName,
-    );
+  // Bounded retry driven by FRESH structured state rather than error text:
+  // after every failed attempt we re-read `git worktree list` and the branch
+  // refs, and adopt whatever appeared in the meantime (parallel provisioning,
+  // partially-created worktree, ref written by a concurrent fetch).
+  let lastStderr = "";
+  let lastStatus = 1;
+  let lastArgs: string[] = [];
+  for (let attempt = 1; attempt <= WORKTREE_CREATE_MAX_ATTEMPTS; attempt += 1) {
+    const branchNowExists = branchExists(projectRoot, branchName);
+    const args = branchNowExists
+      ? ["worktree", "add", expectedWorktreePath, branchName]
+      : ["worktree", "add", "-b", branchName, expectedWorktreePath, baseRef];
+    const { status, stderr } = runGit(projectRoot, args, { ignoreExit: true });
+    if (status === 0) {
+      copyProjectContextToWorktree(projectRoot, expectedWorktreePath);
+      log.info(
+        { projectRoot, worktreePath: expectedWorktreePath, branchName, taskId, attempt },
+        "Created task worktree",
+      );
+      return { action: "created", branchName, worktreePath: expectedWorktreePath };
+    }
+
+    lastStatus = status;
+    lastStderr = stderr;
+    lastArgs = args;
+
+    const raced = findWorktreeForBranch(listWorktrees(projectRoot), branchName);
+    if (raced) {
+      log.info(
+        { taskId, branchName, worktreePath: raced.path },
+        "Adopted existing worktree for branch",
+      );
+      copyProjectContextToWorktree(projectRoot, raced.path);
+      return { action: "reused", branchName, worktreePath: raced.path };
+    }
+
+    if (attempt < WORKTREE_CREATE_MAX_ATTEMPTS) {
+      log.warn(
+        { taskId, branchName, attempt, status, stderr: truncateStderr(stderr) },
+        "Task worktree provisioning failed; retrying",
+      );
+    }
   }
 
-  copyProjectContextToWorktree(projectRoot, worktreePath);
-  log.info({ projectRoot, worktreePath, branchName, taskId }, "Created task worktree");
-  return { action: "created", branchName, worktreePath };
+  log.error(
+    {
+      taskId,
+      branchName,
+      projectRoot,
+      args: lastArgs,
+      status: lastStatus,
+      stderr: truncateStderr(lastStderr),
+    },
+    "Task worktree provisioning failed after retries",
+  );
+  throw new BranchIsolationError(
+    "worktree_create_failed",
+    `git ${lastArgs.join(" ")} failed after ${WORKTREE_CREATE_MAX_ATTEMPTS} attempts (last exit ${lastStatus}): ${
+      lastStderr || "unknown error"
+    }`,
+    projectRoot,
+    branchName,
+  );
+}
+
+function truncateStderr(value: string): string {
+  return value.length > STDERR_LOG_MAX ? `${value.slice(0, STDERR_LOG_MAX)}…[truncated]` : value;
 }
 
 export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeatureBranchResult {
