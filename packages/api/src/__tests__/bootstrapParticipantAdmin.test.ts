@@ -224,7 +224,7 @@ describe("first participant administrator bootstrap", () => {
     expect(dependencies.errors.join("\n")).not.toContain("too-short");
   });
 
-  it("reads only regular password files with owner-only permissions", () => {
+  it("enforces protected password file rules", () => {
     const directory = mkdtempSync(join(tmpdir(), "aif-bootstrap-"));
     const passwordFile = join(directory, "password");
     writeFileSync(passwordFile, "protected bootstrap password\n", { mode: 0o600 });
@@ -232,9 +232,13 @@ describe("first participant administrator bootstrap", () => {
     expect(readProtectedPasswordFile(passwordFile)).toBe("protected bootstrap password\n");
 
     chmodSync(passwordFile, 0o644);
-    expect(() => readProtectedPasswordFile(passwordFile)).toThrow(
-      "must not be accessible by group or other users",
-    );
+    if (process.platform === "win32") {
+      expect(readProtectedPasswordFile(passwordFile)).toBe("protected bootstrap password\n");
+    } else {
+      expect(() => readProtectedPasswordFile(passwordFile)).toThrow(
+        "must not be accessible by group or other users",
+      );
+    }
     expect(() => readProtectedPasswordFile(directory)).toThrow("must be a regular file");
   });
 });

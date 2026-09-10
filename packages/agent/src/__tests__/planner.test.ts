@@ -10,7 +10,7 @@ import {
 import { createTestDb } from "@aif/shared/server";
 import { eq } from "drizzle-orm";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -673,5 +673,200 @@ describe("runPlanner comment selection", () => {
     expect(call.prompt).toContain("/aif-plan fast @.ai-factory/PLAN.md docs:false tests:false");
     expect(call.prompt).toContain("HANDOFF_MODE: 1");
     expect(call.prompt).toContain("HANDOFF_TASK_ID: task-skill-1");
+  });
+});
+
+describe("runPlanner stale plan cleanup", () => {
+  beforeEach(() => {
+    (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
+      queryMock;
+    testDb.current = createTestDb();
+    delete process.env.AIF_TASK_WORKTREES_ENABLED;
+    delete process.env.AIF_GITHUB_ISSUE_PR_ENABLED;
+    resetEnvCache();
+    queryMock.mockReset();
+    queryMock.mockReturnValue(streamSuccess("## New Plan\n- [ ] Task 1: Work"));
+  });
+
+  it("deletes stale completed plan file on first-time planning", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-stale-"));
+    const planFilePath = join(projectRoot, "PLAN.md");
+    const planContent = "- [x] Task 1: Create user model\n- [x] Task 2: Add auth\n";
+    writeFileSync(planFilePath, planContent, "utf8");
+
+    db.insert(projects)
+      .values({
+        id: "project-stale",
+        name: "Stale Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-stale-1",
+        projectId: "project-stale",
+        title: "Stale plan task",
+        description: "Desc",
+        status: "planning",
+        planPath: "PLAN.md",
+        plannerMode: "fast",
+        useSubagents: true,
+      })
+      .run();
+
+    expect(existsSync(planFilePath)).toBe(true);
+    await runPlanner("task-stale-1", projectRoot);
+
+    // First-time planning: stale content should be replaced by the fresh subagent result.
+    expect(existsSync(planFilePath)).toBe(true);
+    const content = readFileSync(planFilePath, "utf8");
+    expect(content).toContain("## New Plan");
+    expect(content).toContain("Task 1: Work");
+    expect(content).not.toContain("Create user model");
+    expect(content).not.toContain("Add auth");
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps plan file intact during replanning (planReviewFeedback set)", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-replan-"));
+    mkdirSync(join(projectRoot, ".ai-factory"), { recursive: true });
+    const planFilePath = join(projectRoot, ".ai-factory", "PLAN.md");
+    writeFileSync(
+      planFilePath,
+      "- [x] Task 1: Create user model\n- [x] Task 2: Add auth\n",
+      "utf8",
+    );
+
+    db.insert(projects)
+      .values({
+        id: "project-replan",
+        name: "Replan Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-replan-stale",
+        projectId: "project-replan",
+        title: "Replan task",
+        description: "Desc",
+        status: "planning",
+        planReviewFeedback: "Please revise the approach",
+        useSubagents: true,
+        plannerMode: "fast",
+      })
+      .run();
+
+    expect(existsSync(planFilePath)).toBe(true);
+    await runPlanner("task-replan-stale", projectRoot);
+
+    // Replanning: stale file should NOT be deleted
+    expect(existsSync(planFilePath)).toBe(true);
+    const content = readFileSync(planFilePath, "utf8");
+    expect(content).toContain("Task 1: Create user model");
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not delete plan file when some tasks are incomplete", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-partial-"));
+    mkdirSync(join(projectRoot, ".ai-factory"), { recursive: true });
+    const planFilePath = join(projectRoot, ".ai-factory", "PLAN.md");
+    writeFileSync(
+      planFilePath,
+      "- [x] Task 1: Create user model\n- [ ] Task 2: Add auth\n",
+      "utf8",
+    );
+
+    db.insert(projects)
+      .values({
+        id: "project-partial",
+        name: "Partial Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-partial-1",
+        projectId: "project-partial",
+        title: "Partial task",
+        description: "Desc",
+        status: "planning",
+        plannerMode: "fast",
+        useSubagents: true,
+      })
+      .run();
+
+    expect(existsSync(planFilePath)).toBe(true);
+    await runPlanner("task-partial-1", projectRoot);
+
+    // Not all tasks completed → file should NOT be deleted
+    expect(existsSync(planFilePath)).toBe(true);
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fail when plan file does not exist", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-no-file-"));
+    mkdirSync(join(projectRoot, ".ai-factory"), { recursive: true });
+
+    db.insert(projects)
+      .values({
+        id: "project-no-file",
+        name: "No File Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-no-file-1",
+        projectId: "project-no-file",
+        title: "No file task",
+        description: "Desc",
+        status: "planning",
+        plannerMode: "fast",
+        useSubagents: true,
+      })
+      .run();
+
+    // File doesn't exist — should not throw
+    await expect(runPlanner("task-no-file-1", projectRoot)).resolves.toBeUndefined();
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire for isFix tasks even when plan is fully completed", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-fix-"));
+    mkdirSync(join(projectRoot, ".ai-factory"), { recursive: true });
+    const planFilePath = join(projectRoot, ".ai-factory", "PLAN.md");
+    writeFileSync(planFilePath, "- [x] Task 1: Fix login bug\n", "utf8");
+
+    db.insert(projects)
+      .values({
+        id: "project-fix-skip",
+        name: "Fix Skip Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-fix-skip-1",
+        projectId: "project-fix-skip",
+        title: "Fix task",
+        description: "Desc",
+        status: "planning",
+        isFix: true,
+        useSubagents: false,
+      })
+      .run();
+
+    expect(existsSync(planFilePath)).toBe(true);
+    await runPlanner("task-fix-skip-1", projectRoot);
+
+    // isFix tasks skip the stale cleanup guard
+    expect(existsSync(planFilePath)).toBe(true);
+    expect(queryMock).toHaveBeenCalledTimes(1);
   });
 });
