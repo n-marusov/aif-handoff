@@ -408,7 +408,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
 ### Phase 4: Documentation
 
-- [ ] **Task 14: Documentation update**
+- [x] **Task 14: Documentation update**
 
   Deliverable: docs describe the two levels of parallelism, the worktree lifecycle, the DB-as-source-of-truth rule, git mutation locking, cleanup reference protection, unsafe fix-task serialization, and the new env vars; stale "worktrees are retained after done/verified" and "GitHub tasks always use a worktree" statements are corrected.
 

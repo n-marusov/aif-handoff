@@ -66,6 +66,7 @@ packages/
 │       ├── index.ts         # Server entry point
 │       ├── routes/          # tasks/projects/chat/runtime profiles plus auth/participants
 │       ├── services/        # runtime.ts, codexIndex.ts, fastFix.ts, roadmapGeneration.ts
+│       │                    # agentInternal.ts bridges API → agent internal HTTP (worktree cleanup)
 │       │                    # github.ts + gitlab.ts provide the GitHub/GitLab REST clients
 │       ├── middleware/      # logger.ts, rateLimit.ts, zodValidator.ts
 │       ├── schemas.ts       # Zod request validation
@@ -99,6 +100,10 @@ packages/
         ├── notifier.ts      # Notification system
         ├── githubWorkflow.ts # GitHub sync, branch push, and PR publication
         ├── gitlabWorkflow.ts # GitLab sync, branch push, and MR publication
+        ├── gitOperationLock.ts # Per-project git mutation lock (keyed async mutex)
+        ├── internalApi.ts      # Always-on agent-internal HTTP API (git prepare, worktree cleanup)
+        ├── worktreeLifecycle.ts # Stash-before-remove task worktree cleanup
+        ├── worktreeReconcile.ts # DB ↔ filesystem worktree reconciliation sweep
         ├── codex/           # Codex login broker (OAuth-in-Docker bridge)
         └── subagents/       # planner.ts, implementer.ts, reviewer.ts
 

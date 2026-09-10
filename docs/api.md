@@ -1769,6 +1769,53 @@ The web settings route `POST /settings/mcp/install` installs the MCP server into
 
 See [MCP Sync Server](mcp-sync.md) for full documentation.
 
+## Agent Internal API
+
+The agent process runs a small always-on Hono server bound to the `AGENT_INTERNAL_URL` port
+(default `http://agent:3010`). It is not part of the browser-facing API surface: callers are
+trusted internal services (the API process), and every route enforces the same internal auth
+rules as the broadcast endpoints (`Authorization: Bearer <INTERNAL_BROADCAST_TOKEN>` or
+`X-Internal-Broadcast-Token`). When no token is configured the route trusts the internal
+network.
+
+### Prepare the Local Git Repo
+
+`POST /gitlab/prepare` — body `{ projectId }`. Auto-prepares the local repository for a
+GitLab connection (origin remote, credential helper, default branch, AI Factory scaffold).
+Returns `{ ok: true, gitPreparedAt }` or a structured `4xx/5xx` with a `code`
+(e.g. `gitlab_prepare_fetch_failed`).
+
+### Clean Up a Task Worktree
+
+`POST /worktrees/cleanup` — body:
+
+```json
+{
+  "taskId": "…",
+  "projectId": "…",
+  "projectRoot": "/home/www/project",
+  "branchName": "feature/github-issue-12",
+  "worktreePath": "/home/www/.worktrees/project/feature-github-issue-12",
+  "reason": "task_delete"
+}
+```
+
+The agent snapshots the task's git identity, stashes uncommitted tracked and untracked
+changes (`git stash push -u -m "aif task <taskId> cleanup: <reason>"`), checks that no other
+live task references the same folder, then removes the worktree and prunes registrations.
+The branch is retained.
+
+| Status | Body                                                                | Meaning                                                                                                   |
+| ------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `200`  | `{ ok: true, cleaned, skippedDueToReference?, stashSha?, reason? }` | Cleanup ran, or was intentionally skipped (`no_worktree`, `worktree_missing`, `referenced_by_live_task`). |
+| `400`  | `{ error, code: "invalid_body" }`                                   | Missing `taskId`, `projectId`, or `projectRoot`.                                                          |
+| `500`  | `{ error, code: "worktree_cleanup_internal" }`                      | Unexpected failure (e.g. stash failed — the worktree is left in place).                                   |
+
+Callers are **best-effort**: `DELETE /tasks/:id` and the GitHub/GitLab `merged → verified`
+transitions request cleanup but never fail the primary operation when the agent is
+unreachable. The reconciliation sweep (agent startup + after each poll cycle) is the
+backstop.
+
 ## See Also
 
 - [Architecture](architecture.md) — system overview and data flow

@@ -103,6 +103,13 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 
 Environment validation is handled by Zod in `packages/shared/src/env.ts`. The application will fail to start with a descriptive error if required variables are invalid.
 
+### Parallel Worktree Variables
+
+| Variable                    | Type   | Default                      | Description                                                                                                                                                                                                                                                                                       |
+| --------------------------- | ------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AIF_WORKTREE_ROOT`         | string | `<projectParent>/.worktrees` | Root folder that hosts branch-scoped task worktrees. When unset the agent uses `<dirname(projectRoot)>/.worktrees`. Point it at a dedicated volume (e.g. `/home/www/.worktrees`) to keep worktrees off the project mount. A WARN is logged when the configured root is outside the project mount. |
+| `AIF_IMPLEMENT_MAX_WORKERS` | number | `2`                          | Maximum `implement-worker` subagents fanned out per parallel execution layer. Range 1–10; out-of-range or non-numeric values fall back to `2` with a WARN. Workers are edit-only — the coordinator owns git writes and the plan file.                                                             |
+
 ## GitHub Issue-to-PR Mode
 
 Set `AIF_GITHUB_ISSUE_PR_ENABLED=true` to enable this off-by-default integration.
@@ -715,8 +722,9 @@ AIF_TASK_WORKTREES_ENABLED=true
 - The coordinator processes up to `COORDINATOR_MAX_CONCURRENT_PROJECTS` independent project lanes concurrently in a poll cycle. Stage ordering is preserved inside a project lane, so a project's planner still drains before that same project's reviewer, but a slow planner in project A no longer blocks a reviewer in project B.
 - Across all lanes, `COORDINATOR_MAX_CONCURRENT_TASKS` remains the global safety ceiling for active coordinator tasks. Runnable lanes receive slots through a fair FIFO governor, so an older busy project cannot consume the whole first wave when other selected lanes are ready.
 - Cron ticks and WebSocket wakes share one single-flight poll loop. A wake received during an active cycle is coalesced into one follow-up cycle, preserving project-local stage order across trigger sources.
-- With `AIF_TASK_WORKTREES_ENABLED=false` (default), any branch-isolated project (`git.create_branches=true`) remains serial. The API also rejects parallel auto-queue for that combination.
-- With `AIF_TASK_WORKTREES_ENABLED=true`, full-mode planning for parallel branch-isolated projects creates a sibling git worktree for each task, persists its absolute path in `tasks.worktree_path`, and runs all downstream stages from that path. Legacy branch-bound tasks that have `branchName` but no `worktreePath` still force serial execution until they drain.
+- With `AIF_TASK_WORKTREES_ENABLED=false` (default), any branch-isolated project (`git.create_branches=true`) remains serial. The API also rejects parallel auto-queue for that combination. Issue-linked tasks (GitHub/GitLab) also fall back to an in-tree feature branch on the shared checkout, named from the same RULES-derived convention so the branch identity is identical to the worktree path.
+- With `AIF_TASK_WORKTREES_ENABLED=true`, full-mode planning for parallel branch-isolated projects creates a branch-scoped worktree under `AIF_WORKTREE_ROOT` (default `<dirname(projectRoot)>/.worktrees`), persists its absolute path in `tasks.worktree_path`, and runs all downstream stages from that path. Legacy branch-bound tasks that have `branchName` but no `worktreePath` still force serial execution until they drain.
+- Parallel execution has two levels: **Level 1** is isolation across issues (one worktree per issue branch, gated on `AIF_TASK_WORKTREES_ENABLED=true` **and** `parallelEnabled=true`); **Level 2** is bounded fan-out within one issue's implementation run (`AIF_IMPLEMENT_MAX_WORKERS`, default 2). Layers whose tasks declare overlapping files, or tasks that declare no change scope, are downgraded to sequential.
 - With `AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED=false` (default), auto-queue terminal transitions, scheduled-task firing, and project concurrency retain their legacy behavior.
 - With `AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED=true`, auto-queue completion commits are synchronous. A Git task remains in flight until its commit is verified and its SHA is stored; commit failure moves it to `blocked_external` and prevents queue advancement. Due scheduled tasks in auto-queue projects remain in backlog while their Git worktree is dirty.
 - When the completion-commit gate is enabled, any Git-backed auto-queue project that shares one working directory is forced to serial execution. Non-auto-queue projects keep their existing concurrency rules, and parallel task-scoped commits require isolated task worktrees.
@@ -730,7 +738,7 @@ AIF_TASK_WORKTREES_ENABLED=true
 
 When parallel mode is enabled for a project, tasks are forced to `mode = full` (creates git branch/worktree per task) to ensure code isolation between concurrent agents. The UI disables mode selection and auto-generates unique plan file paths. The API enforces these constraints: creating a task in a parallel project auto-sets `plannerMode=full`, and updating to `fast` mode returns a 400 error.
 
-Task worktrees are retained after terminal statuses (`done` / `verified`) for operator inspection and follow-up commits. Handoff does not remove them automatically; cleanup is an operator action. Long-running auto-queue projects should monitor sibling worktree disk usage.
+Task worktrees are not retained indefinitely: a task's worktree is removed when its issue PR/MR is merged (task → `verified`) or when the task is deleted. Removal stashes uncommitted work first and is skipped while another live task references the same folder; a reconciliation sweep at agent startup and after each poll cycle removes ownerless worktrees and repairs missing folders. The issue branch itself is retained, since an open PR/MR may still need it.
 
 ## Backlog Position Normalization
 
