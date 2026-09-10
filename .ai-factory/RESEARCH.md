@@ -1,36 +1,86 @@
 # Research
 
-Updated: 2026-08-16 08:10
+Updated: 2026-09-10 12:00
 Status: active
 
 ## Active Summary (input for /aif-plan)
 <!-- aif:active-summary:start -->
-Topic: Unblock manual-review handoff + wire GitLab "request changes" to rework
+Topic: Parallel agent execution — per-issue git-worktree isolation (Level 1) + intra-issue worker fan-out (Level 2), plus worktree lifecycle and DB↔filesystem reconciliation
 
-Goal: Fix two gaps that left task b0f811dc (GitLab issue #1, MR !1) stuck in `review` after auto-review hit max iterations (4/3) and handed off to a human with zero actionable UI buttons (legacy mode).
+Goal: Replace the current serial "one shared tree" behaviour with a two-level parallelism model, and make it survive task re-execution.
 
-Two planned changes:
-1. **Path 2 (UI, bugfix):** allow `complete_review` / `request_review_changes` for human-owned tasks in `review` status even when participants mode is OFF (legacy). Today `resolveTaskAction` routes ALL legacy-mode tasks through `resolveLegacyAction`, which has no review events → `permittedActions: []` → no buttons. Guard on `executionOwner === "human"` so AI-owned review tasks (coordinator-owned) stay untouched. NOTE: `request_review_changes` → `implementing` keeps the task human-owned → coordinator skips it (`processOneTask` returns false for non-AI) → user then uses "Assign / hand off" to hand back to AI (2 clicks).
-2. **Path 3 (feature, GitLab):** detect GitLab "Request changes" and resume the task at `implementing` with `reworkRequested: true`, mirroring GitHub `changes_requested` handling (routes/github.ts:254-274).
+- **Level 1 — across issues:** one git worktree per issue branch, so several issue tasks run concurrently in the same project. Isolation is real (separate HEAD/index/working files).
+- **Level 2 — within one issue:** N `implement-worker` subagents run inside ONE worktree. There is no git isolation at this level, so safety must come from file-scope partitioning. Fan-out width is capped by the new env var `AIF_IMPLEMENT_MAX_WORKERS=2`.
 
-CRITICAL evidence (Path 3 signal): GitLab "Request changes" in the GUI does NOT set `detailed_merge_status: requested_changes` on gitlab.com Free (verified live: stays `mergeable` even with `?with_merge_status_recheck=true`). The real signal is a **system note** in the MR discussions/notes API: `{ system: true, body: "requested changes" }` (verified live: note id 3691116788, author nikomaru, 2026-08-16T07:42:03Z). Dedup via note `id` > stored `lastReviewNoteId` (analog of GitHub `lastReviewId`), NOT via detailed_merge_status.
+Origin incident: a retained task-scoped worktree `vnc-feature-github-issue-1-a1342eab-…` held branch `feature/github-issue-1`; later tasks for the same issue computed a different path but the same branch, so `git worktree add` failed → `worktree_create_failed` → permanent `blocked_external` (retryAfter=null). A retained worktree without any owner in the pipeline is the core structural defect.
+
+Decisions (confirmed with the user):
+- **Level 1 identity:** worktree path is deterministic from the BRANCH (never from `taskId`); branch is one-per-issue and named from the project's RULES (`## Git conventions` → `branch_prefix`) + issue number, with fallback chain RULES → `git.branch_prefix` → provider default.
+- **Worktree root (option C):** `/home/www/.worktrees/<project>/<branch>` — isolated, predictable, not nested inside the working tree.
+- **Adopt instead of fail:** if a worktree for that branch already exists, reuse it (`action: "reused"`) and persist its path; never throw `worktree_create_failed` for that case.
+- **Enablement:** `AIF_TASK_WORKTREES_ENABLED=true` + `project.parallelEnabled=true` open the parallel pool. This reverses the earlier `AIF_TASK_WORKTREES_ENABLED=false` decision.
+- **Issue-task bypass must be removed:** `shouldCreateWorktree = Boolean(githubIssue) || (…)` (planner.ts:211-215) currently ignores the flag; and the non-worktree path must pass the RULES-derived issue branch into `ensureFeatureBranch` (planner.ts:249), otherwise the branch becomes task-slug-scoped.
+- **Task restart:** same worktree, **new agent session** (no session resume) — changes the current `sessionReusePolicy: "resume_if_available"` for the implementer.
+- **Task deletion (option a):** stash uncommitted changes, then `git worktree remove`.
+- **DB↔folder sync (option a):** the DB is the source of truth. Reconcile at agent start and after terminal transitions: orphan worktree folders → `git worktree remove` + `git worktree prune`; a task with a non-null `worktreePath` and no folder → recreate the worktree, otherwise park the task as `blocked_external`.
+- **Level 2 ownership rules:** plan tasks must declare their change scope (which files, why, what changes; new vs modified artifacts by type). Overlapping file sets are sequenced, never parallelised. Workers are edit-only (no git writes); the coordinator owns all git writes and the plan file; repo-wide builds/tests run once per layer; each layer is checkpointed for rollback.
+- **Control surface for Level 2:** the `ai-factory` package itself is NOT in scope. Its the target project's skills, rules and agent definitions (`.claude/agents/`, `.claude/skills/`, `.ai-factory/rules/`) that govern fan-out behaviour, and those live in the project repo under VCS.
+- **Dropped requirement:** no human ever edits artifacts inside the container working tree, so human-lease safety gating is not needed.
 
 Constraints:
-- Migration append-only: new column `last_review_note_id` (or similar) in `gitlab_issues` at next free version — never renumber existing migrations.
 - DB boundary via @aif/data.
-- Legacy-mode behavior is pinned by test `stateMachine.test.ts` "preserves disabled-mode anonymous compatibility" (human-owned backlog can still `start_ai`) → do NOT route all human-owned tasks through `resolveHumanOwnerAction` in legacy mode; add guarded cases instead.
-- Every package >=70% coverage; `npm run ai:validate`.
+- Migration versions append-only — never renumber a merged migration.
+- Every package ≥70% coverage; `npm run ai:validate` after implementation.
+- Docker config must stay in sync if packages/config change.
+- Level 1 requires a per-project mutex around repo-mutating git ops (`fetch`/`worktree add`/branch create) to avoid ref-lock races.
+
+Open questions (unresolved):
+1. PR comment → `/aif-improve` conflicts with the current implementation, which moves `plan_review` → `planning` and re-runs the **planner** with `planReviewFeedback` (planner.ts:155-164); `/aif-improve` only exists in skills mode (`runPlanImprove && !useSubagents`).
+2. `isFix` tasks get no branch at all and therefore run on arbitrary HEAD.
+3. Shared-artifact divergence across parallel issue branches (`AGENTS.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `RULES.md`).
+4. On task deletion — is the issue branch also removed, or retained because the PR/MR needs it?
+5. Legacy task rows whose `worktreePath` points at an old sibling folder (`…-<taskId>`) — adopt or recreate?
 
 Success signals:
-- Task b0f811dc (or any manual-review handoff) shows "Complete review" / "Request review changes" buttons in Web UI (legacy mode).
-- Clicking "Request review changes" moves task to `implementing` with `reworkRequested: true`.
-- A new "requested changes" system note on the GitLab MR moves an AI-owned `review`/`done` task back to `implementing` exactly once (edge-triggered by note id).
+- Two issue tasks of one project run concurrently, each in its own worktree, with no `worktree_create_failed`.
+- Re-running a blocked task adopts the existing worktree instead of parking forever.
+- Deleting a task removes its folder while its uncommitted work stays recoverable in a tagged stash.
+- After the sweep, `git worktree list` matches the set of non-terminal tasks in the DB.
+- Within one issue, a layer's workers touch disjoint file sets and only the coordinator commits.
 
-Next step: /aif-plan full for both paths (Path 2 first — small bugfix; Path 3 second — GitLab feature with migration)
+Next step: /aif-plan full — correctness core first (Level 1 identity + adopt + lifecycle + DB↔folder sync + branch-isolation stderr logging), then the Level 2 fan-out contract and `AIF_IMPLEMENT_MAX_WORKERS`.
 <!-- aif:active-summary:end -->
 
 ## Sessions
 <!-- aif:sessions:start -->
+### 2026-09-10 12:00 — Parallel agent execution: worktree identity, lifecycle, and DB sync
+What changed: Diagnosed the `worktree_create_failed` incident, corrected a wrong first hypothesis, and converged on a two-level parallelism model with explicit identity, lifecycle, fan-out and DB-sync rules.
+
+Key notes:
+- Incident root cause: the branch name is issue-scoped (`feature/github-issue-<N>`, planner.ts:221) while the worktree path was task-scoped (`buildTaskWorktreePath` = `dirname(projectRoot)/<project>-<branch-slug>-<taskId>`, gitIsolation.ts:109-118), and nothing ever removes worktrees. A retained worktree from task a1342eab held the branch, so tasks 146c1db2/aaab3549 failed `git worktree add` → `worktree_create_failed` → `blocked_external`.
+- Branch-isolation failures are intentionally non-retryable: `classifyStageError` pins them to `blocked_external` with `retryAfter=null` (stageErrorHandler.ts:218-248).
+- Diagnostic gaps (why this took several rounds): the failing command runs as `runGit(projectRoot, args, { ignoreExit: true })` (gitIsolation.ts:617), and `runGit` only logs when `ignoreExit` is falsy; `stageErrorHandler` logs only `{ branchKind, branchName, projectRoot }` and never `branchErr.message`. The stderr survives only in `tasks.blockedReason` (persisted at coordinator.ts:869, rendered on the task card).
+- The `dubious ownership` message the operator pasted was an artifact of `docker compose exec agent` running as **root** (it bypasses the ENTRYPOINT's `exec gosu node`, .docker/docker-entrypoint.sh:12). Live check showed `/home/www`, `/home/www/vnc`, `/home/www/vnc/.git` are all `node:node`, so the agent (uid 1000) never hits that error.
+- `safe.directory` is only ever set by the GitLab prepare path (`gitlabPrepare.ts:159-172`); there is no GitHub equivalent, but that turned out not to be the cause here.
+- Serialization today: `projectRequiresSerialExecution` (coordinator.ts:320-333) forces pool depth 1 whenever `!AIF_TASK_WORKTREES_ENABLED || !projectSupportsTaskWorktrees`, and the API rejects parallel auto-queue for that combo (`rejectsParallelAutoQueueWithBranches`) — one shared tree and parallelism are mutually exclusive.
+- Retry semantics today: `restorePersistedBranch` returns before the clean check when HEAD already equals the persisted branch (gitIsolation.ts:832-835), so dirty state is preserved on an in-place retry.
+- Intra-issue fan-out is delegated to runtime-native subagents (`executionMode: "native_subagents"`, `agentDefinitionName: "implement-coordinator"`, implementer.ts:363-380). `.claude/agents/` is empty in this repo — the definitions are project content under VCS, created by `ai-factory init`.
+- `planLayers.ts` builds a dependency DAG and execution layers, and `formatLayerSummary` renders `"Layer N (parallel): …"`, but it is dead code — never injected into the prompt (only `computePendingPlanLayers` is used, for pending counts).
+- Existing commit points to build on: plan-only commit via `ensurePlanReviewCommit` (planReviewPublisher.ts:73); implementation commit via `ensureAutoQueueTaskCommit` before push (githubWorkflow.ts:187). Plan and implementation share one branch/PR (`task.branchName`).
+- Risk registers produced: Level 1 (ref-lock races, collision, stale registrations, disk growth, shared-artifact divergence, resources, opacity) and Level 2 (same-file lost updates, git-index races, plan-file races, build/test contention, no rollback, worker recursion, resource exhaustion).
+
+Links (paths):
+- packages/shared/src/gitIsolation.ts (`ensureTaskWorktree`, `buildTaskWorktreePath`, `ensureFeatureBranch`, `restorePersistedBranch`, `assertWorkingTreeClean`, `runGit`)
+- packages/agent/src/subagents/planner.ts:147,188-260 (worktree decision + branch provisioning)
+- packages/agent/src/subagents/implementer.ts:216-380 (layer computation, prompt, `sessionReusePolicy`)
+- packages/agent/src/planLayers.ts (`computePlanLayers`, `formatLayerSummary` — unused)
+- packages/agent/src/coordinator.ts:320-333,1148-1158 (serial predicate), :825-891 (stage error handling / blockedReason persist)
+- packages/agent/src/stageErrorHandler.ts:218-248 (branch-isolation blocking)
+- packages/agent/src/planReviewPublisher.ts:61-73, githubWorkflow.ts:87-240 (plan/impl commit + publish)
+- packages/data/src/index.ts:1537-1541 (`deleteTask`), packages/data/src/github.ts:233-410 (issue→task dedupe via `githubIssues.taskId`)
+- packages/shared/src/projectConfig.ts:108-115 (git defaults), packages/agent/src/gitConventions.ts (RULES `branch_prefix`)
+- docs/architecture.md (worktree retention policy), docs/getting-started.md (root-owned PROJECTS_DIR warning)
+
 ### 2026-08-16 07:00 — Manual-review handoff stuck in legacy mode + GitLab "request changes" signal
 What changed: Investigated why task b0f811dc showed "Auto-review stopped and human review is required" but offered no way to send it back for fixing; then validated the GitLab "Request changes" flow end-to-end against live API data.
 Key notes:

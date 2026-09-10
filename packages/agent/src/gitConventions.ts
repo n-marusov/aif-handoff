@@ -28,6 +28,9 @@ export interface TargetProjectGitConventions {
 export const DEFAULT_BRANCH_PREFIX = "feature/";
 export const DEFAULT_COMMIT_SUBJECT_PREFIX = "docs(plan):";
 
+/** VCS provider that owns the issue a branch is named after. */
+export type IssueProvider = "github" | "gitlab";
+
 const RULE_CANDIDATES = [".ai-factory/RULES.md", "RULES.md", "AGENTS.md", "CLAUDE.md"] as const;
 
 const SECTION_HEADING = /^#{2,3}\s+git conventions\s*$/i;
@@ -197,4 +200,57 @@ export function buildPlanCommitSubject(
   const subject = `${prefix}${separator}${normalizedTitle}`.trim();
   // Conventional-commits subjects are capped near 72 chars.
   return subject.length > 72 ? `${subject.slice(0, 69).replace(/\s+$/, "")}...` : subject;
+}
+
+/**
+ * Branch name for a VCS issue: `<prefix><provider>-issue-<number>`. This is the
+ * SINGLE source of truth for both provisioning paths — the worktree path and
+ * the in-tree `ensureFeatureBranch` path must yield the same branch for the
+ * same issue, otherwise re-running a task silently creates a second branch.
+ */
+export function resolveBranchName(
+  prefix: string,
+  provider: IssueProvider,
+  issueNumber: number,
+): string {
+  return `${normalizeBranchPrefix(prefix)}${provider}-issue-${issueNumber}`;
+}
+
+export interface ResolvedIssueBranch {
+  branchName: string;
+  /** Where the branch prefix came from. */
+  source: GitConventionsSource;
+  sourceDetail: string | null;
+}
+
+/**
+ * Resolve an issue branch name together with the provenance of its prefix.
+ * Fallback chain: RULES `## Git conventions` → `.ai-factory/config.yaml` →
+ * provider default (`feature/`). Logs a WARN when the default is used so an
+ * operator can see why the branch does not follow a project convention.
+ */
+export function resolveIssueBranchName(input: {
+  projectRoot: string;
+  provider: IssueProvider;
+  issueNumber: number;
+}): ResolvedIssueBranch {
+  const conventions = resolveTargetProjectGitConventions(input.projectRoot);
+  const branchName = resolveBranchName(conventions.branchPrefix, input.provider, input.issueNumber);
+  if (conventions.source === "default") {
+    log.warn(
+      {
+        projectRoot: input.projectRoot,
+        provider: input.provider,
+        issueNumber: input.issueNumber,
+        branchName,
+        source: conventions.source,
+      },
+      "No branch convention declared; using provider default prefix for issue branch",
+    );
+  }
+  return {
+    branchName,
+    source: conventions.source,
+    sourceDetail: conventions.sourceDetail,
+  };
 }

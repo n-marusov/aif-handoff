@@ -21,6 +21,10 @@ import {
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import {
+  requestWorktreeCleanupAfterMerge,
+  snapshotTaskWorktree,
+} from "../services/agentInternal.js";
+import {
   gitlabConnectSchema,
   gitlabPlanPublishSchema,
   gitlabPublishSchema,
@@ -308,11 +312,20 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         }
         const planReviewMode = existing?.mrMode === "plan_review";
         if (task && mrState === "merged" && task.status === "done") {
+          const verifiedTask = task;
           updateTaskStatus(
             task.id,
             "verified",
             {},
             { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
+          );
+          // Lifecycle close-out: drop the worktree, keep the branch.
+          await requestWorktreeCleanupAfterMerge(
+            snapshotTaskWorktree(
+              verifiedTask,
+              findProjectById(verifiedTask.projectId)?.rootPath ?? null,
+            ),
+            `MR !${mr.iid}`,
           );
         } else if (task && mrState === "closed") {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });

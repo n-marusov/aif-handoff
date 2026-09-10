@@ -3,7 +3,12 @@ import { writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createGitTestRoot } from "./gitTestUtils.js";
-import { buildPlanCommitSubject, resolveTargetProjectGitConventions } from "../gitConventions.js";
+import {
+  buildPlanCommitSubject,
+  resolveBranchName,
+  resolveIssueBranchName,
+  resolveTargetProjectGitConventions,
+} from "../gitConventions.js";
 
 describe("resolveTargetProjectGitConventions", () => {
   it("falls back to Handoff defaults when the project declares no conventions", () => {
@@ -82,6 +87,45 @@ describe("resolveTargetProjectGitConventions", () => {
       commitSubjectPrefix: "docs(plan):",
       source: "rules",
     });
+  });
+});
+
+describe("resolveBranchName", () => {
+  it("composes prefix + provider + issue number into a stable branch name", () => {
+    expect(resolveBranchName("feature/", "github", 42)).toBe("feature/github-issue-42");
+    expect(resolveBranchName("feature/", "gitlab", 7)).toBe("feature/gitlab-issue-7");
+    expect(resolveBranchName("fix", "github", 3)).toBe("fix/github-issue-3");
+  });
+});
+
+describe("resolveIssueBranchName", () => {
+  it("uses the RULES-declared prefix and reports the source", () => {
+    const { rootPath } = createGitTestRoot("issue-branch-rules-");
+    writeFileSync(
+      join(rootPath, "RULES.md"),
+      ["## Git conventions", "branch_prefix: fix/", ""].join("\n"),
+    );
+    const resolved = resolveIssueBranchName({
+      projectRoot: rootPath,
+      provider: "github",
+      issueNumber: 5,
+    });
+    expect(resolved).toMatchObject({
+      branchName: "fix/github-issue-5",
+      source: "rules",
+      sourceDetail: "RULES.md",
+    });
+  });
+
+  it("falls back to the provider default prefix when nothing is declared", () => {
+    const { rootPath } = createGitTestRoot("issue-branch-default-");
+    const resolved = resolveIssueBranchName({
+      projectRoot: rootPath,
+      provider: "github",
+      issueNumber: 9,
+    });
+    expect(resolved.branchName).toBe("feature/github-issue-9");
+    expect(resolved.source).toBe("default");
   });
 });
 

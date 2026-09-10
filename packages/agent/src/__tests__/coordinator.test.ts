@@ -121,6 +121,7 @@ const {
   getCoordinatorRuntimeCounters,
   resetCoordinatorRuntimeCountersForTests,
   getStageSemaphore,
+  __testBranchlessFixTaskRequiresExclusiveRun: branchlessFixTaskRequiresExclusiveRun,
 } = await import("../coordinator.js");
 const { runPlanner } = await import("../subagents/planner.js");
 const { runImprover } = await import("../subagents/improver.js");
@@ -2637,5 +2638,49 @@ describe("coordinator", () => {
     } finally {
       await pollPromise;
     }
+  });
+});
+
+describe("branchless fix task parallel-eligibility guard", () => {
+  const baseTask = {
+    isFix: true,
+    branchName: null as string | null,
+    worktreePath: null as string | null,
+  };
+
+  it("requires exclusive execution when the fix task has no branch", () => {
+    expect(
+      branchlessFixTaskRequiresExclusiveRun({
+        ...baseTask,
+        branchName: null,
+        worktreePath: null,
+      } as never),
+    ).toBe(true);
+  });
+
+  it("requires exclusive execution when the fix task has no worktree", () => {
+    expect(
+      branchlessFixTaskRequiresExclusiveRun({
+        ...baseTask,
+        branchName: "fix/issue-1",
+        worktreePath: null,
+      } as never),
+    ).toBe(true);
+  });
+
+  it("allows a fully provisioned fix task to be parallel-eligible", () => {
+    expect(
+      branchlessFixTaskRequiresExclusiveRun({
+        ...baseTask,
+        branchName: "fix/issue-1",
+        worktreePath: "/tmp/worktrees/fix-issue-1",
+      } as never),
+    ).toBe(false);
+  });
+
+  it("does not constrain non-fix tasks", () => {
+    expect(branchlessFixTaskRequiresExclusiveRun({ ...baseTask, isFix: false } as never)).toBe(
+      false,
+    );
   });
 });

@@ -2,6 +2,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { getEnv, logger } from "@aif/shared";
 import { GitLabPrepareError, prepareGitLabRepositoryForProject } from "./gitlabPrepare.js";
+import { stashAndRemoveWorktree } from "./worktreeLifecycle.js";
 
 const log = logger("agent-internal-api");
 
@@ -60,6 +61,8 @@ export function createInternalApiApp(): Hono {
 
   app.get("/health", (c) => c.json({ status: "ok" }));
 
+  mountWorktreeCleanupRoute(app);
+
   app.post("/gitlab/prepare", async (c) => {
     let body: { projectId?: string };
     try {
@@ -86,6 +89,52 @@ export function createInternalApiApp(): Hono {
   });
 
   return app;
+}
+
+interface WorktreeCleanupBody {
+  taskId?: string;
+  projectId?: string;
+  projectRoot?: string;
+  branchName?: string | null;
+  worktreePath?: string | null;
+  reason?: string;
+}
+
+function mountWorktreeCleanupRoute(app: Hono): void {
+  app.post("/worktrees/cleanup", async (c) => {
+    let body: WorktreeCleanupBody;
+    try {
+      body = (await c.req.json()) as WorktreeCleanupBody;
+    } catch {
+      return c.json({ error: "Invalid JSON body", code: "invalid_body" }, 400);
+    }
+    if (!body.taskId || !body.projectId || !body.projectRoot) {
+      return c.json(
+        { error: "taskId, projectId and projectRoot are required", code: "invalid_body" },
+        400,
+      );
+    }
+
+    const reason = body.reason?.trim() || "unspecified";
+    log.info(
+      { taskId: body.taskId, worktreePath: body.worktreePath ?? null, reason },
+      "Worktree cleanup requested",
+    );
+    try {
+      const result = await stashAndRemoveWorktree({
+        taskId: body.taskId,
+        projectId: body.projectId,
+        projectRoot: body.projectRoot,
+        branchName: body.branchName ?? null,
+        worktreePath: body.worktreePath ?? null,
+        reason,
+      });
+      return c.json({ ok: true, ...result });
+    } catch (error) {
+      log.error({ taskId: body.taskId, err: error }, "Worktree cleanup failed");
+      return c.json({ error: "Worktree cleanup failed", code: "worktree_cleanup_internal" }, 500);
+    }
+  });
 }
 
 export function startInternalApi(options: StartInternalApiOptions = {}): InternalApiServer {

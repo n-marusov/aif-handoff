@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assertCurrentBranch,
@@ -10,6 +10,7 @@ import {
   BranchIsolationError,
   branchExists,
   buildBranchName,
+  buildProjectWorktreeSegment,
   buildTaskWorktreePath,
   describeDirtyWorkingTree,
   ensureFeatureBranch,
@@ -19,7 +20,9 @@ import {
   getHeadCommitSha,
   isBranchIsolationError,
   isGitRepo,
+  listWorktrees,
   projectUsesSharedBranchIsolation,
+  resolveWorktreeRoot,
   slugifyTitle,
   workingTreeClean,
 } from "../gitIsolation.js";
@@ -145,8 +148,8 @@ describe("gitIsolation", () => {
 
       const taskId = "12345678-0000-0000-0000-000000000000";
       const branchName = "feature/worktree-task-123456";
-      const worktreePath = buildTaskWorktreePath(projectRoot, branchName, taskId);
-      extraPaths.push(worktreePath);
+      const worktreePath = buildTaskWorktreePath({ projectRoot, branchName });
+      extraPaths.push(worktreePath, resolveWorktreeRoot(projectRoot).worktreeRoot);
 
       const result = ensureTaskWorktree({
         projectRoot,
@@ -160,6 +163,128 @@ describe("gitIsolation", () => {
       expect(getCurrentBranch(worktreePath)).toBe(branchName);
       expect(existsSync(join(worktreePath, ".ai-factory", "config.yaml"))).toBe(true);
       expect(existsSync(join(worktreePath, "CLAUDE.md"))).toBe(true);
+      expect(listWorktrees(projectRoot).some((entry) => entry.branch === branchName)).toBe(true);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it("builds branch-scoped worktree paths independent of the task id", () => {
+    const branchName = "feature/github-issue-7";
+    const first = buildTaskWorktreePath({ projectRoot, branchName });
+    const second = buildTaskWorktreePath({ projectRoot, branchName });
+
+    // Same branch → same path, regardless of which task asked for it.
+    expect(first).toBe(second);
+    expect(first).toContain(`${sep}.worktrees${sep}`);
+    expect(first.endsWith(`feature-github-issue-7`)).toBe(true);
+    expect(first).not.toContain("12345678");
+
+    // Explicit project id becomes a readable, stable project segment.
+    const withProjectId = buildTaskWorktreePath({
+      projectRoot,
+      branchName,
+      projectId: "project-alpha",
+    });
+    expect(withProjectId).toContain(`${sep}project-alpha${sep}`);
+    expect(withProjectId.endsWith(`feature-github-issue-7`)).toBe(true);
+
+    // Deterministic fallback segment mixes basename + a stable path hash, so two
+    // projects with the same basename cannot collide.
+    const segment = buildProjectWorktreeSegment(projectRoot);
+    expect(segment.startsWith(basename(projectRoot))).toBe(true);
+    expect(segment).toBe(buildProjectWorktreeSegment(projectRoot));
+    expect(segment).not.toBe(buildProjectWorktreeSegment(`${projectRoot}-other`));
+  });
+
+  it("honors an explicit worktree root and the AIF_WORKTREE_ROOT env override", () => {
+    const branchName = "feature/env-root";
+    const customRoot = mkdtempSync(join(tmpdir(), "aif-worktree-root-"));
+    extraPaths.push(customRoot);
+
+    const explicit = buildTaskWorktreePath({
+      projectRoot,
+      branchName,
+      worktreeRoot: customRoot,
+    });
+    expect(explicit.startsWith(customRoot)).toBe(true);
+    expect(resolveWorktreeRoot(projectRoot, customRoot).source).toBe("explicit");
+
+    const previous = process.env.AIF_WORKTREE_ROOT;
+    process.env.AIF_WORKTREE_ROOT = customRoot;
+    try {
+      const fromEnv = buildTaskWorktreePath({ projectRoot, branchName });
+      expect(fromEnv).toBe(explicit);
+      expect(resolveWorktreeRoot(projectRoot).source).toBe("env");
+    } finally {
+      if (previous === undefined) delete process.env.AIF_WORKTREE_ROOT;
+      else process.env.AIF_WORKTREE_ROOT = previous;
+    }
+  });
+
+  it(
+    "adopts a worktree that already holds the branch instead of failing",
+    () => {
+      initRepo(projectRoot);
+      writeConfig(
+        projectRoot,
+        "git:\n  enabled: true\n  base_branch: main\n  create_branches: true\n",
+      );
+
+      const branchName = "feature/github-issue-1";
+      // Simulate the retained legacy worktree from the incident: same branch,
+      // different (task-scoped) folder than the canonical branch-scoped path.
+      const legacyPath = join(
+        dirname(projectRoot),
+        `${basename(projectRoot)}-feature-github-issue-1-legacy`,
+      );
+      extraPaths.push(legacyPath, join(dirname(projectRoot), ".worktrees"));
+      git(projectRoot, ["worktree", "add", "-b", branchName, legacyPath, "main"]);
+
+      const result = ensureTaskWorktree({
+        projectRoot,
+        taskId: "task-after-incident",
+        title: "Issue 1",
+        explicitBranchName: branchName,
+      });
+
+      expect(result.action).toBe("reused");
+      expect(result.branchName).toBe(branchName);
+      expect(result.worktreePath).toBe(legacyPath);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reports a precise collision when the target path is bound to another branch",
+    () => {
+      initRepo(projectRoot);
+      writeConfig(
+        projectRoot,
+        "git:\n  enabled: true\n  base_branch: main\n  create_branches: true\n",
+      );
+
+      const otherBranch = "feature/other-work";
+      const targetBranch = "feature/target-work";
+      const targetPath = buildTaskWorktreePath({ projectRoot, branchName: targetBranch });
+      extraPaths.push(targetPath, resolveWorktreeRoot(projectRoot).worktreeRoot);
+      mkdirSync(dirname(targetPath), { recursive: true });
+      git(projectRoot, ["worktree", "add", "-b", otherBranch, targetPath, "main"]);
+
+      try {
+        ensureTaskWorktree({
+          projectRoot,
+          taskId: "task-collide",
+          title: "Collide",
+          explicitBranchName: targetBranch,
+        });
+        throw new Error("Expected ensureTaskWorktree to throw");
+      } catch (err) {
+        expect(isBranchIsolationError(err)).toBe(true);
+        if (isBranchIsolationError(err)) {
+          expect(err.kind).toBe("worktree_path_collision");
+          expect(err.message).toContain(otherBranch);
+        }
+      }
     },
     GIT_TEST_TIMEOUT_MS,
   );
@@ -174,7 +299,7 @@ describe("gitIsolation", () => {
       );
 
       const branchName = buildBranchName("feature", "Strict worktree", "task-strict-1");
-      extraPaths.push(buildTaskWorktreePath(projectRoot, branchName, "task-strict-1"));
+      extraPaths.push(buildTaskWorktreePath({ projectRoot, branchName }));
 
       try {
         ensureTaskWorktree({
@@ -202,7 +327,7 @@ describe("gitIsolation", () => {
       writeFileSync(join(projectRoot, ".ai-factory", "patches", "stale.patch"), "diff --git\n");
 
       const branchName = buildBranchName("feature", "Patch context", "task-patch-1");
-      const worktreePath = buildTaskWorktreePath(projectRoot, branchName, "task-patch-1");
+      const worktreePath = buildTaskWorktreePath({ projectRoot, branchName });
       extraPaths.push(worktreePath);
 
       const result = ensureTaskWorktree({

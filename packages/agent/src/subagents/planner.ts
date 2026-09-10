@@ -19,11 +19,39 @@ import {
   projectSupportsTaskWorktrees,
   restorePersistedBranch,
 } from "../gitBranch.js";
+import { withProjectGitLock } from "../gitOperationLock.js";
+import { resolveIssueBranchName, type IssueProvider } from "../gitConventions.js";
 import { logActivity } from "../hooks.js";
 
 const log = logger("planner");
 const AGENT_NAME = "plan-coordinator";
 const FIX_SKILL_NAME = "aif-fix";
+
+/** How the planner provisions the execution root for a task. */
+export type WorktreeProvisionMode = "worktree" | "in_tree" | "serial_fix";
+
+export interface ShouldProvisionWorktreeInput {
+  hasVcsIssue: boolean;
+  flagEnabled: boolean;
+  parallelEnabled: boolean;
+  supportsTaskWorktrees: boolean;
+}
+
+/**
+ * Decide whether a task is provisioned into an isolated task worktree.
+ *
+ * The rollout flag (`AIF_TASK_WORKTREES_ENABLED`) gates BOTH issue-linked and
+ * parallel projects: while it is off, even VCS-issue tasks stay in-tree on a
+ * shared checkout with a deterministic issue branch, so the flag is a real
+ * kill-switch. Issue tasks do not additionally require `parallelEnabled` —
+ * their isolation is required for correctness (PR/MR publication), not only
+ * for throughput.
+ */
+export function shouldProvisionWorktree(input: ShouldProvisionWorktreeInput): boolean {
+  if (!input.flagEnabled || !input.supportsTaskWorktrees) return false;
+  if (input.hasVcsIssue) return true;
+  return input.parallelEnabled;
+}
 
 function extractPlanPathFromResult(resultText: string): string | null {
   const patterns = [/plan written to\s+([^\n]+)/i, /saved to\s+([^\n]+)/i];
@@ -205,51 +233,78 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     preparedBranch = task.branchName;
     logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
   } else if (!task.isFix && plannerMode === "full") {
-    const githubIssue = getEnv().AIF_GITHUB_ISSUE_PR_ENABLED
-      ? findGitHubIssueByTaskId(taskId)
+    const env = getEnv();
+    const provider: IssueProvider = env.GIT_PROVIDER === "gitlab" ? "gitlab" : "github";
+    // Only the GitHub issue link is wired into the planner today; GitLab tasks
+    // follow the same code path once their issue lookup lands.
+    const githubIssue =
+      provider === "github" && env.AIF_GITHUB_ISSUE_PR_ENABLED
+        ? findGitHubIssueByTaskId(taskId)
+        : null;
+    const issueNumber = githubIssue?.issueNumber ?? null;
+    const hasVcsIssue = issueNumber !== null;
+    const useWorktree = shouldProvisionWorktree({
+      hasVcsIssue,
+      flagEnabled: env.AIF_TASK_WORKTREES_ENABLED,
+      parallelEnabled: Boolean(project?.parallelEnabled),
+      supportsTaskWorktrees: projectSupportsTaskWorktrees(projectRoot),
+    });
+    const issueBranchName = hasVcsIssue
+      ? resolveIssueBranchName({ projectRoot, provider, issueNumber }).branchName
       : null;
-    const shouldCreateWorktree =
-      Boolean(githubIssue) ||
-      (getEnv().AIF_TASK_WORKTREES_ENABLED &&
-        Boolean(project?.parallelEnabled) &&
-        projectSupportsTaskWorktrees(projectRoot));
-    if (shouldCreateWorktree) {
-      const worktreeResult = ensureTaskWorktree({
-        projectRoot,
+    const mode: WorktreeProvisionMode = useWorktree ? "worktree" : "in_tree";
+    log.info(
+      {
         taskId,
-        title: task.title,
-        explicitBranchName: githubIssue ? `feature/github-issue-${githubIssue.issueNumber}` : null,
-      });
-      if (
-        worktreeResult.action !== "skipped" &&
-        worktreeResult.branchName &&
-        worktreeResult.worktreePath
-      ) {
-        preparedBranch = worktreeResult.branchName;
-        executionRoot = worktreeResult.worktreePath;
-        setTaskFields(taskId, {
-          branchName: worktreeResult.branchName,
-          worktreePath: worktreeResult.worktreePath,
-          updatedAt: new Date().toISOString(),
-        });
-        logActivity(
+        flagEnabled: env.AIF_TASK_WORKTREES_ENABLED,
+        provider,
+        branchName: issueBranchName,
+        mode,
+      },
+      "Planner provisioning decision",
+    );
+
+    // Repo-mutating git provisioning is serialized per project root so
+    // parallel scheduling cannot race git's own ref locks.
+    await withProjectGitLock({ projectRoot, operation: `planner-${mode}` }, () => {
+      if (useWorktree) {
+        const worktreeResult = ensureTaskWorktree({
+          projectRoot,
           taskId,
-          "Agent",
-          `Task worktree ${worktreeResult.action}: ${worktreeResult.worktreePath} (${worktreeResult.branchName})`,
-        );
-      } else if (worktreeResult.reason) {
-        if (githubIssue) {
+          title: task.title,
+          projectId: task.projectId,
+          explicitBranchName: issueBranchName,
+        });
+        if (
+          worktreeResult.action !== "skipped" &&
+          worktreeResult.branchName &&
+          worktreeResult.worktreePath
+        ) {
+          preparedBranch = worktreeResult.branchName;
+          executionRoot = worktreeResult.worktreePath;
+          setTaskFields(taskId, {
+            branchName: worktreeResult.branchName,
+            worktreePath: worktreeResult.worktreePath,
+            updatedAt: new Date().toISOString(),
+          });
+          logActivity(
+            taskId,
+            "Agent",
+            `Task worktree ${worktreeResult.action}: ${worktreeResult.worktreePath} (${worktreeResult.branchName})`,
+          );
+        } else if (worktreeResult.reason) {
           throw new StageManualBlockError(
-            `GitHub issue #${githubIssue.issueNumber} requires an isolated Git worktree: ${worktreeResult.reason}`,
+            `This task requires an isolated Git worktree: ${worktreeResult.reason}`,
           );
         }
-        log.debug({ taskId, reason: worktreeResult.reason }, "Worktree creation skipped");
+        return;
       }
-    } else {
+
       const branchResult = ensureFeatureBranch({
         projectRoot: executionRoot,
         taskId,
         title: task.title,
+        explicitBranchName: issueBranchName,
       });
       if (branchResult.action !== "skipped" && branchResult.branchName) {
         preparedBranch = branchResult.branchName;
@@ -263,9 +318,14 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
           `Feature branch ${branchResult.action}: ${branchResult.branchName}`,
         );
       } else if (branchResult.reason) {
+        if (hasVcsIssue) {
+          throw new StageManualBlockError(
+            `Issue #${issueNumber} requires a feature branch: ${branchResult.reason}`,
+          );
+        }
         log.debug({ taskId, reason: branchResult.reason }, "Branch creation skipped");
       }
-    }
+    });
   }
 
   const taskContext = `Title: ${task.title}

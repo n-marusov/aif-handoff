@@ -162,11 +162,14 @@ GitHub issue → sync/dedupe → task → isolated worktree/branch → commit + 
                                      human merge → Done → Verified
 ```
 
-GitHub tasks always use a persisted per-task worktree when Git supports it, independent of
-the general parallel-worktree rollout flag. The agent never embeds a token in Git commands:
-push uses configured Git credentials, while PR operations go through the authenticated
-internal API. PR creation tolerates restart races by looking up the branch after GitHub's
-duplicate-validation response, and review comments are fingerprinted to avoid duplicates.
+GitHub issue tasks use a persistent, branch-scoped worktree when the
+`AIF_TASK_WORKTREES_ENABLED` rollout flag is on. While the flag is off they fall back to an
+in-tree feature branch on the shared checkout, named from the same RULES-derived
+convention (`feature/github-issue-<N>`), so the branch identity is identical either way.
+The agent never embeds a token in Git commands: push uses configured Git credentials,
+while PR operations go through the authenticated internal API. PR creation tolerates
+restart races by looking up the branch after GitHub's duplicate-validation response, and
+review comments are fingerprinted to avoid duplicates.
 
 `Done` is the terminal **PR ready for human decision** state in this mode. The coordinator
 never merges and the web UI does not offer local approve/request-change actions for these
@@ -302,6 +305,71 @@ This makes parallelism explicit:
 
 - layers with one ready task are sequential,
 - layers with multiple ready tasks are parallel and must dispatch `implement-worker` subagents.
+
+Every task declares a change scope (`Files:` bullets plus a `Change scope:` block). Before
+fan-out, the implementer validates that the tasks in a layer touch **disjoint** file sets;
+any layer with an overlapping file, or with a task that declares no parsable scope, is
+downgraded to sequential. After a fan-out run, files changed since the layer baseline are
+compared against the union of declared scopes — out-of-scope edits are logged and surfaced
+as a `[warning]` note on the implementation result instead of being committed silently.
+
+### Worktree Lifecycle and Two-Level Parallelism
+
+Parallel execution has two independent levels:
+
+- **Level 1 — across issues (isolation).** From the repo root, the coordinator processes up
+  to `COORDINATOR_MAX_CONCURRENT_PROJECTS` independent project lanes concurrently and, inside
+  a parallel project, up to `COORDINATOR_MAX_CONCURRENT_TASKS_PER_PROJECT` tasks per stage.
+  Enabled only when `AIF_TASK_WORKTREES_ENABLED=true` **and** the project has
+  `parallelEnabled=true`.
+- **Level 2 — within one issue (fan-out).** Inside a single implementation run, a layer with
+  multiple independent tasks may fan out to at most `AIF_IMPLEMENT_MAX_WORKERS` (default 2,
+  range 1–10) edit-only `implement-worker` subagents. Workers never run git commands and
+  never write the plan file; the coordinator owns git writes and the checklist, and runs
+  repo-wide builds/tests once per layer.
+
+#### Worktree identity
+
+A task worktree path is a pure function of the **branch** (plus a stable project segment),
+never of the task id:
+
+```
+<worktree-root>/<project-segment>/<branch-with-slashes-replaced>
+```
+
+- `<worktree-root>` is `AIF_WORKTREE_ROOT` when set, otherwise `<dirname(projectRoot)>/.worktrees`.
+- `<project-segment>` is the project id when known, otherwise `<basename>-<shortHash(projectRoot)>`.
+- `<branch>` follows the target project's RULES `## Git conventions` → `git.branch_prefix` →
+  provider default (`feature/`).
+
+Because the path depends only on the branch, re-running an issue lands on the same folder.
+When the branch is already checked out somewhere, `ensureTaskWorktree` **adopts** that
+checkout instead of failing `git worktree add`; provisioning only retries after a fresh,
+structured state check (`git worktree list`, refs, path existence).
+
+#### Single writer for git
+
+Repo-mutating git operations (`fetch`, branch creation, worktree add/remove/prune) are
+serialized per project root through a keyed async mutex. The lock is held only for the git
+operation itself — never across LLM/runtime execution.
+
+#### Lifecycle and reconciliation
+
+The database is the source of truth for worktree structure; folders are reconciled to it.
+
+- **Delete:** snapshot → `git stash push -u` → reference check → `worktree remove` → `prune`.
+  Uncommitted work is stashed, never destroyed; if another live (non-terminal) task
+  references the same folder, physical removal is skipped.
+- **Merge:** when a merged PR/MR moves a task to `verified`, its worktree is cleaned up via
+  the same mechanism. The branch is retained.
+- **Sweep:** at agent startup and after a poll cycle with no stage in flight, worktrees no
+  live task references are removed and pruned, missing folders for live tasks are recreated
+  (otherwise the task is parked as `blocked_external`), and dangling VCS issue→task links
+  are cleared.
+
+`isFix=true` tasks without a deterministic `branchName`/`worktreePath` are never treated as
+parallel-eligible: they mutate the shared checkout and run only when nothing else for the
+project is in flight.
 
 ### Agent Definitions
 
@@ -525,9 +593,10 @@ worktree before publishing the task as `done`:
 The flag defaults to `false`. In that state, terminal transitions and project
 concurrency follow the legacy path and no auto-queue commit state is prepared.
 
-Task worktrees are retained after `done` / `verified` so operators can inspect
-follow-up changes. Handoff records the path but does not automatically remove
-the sibling worktree directory.
+Task worktrees are removed when their issue PR/MR is merged (task → `verified`) or when the
+task is deleted; a reconciliation sweep is the backstop. Uncommitted work is stashed first,
+and removal is skipped while another live task still references the same folder. The issue
+branch is retained, since an open PR/MR may still need it.
 
 Auto-queue and scheduled execution compose in the same poll cycle:
 `processDueScheduledTasks()` runs first and fires every eligible backlog task

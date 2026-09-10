@@ -43,6 +43,7 @@ import { runImprover } from "./subagents/improver.js";
 import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
+import { reconcileAllProjectWorktrees } from "./worktreeReconcile.js";
 import { runVerifier } from "./subagents/verifier.js";
 import { runPlanReviewPublisher, taskRequiresPlanReview } from "./planReviewPublisher.js";
 import {
@@ -331,6 +332,18 @@ function projectRequiresSerialExecution(project: ProjectRow): boolean {
 
   return hasSharedBranchTask || usesSharedBranchIsolation || usesAutoQueueSharedGitWorktree;
 }
+
+/**
+ * A branchless fix task has no deterministic branch/worktree yet, so it mutates
+ * the shared project checkout. It must never run concurrently with any other
+ * task for the same project — the coordinator treats it as an exclusive claim.
+ */
+function branchlessFixTaskRequiresExclusiveRun(task: TaskRow): boolean {
+  return task.isFix === true && (!task.branchName || !task.worktreePath);
+}
+
+/** Exported for focused unit tests of the parallel-eligibility guard. */
+export const __testBranchlessFixTaskRequiresExclusiveRun = branchlessFixTaskRequiresExclusiveRun;
 
 function scheduledTaskHasDirtyAutoQueueWorktree(
   task: TaskRow,
@@ -1185,6 +1198,9 @@ async function runPollCycle(): Promise<void> {
   );
 
   async function processProjectLane(projectId: string): Promise<void> {
+    // Once a branchless fix task is claimed, the rest of this project lane waits
+    // for the next cycle so its shared-tree mutation cannot overlap.
+    let exclusiveRunClaimedThisCycle = false;
     for (const stage of PIPELINE) {
       const concurrency = resolveProjectConcurrency(projectId);
       const parallel = concurrency.parallel;
@@ -1226,6 +1242,31 @@ async function runPollCycle(): Promise<void> {
             log.debug(
               { taskId: task.id, projectId: task.projectId, projectMax },
               "Project at capacity, skipping task",
+            );
+            continue;
+          }
+
+          // Branchless fix tasks mutate the shared checkout: they are never
+          // parallel-eligible and run only when nothing else is in flight.
+          if (exclusiveRunClaimedThisCycle) {
+            log.debug(
+              { taskId: task.id, projectId: task.projectId },
+              "Exclusive (branchless fix) task already claimed this cycle; deferring candidate",
+            );
+            continue;
+          }
+          const requiresExclusiveRun = branchlessFixTaskRequiresExclusiveRun(task);
+          if (
+            requiresExclusiveRun &&
+            (spawned.length > 0 || hasActiveLockedTaskForProject(task.projectId))
+          ) {
+            log.warn(
+              {
+                taskId: task.id,
+                projectId: task.projectId,
+                inFlightInLane: spawned.length,
+              },
+              "Branchless fix task requires exclusive execution; deferring while other project tasks are active",
             );
             continue;
           }
@@ -1303,6 +1344,10 @@ async function runPollCycle(): Promise<void> {
             }
             const executionTask = claimedTask;
 
+            if (branchlessFixTaskRequiresExclusiveRun(executionTask)) {
+              exclusiveRunClaimedThisCycle = true;
+            }
+
             log.debug(
               {
                 stage: stage.label,
@@ -1362,6 +1407,17 @@ async function runPollCycle(): Promise<void> {
       );
     }
   });
+
+  // Post-cycle reconciliation, guarded on "no stage in flight": a worktree that
+  // a task is mid-provisioning must never be mistaken for an orphan. This is the
+  // backstop that keeps `git worktree list` aligned with the live task set.
+  if (stageSemaphore.totalActive() === 0) {
+    try {
+      await reconcileAllProjectWorktrees("poll_cycle");
+    } catch (err) {
+      log.error({ err }, "Post-cycle worktree reconciliation failed; poll cycle continues");
+    }
+  }
 
   log.debug("Poll cycle complete");
 }

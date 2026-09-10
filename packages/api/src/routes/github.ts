@@ -21,6 +21,10 @@ import {
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import {
+  requestWorktreeCleanupAfterMerge,
+  snapshotTaskWorktree,
+} from "../services/agentInternal.js";
+import {
   githubConnectSchema,
   githubPlanPublishSchema,
   githubPublishSchema,
@@ -251,11 +255,20 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           task = findTaskById(result.taskId);
         }
         if (task && prState === "merged" && task.status === "done") {
+          const verifiedTask = task;
           updateTaskStatus(
             task.id,
             "verified",
             {},
             { kind: "system", id: "github-sync", displayNameSnapshot: "GitHub Sync" },
+          );
+          // Lifecycle close-out: drop the worktree, keep the branch.
+          await requestWorktreeCleanupAfterMerge(
+            snapshotTaskWorktree(
+              verifiedTask,
+              findProjectById(verifiedTask.projectId)?.rootPath ?? null,
+            ),
+            `PR #${pull.number}`,
           );
         } else if (task && prState === "closed" && !pull.merged_at) {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });

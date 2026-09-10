@@ -9,6 +9,7 @@ import { connectWakeChannel, closeWakeChannel, waitForApiReady } from "./wakeCha
 import { abortAllActiveStages } from "./stageAbort.js";
 import { startPollScheduler } from "./pollScheduler.js";
 import { startInternalApi, type InternalApiServer } from "./internalApi.js";
+import { reconcileAllProjectWorktrees } from "./worktreeReconcile.js";
 import { createBrokerRuntime, type BrokerServer } from "./codex/loginBroker.js";
 
 const log = logger("agent");
@@ -47,6 +48,15 @@ applyGitIdentity({
 
 // Ensure DB is ready
 listProjects();
+
+// Reconcile declared worktrees with the folders on disk exactly once at startup,
+// before the first poll: ownerless folders left by a previous run would
+// otherwise poison branch provisioning for the first tasks of this run.
+try {
+  await reconcileAllProjectWorktrees("startup");
+} catch (err) {
+  log.error({ err }, "Startup worktree reconciliation failed; continuing to poll");
+}
 
 const pollScheduler = startPollScheduler(async () => {
   try {

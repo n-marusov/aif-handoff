@@ -368,6 +368,30 @@ describe("classifyStageError", () => {
     }
   });
 
+  it("logs the underlying git error and a worktree snapshot for branch isolation failures", async () => {
+    const { BranchIsolationError } = await import("../gitBranch.js");
+    const err = new BranchIsolationError(
+      "worktree_create_failed",
+      "git worktree add /tmp/wt feature/x failed: fatal: 'feature/x' is already checked out at /tmp/old",
+      "/tmp/p",
+      "feature/x",
+    );
+    classifyStageError(makeInput({ err, taskId: "t-branch", stageLabel: "planner" }));
+
+    expect(mockError).toHaveBeenCalledOnce();
+    const [meta, msg] = mockError.mock.calls[0];
+    expect(meta).toMatchObject({
+      taskId: "t-branch",
+      stage: "planner",
+      branchKind: "worktree_create_failed",
+      branchName: "feature/x",
+      projectRoot: "/tmp/p",
+    });
+    expect(String(meta.errorMessage)).toContain("already checked out");
+    expect(meta).toHaveProperty("worktreeSnapshot");
+    expect(msg).toMatch(/branch isolation failure/i);
+  });
+
   it("classifies BranchIsolationError(branch_drift) as blocked_external", async () => {
     const { BranchIsolationError } = await import("../gitBranch.js");
     const err = new BranchIsolationError("branch_drift", "HEAD drift", "/tmp/p", "feature/y");

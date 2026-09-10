@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetEnvCache } from "@aif/shared";
 
 const prepareForProjectMock = vi.fn();
+const stashAndRemoveWorktreeMock = vi.fn();
 
 vi.mock("../gitlabPrepare.js", () => ({
   prepareGitLabRepositoryForProject: (...args: unknown[]) => prepareForProjectMock(...args),
@@ -16,6 +17,10 @@ vi.mock("../gitlabPrepare.js", () => ({
   },
 }));
 
+vi.mock("../worktreeLifecycle.js", () => ({
+  stashAndRemoveWorktree: stashAndRemoveWorktreeMock,
+}));
+
 const { createInternalApiApp } = await import("../internalApi.js");
 
 describe("agent internal API", () => {
@@ -23,6 +28,7 @@ describe("agent internal API", () => {
 
   beforeEach(() => {
     prepareForProjectMock.mockReset();
+    stashAndRemoveWorktreeMock.mockReset();
     vi.stubEnv("GIT_PROVIDER", "gitlab");
     resetEnvCache();
     app = createInternalApiApp();
@@ -102,5 +108,54 @@ describe("agent internal API", () => {
       body: JSON.stringify({ projectId: "project-1" }),
     });
     expect(res.status).toBe(200);
+  });
+
+  it("rejects a worktree cleanup request missing required fields", async () => {
+    const res = await app.request("/worktrees/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: "t1" }),
+    });
+    expect(res.status).toBe(400);
+    expect(stashAndRemoveWorktreeMock).not.toHaveBeenCalled();
+  });
+
+  it("runs worktree cleanup and returns the agent result", async () => {
+    stashAndRemoveWorktreeMock.mockResolvedValue({ cleaned: true, stashSha: "abc123" });
+    const res = await app.request("/worktrees/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        taskId: "t1",
+        projectId: "p1",
+        projectRoot: "/tmp/repo",
+        branchName: "feature/x",
+        worktreePath: "/tmp/wt",
+        reason: "task_delete",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, cleaned: true, stashSha: "abc123" });
+    expect(stashAndRemoveWorktreeMock).toHaveBeenCalledWith({
+      taskId: "t1",
+      projectId: "p1",
+      projectRoot: "/tmp/repo",
+      branchName: "feature/x",
+      worktreePath: "/tmp/wt",
+      reason: "task_delete",
+    });
+  });
+
+  it("surfaces a cleanup failure as 500", async () => {
+    stashAndRemoveWorktreeMock.mockRejectedValue(new Error("boom"));
+    const res = await app.request("/worktrees/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: "t1", projectId: "p1", projectRoot: "/tmp/repo" }),
+    });
+    expect(res.status).toBe(500);
+    expect((await res.json()) as { code?: string }).toMatchObject({
+      code: "worktree_cleanup_internal",
+    });
   });
 });
