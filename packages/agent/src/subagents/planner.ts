@@ -81,6 +81,14 @@ function normalizePlanPath(path: string | null | undefined, projectRoot: string)
   return path.trim().replace(/^@+/, "") || defaultPlan;
 }
 
+function isExplicitTaskPlanPath(
+  customPlanPath: string | null | undefined,
+  normalizedPlanPath: string,
+  defaultPlanPath: string,
+): boolean {
+  return Boolean(customPlanPath?.trim()) && normalizedPlanPath !== defaultPlanPath;
+}
+
 function readPlanFromDisk(
   projectRoot: string,
   resultText: string,
@@ -91,6 +99,8 @@ function readPlanFromDisk(
   const cfg = getProjectConfig(projectRoot);
   const normalizedPlanPath = normalizePlanPath(customPlanPath, projectRoot);
   const canonicalPlanPath = resolve(projectRoot, isFix ? cfg.paths.fix_plan : normalizedPlanPath);
+  const explicitTaskPlanPath =
+    !isFix && isExplicitTaskPlanPath(customPlanPath, normalizedPlanPath, cfg.paths.plan);
   const candidatePaths: string[] = [canonicalPlanPath];
   const pathFromResult = extractPlanPathFromResult(resultText);
   if (pathFromResult) {
@@ -100,12 +110,23 @@ function readPlanFromDisk(
     candidatePaths.push(resolved);
   }
 
-  // Skill runs may write fallback paths even when @path is requested.
+  // Skill runs may write fallback paths even when the default @path is requested.
   if (isFix) {
     candidatePaths.push(resolve(projectRoot, "FIX_PLAN.md"));
-  } else {
+  } else if (!explicitTaskPlanPath) {
     candidatePaths.push(resolve(projectRoot, cfg.paths.plan));
     candidatePaths.push(resolve(projectRoot, "PLAN.md"));
+  } else {
+    log.warn(
+      {
+        requestedPlanPath: canonicalPlanPath,
+        skippedFallbackPlanPaths: [
+          resolve(projectRoot, cfg.paths.plan),
+          resolve(projectRoot, "PLAN.md"),
+        ],
+      },
+      "[FIX] Skipping generic plan fallback paths because an explicit task plan path was requested",
+    );
   }
 
   const seen = new Set<string>();

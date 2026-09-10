@@ -350,6 +350,46 @@ describe("runPlanner comment selection", () => {
     ).toContain("Fresh Plan");
   });
 
+  it("does not load target project .ai-factory/PLAN.md when an explicit plan path is requested", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-explicit-path-"));
+    mkdirSync(join(projectRoot, ".ai-factory", "plans"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, ".ai-factory", "PLAN.md"),
+      "# Old target repo plan\n- [x] Task 1: Old work",
+      "utf8",
+    );
+
+    db.insert(projects)
+      .values({
+        id: "project-explicit-path",
+        name: "Explicit Path Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-explicit-path",
+        projectId: "project-explicit-path",
+        title: "Fresh GitHub issue",
+        description: "Create hello.md",
+        status: "planning",
+        planPath: ".ai-factory/plans/github-issue-3.md",
+        plannerMode: "full",
+        useSubagents: false,
+      })
+      .run();
+
+    queryMock.mockReset();
+    queryMock.mockReturnValue(streamSuccess("## Fresh Plan\n- [ ] Task 1: Create hello.md"));
+
+    await runPlanner("task-explicit-path", projectRoot);
+
+    const updatedTask = db.select().from(tasks).where(eq(tasks.id, "task-explicit-path")).get();
+    expect(updatedTask?.plan).toBe("## Fresh Plan\n- [ ] Task 1: Create hello.md");
+    expect(updatedTask?.plan).not.toContain("Old target repo plan");
+  });
+
   it("creates a feature branch when plannerMode=full and git.create_branches=true", async () => {
     const db = testDb.current;
     const projectRoot = mkdtempSync(join(tmpdir(), "planner-git-"));
