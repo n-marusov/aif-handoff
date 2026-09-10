@@ -101,7 +101,7 @@ export function readProtectedPasswordFile(path: string): string {
   if (!metadata.isFile()) {
     throw new Error("Password path must be a regular file");
   }
-  if ((metadata.mode & 0o077) !== 0) {
+  if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) {
     throw new Error("Password file must not be accessible by group or other users");
   }
   return readFileSync(path, "utf8");
