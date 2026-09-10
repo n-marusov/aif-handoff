@@ -281,7 +281,6 @@ describe("runPlanner comment selection", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "planner-fallback-"));
     mkdirSync(projectRoot, { recursive: true });
     const fallbackPlanPath = join(projectRoot, "PLAN.md");
-    writeFileSync(fallbackPlanPath, "## Fallback Plan\n- [ ] Step from fallback", "utf8");
 
     db.insert(projects)
       .values({
@@ -302,12 +301,53 @@ describe("runPlanner comment selection", () => {
       .run();
 
     queryMock.mockReset();
-    queryMock.mockReturnValue(streamSuccess("Plan written to PLAN.md"));
+    queryMock.mockImplementation(() => {
+      writeFileSync(fallbackPlanPath, "## Fallback Plan\n- [ ] Step from fallback", "utf8");
+      return streamSuccess("Plan written to PLAN.md");
+    });
 
     await runPlanner("task-fallback", projectRoot);
 
     const updatedTask = db.select().from(tasks).where(eq(tasks.id, "task-fallback")).get();
     expect(updatedTask?.plan).toBe("## Fallback Plan\n- [ ] Step from fallback");
+  });
+
+  it("ignores old fallback PLAN.md during first-time planning when the planner returns inline content", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-stale-fallback-"));
+    mkdirSync(join(projectRoot, ".ai-factory", "plans"), { recursive: true });
+    writeFileSync(join(projectRoot, "PLAN.md"), "## Old fallback\n- [x] Task 1: Old work", "utf8");
+
+    db.insert(projects)
+      .values({
+        id: "project-stale-fallback",
+        name: "Stale Fallback Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-stale-fallback",
+        projectId: "project-stale-fallback",
+        title: "Fresh issue task",
+        description: "Desc",
+        status: "planning",
+        planPath: ".ai-factory/plans/github-issue-3.md",
+        plannerMode: "full",
+        useSubagents: true,
+      })
+      .run();
+
+    queryMock.mockReset();
+    queryMock.mockReturnValue(streamSuccess("## Fresh Plan\n- [ ] Task 1: New work"));
+
+    await runPlanner("task-stale-fallback", projectRoot);
+
+    const updatedTask = db.select().from(tasks).where(eq(tasks.id, "task-stale-fallback")).get();
+    expect(updatedTask?.plan).toBe("## Fresh Plan\n- [ ] Task 1: New work");
+    expect(
+      readFileSync(join(projectRoot, ".ai-factory", "plans", "github-issue-3.md"), "utf8"),
+    ).toContain("Fresh Plan");
   });
 
   it("creates a feature branch when plannerMode=full and git.create_branches=true", async () => {
@@ -769,7 +809,7 @@ describe("runPlanner stale plan cleanup", () => {
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not delete plan file when some tasks are incomplete", async () => {
+  it("deletes pre-existing plan file on first-time planning even when it has incomplete tasks", async () => {
     const db = testDb.current;
     const projectRoot = mkdtempSync(join(tmpdir(), "planner-partial-"));
     mkdirSync(join(projectRoot, ".ai-factory"), { recursive: true });
@@ -802,8 +842,52 @@ describe("runPlanner stale plan cleanup", () => {
     expect(existsSync(planFilePath)).toBe(true);
     await runPlanner("task-partial-1", projectRoot);
 
-    // Not all tasks completed → file should NOT be deleted
     expect(existsSync(planFilePath)).toBe(true);
+    const content = readFileSync(planFilePath, "utf8");
+    expect(content).toContain("## New Plan");
+    expect(content).toContain("Task 1: Work");
+    expect(content).not.toContain("Create user model");
+    expect(content).not.toContain("Add auth");
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps existing plan file when the task already has a persisted plan", async () => {
+    const db = testDb.current;
+    const projectRoot = mkdtempSync(join(tmpdir(), "planner-persisted-plan-"));
+    mkdirSync(join(projectRoot, ".ai-factory"), { recursive: true });
+    const planFilePath = join(projectRoot, ".ai-factory", "PLAN.md");
+    writeFileSync(
+      planFilePath,
+      "- [x] Task 1: Create user model\n- [ ] Task 2: Add auth\n",
+      "utf8",
+    );
+
+    db.insert(projects)
+      .values({
+        id: "project-persisted-plan",
+        name: "Persisted Plan Project",
+        rootPath: projectRoot,
+      })
+      .run();
+    db.insert(tasks)
+      .values({
+        id: "task-persisted-plan-1",
+        projectId: "project-persisted-plan",
+        title: "Persisted plan task",
+        description: "Desc",
+        status: "planning",
+        plan: "## Existing DB Plan\n- [ ] Keep refining",
+        plannerMode: "fast",
+        useSubagents: true,
+      })
+      .run();
+
+    expect(existsSync(planFilePath)).toBe(true);
+    await runPlanner("task-persisted-plan-1", projectRoot);
+
+    expect(existsSync(planFilePath)).toBe(true);
+    const content = readFileSync(planFilePath, "utf8");
+    expect(content).toContain("Task 1: Create user model");
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
 
