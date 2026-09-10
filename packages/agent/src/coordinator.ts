@@ -43,6 +43,7 @@ import { runImprover } from "./subagents/improver.js";
 import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
+import { reconcileAllProjectWorktrees } from "./worktreeReconcile.js";
 import { runVerifier } from "./subagents/verifier.js";
 import { runPlanReviewPublisher, taskRequiresPlanReview } from "./planReviewPublisher.js";
 import {
@@ -1406,6 +1407,17 @@ async function runPollCycle(): Promise<void> {
       );
     }
   });
+
+  // Post-cycle reconciliation, guarded on "no stage in flight": a worktree that
+  // a task is mid-provisioning must never be mistaken for an orphan. This is the
+  // backstop that keeps `git worktree list` aligned with the live task set.
+  if (stageSemaphore.totalActive() === 0) {
+    try {
+      await reconcileAllProjectWorktrees("poll_cycle");
+    } catch (err) {
+      log.error({ err }, "Post-cycle worktree reconciliation failed; poll cycle continues");
+    }
+  }
 
   log.debug("Poll cycle complete");
 }

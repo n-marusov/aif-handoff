@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   codexLimitHeads,
   codexLimitHistory,
   codexSessionFiles,
   codexSessions,
+  githubIssues,
+  gitlabIssues,
   projects,
   tasks,
 } from "@aif/shared";
@@ -79,6 +81,9 @@ const {
   listAutoQueueProjects,
   countActivePipelineTasksForProject,
   hasActiveBranchBoundTasksForProject,
+  countOtherLiveTasksReferencingWorktree,
+  listActiveTasksWithWorktrees,
+  clearDanglingVcsIssueLinks,
   hasBlockingAutoQueueCommitForProject,
   claimBacklogTaskForAdvance,
   createChatSession,
@@ -2478,5 +2483,130 @@ describe("data layer", () => {
       expect(Array.isArray(summary.tags)).toBe(true);
       expect(summary.tags).toContain("a");
     });
+  });
+});
+
+describe("worktree reconciliation queries", () => {
+  beforeEach(() => {
+    testDb.current = createTestDb();
+    seedProject();
+  });
+
+  it("counts other live tasks referencing the same worktree", () => {
+    const first = createTask({ projectId: "proj-1", title: "A", description: "D" });
+    const second = createTask({ projectId: "proj-1", title: "B", description: "D" });
+    setTaskFields(first.id, { worktreePath: "/tmp/wt", branchName: "feature/x" });
+    setTaskFields(second.id, { worktreePath: "/tmp/wt", branchName: "feature/x" });
+
+    expect(
+      countOtherLiveTasksReferencingWorktree({
+        projectId: "proj-1",
+        branchName: "feature/x",
+        worktreePath: "/tmp/wt",
+        excludeTaskId: first.id,
+      }),
+    ).toBe(1);
+  });
+
+  it("excludes terminal tasks from the reference count", () => {
+    const live = createTask({ projectId: "proj-1", title: "Live", description: "D" });
+    setTaskFields(live.id, { worktreePath: "/tmp/wt" });
+    testDb.current
+      .insert(tasks)
+      .values({
+        id: "terminal-task",
+        projectId: "proj-1",
+        title: "Done",
+        description: "D",
+        status: "verified",
+        worktreePath: "/tmp/wt",
+      })
+      .run();
+
+    expect(
+      countOtherLiveTasksReferencingWorktree({
+        projectId: "proj-1",
+        branchName: null,
+        worktreePath: "/tmp/wt",
+        excludeTaskId: live.id,
+      }),
+    ).toBe(0);
+  });
+
+  it("lists active tasks that declare a worktree", () => {
+    const task = createTask({ projectId: "proj-1", title: "T", description: "D" });
+    setTaskFields(task.id, { worktreePath: "/tmp/wt", branchName: "feature/x" });
+
+    expect(listActiveTasksWithWorktrees("proj-1")).toEqual([
+      {
+        id: task.id,
+        projectId: "proj-1",
+        branchName: "feature/x",
+        worktreePath: "/tmp/wt",
+        status: "backlog",
+      },
+    ]);
+  });
+
+  it("clears dangling VCS issue task links and keeps live ones", () => {
+    const live = createTask({ projectId: "proj-1", title: "Live", description: "D" });
+    const now = new Date().toISOString();
+    // FK enforcement is ON in tests, so disable it briefly to simulate the
+    // production drift this sweep repairs (a link pointing at a deleted task).
+    testDb.current.run(sql`PRAGMA foreign_keys = OFF`);
+    try {
+      testDb.current
+        .insert(githubIssues)
+        .values({
+          projectId: "proj-1",
+          issueNumber: 1,
+          taskId: live.id,
+          nodeId: "n1",
+          htmlUrl: "https://x/1",
+          state: "open",
+          sourceUpdatedAt: now,
+          lastSyncedAt: now,
+        })
+        .run();
+      testDb.current
+        .insert(githubIssues)
+        .values({
+          projectId: "proj-1",
+          issueNumber: 2,
+          taskId: "ghost-task",
+          nodeId: "n2",
+          htmlUrl: "https://x/2",
+          state: "open",
+          sourceUpdatedAt: now,
+          lastSyncedAt: now,
+        })
+        .run();
+      testDb.current
+        .insert(gitlabIssues)
+        .values({
+          projectId: "proj-1",
+          iid: 5,
+          taskId: "ghost-task",
+          globalId: "g5",
+          webUrl: "https://x/5",
+          state: "open",
+          sourceUpdatedAt: now,
+          lastSyncedAt: now,
+        })
+        .run();
+    } finally {
+      testDb.current.run(sql`PRAGMA foreign_keys = ON`);
+    }
+
+    expect(clearDanglingVcsIssueLinks()).toEqual({
+      githubLinksCleared: 1,
+      gitlabLinksCleared: 1,
+    });
+
+    const githubRows = testDb.current.select().from(githubIssues).all();
+    expect(githubRows.find((row) => row.issueNumber === 1)?.taskId).toBe(live.id);
+    expect(githubRows.find((row) => row.issueNumber === 2)?.taskId).toBeNull();
+    const gitlabRows = testDb.current.select().from(gitlabIssues).all();
+    expect(gitlabRows[0]?.taskId).toBeNull();
   });
 });

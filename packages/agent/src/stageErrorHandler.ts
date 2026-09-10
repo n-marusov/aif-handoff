@@ -7,6 +7,7 @@
 import type { RuntimeLimitSnapshot } from "@aif/runtime";
 import {
   getEnv,
+  listWorktrees,
   logger,
   mapSafeRuntimeErrorReason,
   redactProviderTextForLogs,
@@ -32,6 +33,32 @@ const NON_RETRYABLE_RUNTIME_CATEGORIES = new Set([
   "context_length",
   "content_filter",
 ]);
+
+const WORKTREE_SNAPSHOT_MAX = 2_000;
+
+/**
+ * Bounded, human-readable snapshot of the git worktree registrations for the
+ * project. Attached to branch-isolation failures so an operator can see which
+ * folder was holding the branch without having to reproduce the failure.
+ */
+function buildWorktreeSnapshot(projectRoot: string): string | null {
+  try {
+    const entries = listWorktrees(projectRoot);
+    if (entries.length === 0) return null;
+    const rendered = entries
+      .map((entry) => {
+        const branch = entry.branch ? ` [${entry.branch}]` : entry.detached ? " [detached]" : "";
+        const prunable = entry.prunable ? " (prunable)" : "";
+        return `${entry.path}${branch}${prunable}`;
+      })
+      .join("\n");
+    return rendered.length > WORKTREE_SNAPSHOT_MAX
+      ? `${rendered.slice(0, WORKTREE_SNAPSHOT_MAX)}…[truncated]`
+      : rendered;
+  } catch {
+    return null;
+  }
+}
 
 export class StageManualBlockError extends Error {
   readonly blockedReason: string;
@@ -234,6 +261,11 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
         branchKind: branchErr.kind,
         branchName: branchErr.branchName,
         projectRoot: branchErr.projectRoot,
+        // Git stderr is safe to keep in logs (no provider text); the worktree
+        // snapshot is what makes "branch already checked out elsewhere"
+        // diagnosable instead of a bare kind code.
+        errorMessage: branchErr.message,
+        worktreeSnapshot: buildWorktreeSnapshot(branchErr.projectRoot),
       },
       "Subagent stage aborted due to branch isolation failure",
     );

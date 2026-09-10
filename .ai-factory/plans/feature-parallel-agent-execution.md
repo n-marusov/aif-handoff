@@ -174,7 +174,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
 ### Phase 2: Diagnostics, Cleanup and DB Reconciliation
 
-- [ ] **Task 5: Make branch-isolation failures diagnosable**
+- [x] **Task 5: Make branch-isolation failures diagnosable**
 
   Deliverable: branch-isolation failures log the underlying git stderr and a worktree snapshot; the activity log carries the same detail.
 
@@ -196,7 +196,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: none (independent — can land first if desired).
 
-- [ ] **Task 6: API-side agent-internal client for worktree lifecycle calls**
+- [x] **Task 6: API-side agent-internal client for worktree lifecycle calls**
 
   Deliverable: API can call the agent internal API via HTTP without importing agent code. The helper supports the new cleanup endpoint and follows the existing `AGENT_INTERNAL_URL` + internal token pattern.
 
@@ -222,7 +222,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: none.
 
-- [ ] **Task 7: Worktree cleanup on task delete (snapshot → stash -u → reference check → remove → prune)**
+- [x] **Task 7: Worktree cleanup on task delete (snapshot → stash -u → reference check → remove → prune)**
 
   Deliverable: deleting a task snapshots its git identity before DB deletion, stashes uncommitted tracked and untracked changes under a task-tagged message, checks no other live task references the same worktree, then removes the worktree and prunes registrations. The git side effect runs in the agent, not in the API process.
 
@@ -254,7 +254,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: Task 1, Task 2, Task 3, Task 6.
 
-- [ ] **Task 8: DB ↔ filesystem reconciliation sweep**
+- [x] **Task 8: DB ↔ filesystem reconciliation sweep**
 
   Deliverable: at agent start and after terminal transitions, worktrees not referenced by a non-terminal task are removed and pruned; tasks whose `worktreePath` folder is missing are reconciled (recreate, else `blocked_external`); dangling `github_issues.task_id` / `gitlab_issues.task_id` rows pointing at deleted tasks are cleared.
 
@@ -285,7 +285,7 @@ Open questions (deferred, see "Deferred / Open Questions" below): PR-comment →
 
   Dependencies: Task 1, Task 2, Task 7.
 
-- [ ] **Task 9: Remove the worktree when the issue PR/MR is merged**
+- [x] **Task 9: Remove the worktree when the issue PR/MR is merged**
 
   Deliverable: when a merged PR/MR moves a task to `verified`, its worktree is cleaned up via the Task 7 mechanism.
 

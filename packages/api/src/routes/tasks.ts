@@ -61,6 +61,7 @@ import {
   type TaskOwnershipFilters,
 } from "@aif/data";
 import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
+import { callAgentWorktreeCleanup } from "../services/agentInternal.js";
 import { getParticipantAuth, type ParticipantApiEnv } from "../middleware/participantAuth.js";
 
 const log = logger("tasks-route");
@@ -904,17 +905,51 @@ tasksRouter.post("/:id/sync-plan", (c) => {
 });
 
 // DELETE /tasks/:id
-tasksRouter.delete("/:id", (c) => {
+tasksRouter.delete("/:id", async (c) => {
   const { id } = c.req.param();
   const existing = findTaskById(id);
   if (!existing) {
     return c.json({ error: "Task not found" }, 404);
   }
 
+  // Snapshot the git identity BEFORE the DB row disappears: cleanup needs the
+  // branch/worktree names plus the project root to remove the right folder.
+  const project = findProjectById(existing.projectId);
+  const worktreeSnapshot = {
+    taskId: existing.id,
+    projectId: existing.projectId,
+    projectRoot: project?.rootPath ?? "",
+    branchName: existing.branchName ?? null,
+    worktreePath: existing.worktreePath ?? null,
+  };
+
   deleteTask(id);
   log.debug({ taskId: id }, "Task deleted");
 
   broadcast({ type: "task:deleted", payload: { id } });
+
+  // Best-effort worktree cleanup: the delete has already succeeded and must not
+  // be failed by an unreachable agent. The reconciliation sweep is the backstop.
+  if (worktreeSnapshot.worktreePath && worktreeSnapshot.projectRoot) {
+    try {
+      const cleanupResult = await callAgentWorktreeCleanup({
+        ...worktreeSnapshot,
+        reason: "task_delete",
+      });
+      if (!cleanupResult.ok) {
+        log.warn(
+          { taskId: id, code: cleanupResult.errorCode },
+          "Worktree cleanup after delete did not complete",
+        );
+      }
+    } catch (error) {
+      log.warn(
+        { taskId: id, err: error },
+        "Worktree cleanup after delete threw; delete already succeeded",
+      );
+    }
+  }
+
   return c.json({ success: true });
 });
 

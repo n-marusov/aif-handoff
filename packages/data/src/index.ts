@@ -52,6 +52,8 @@ import {
   codexLimitHeads,
   codexLimitHistory,
   codexIndexCursors,
+  githubIssues,
+  gitlabIssues,
   type AppSettings,
   type CreateRuntimeProfileInput,
   type EffectiveRuntimeProfileSelection,
@@ -2495,6 +2497,149 @@ export function hasActiveLockedTaskForProject(projectId: string): boolean {
     ))
     .get();
   return (row?.cnt ?? 0) > 0;
+}
+
+/**
+ * Statuses that can still own or resume a task worktree. Everything except the
+ * terminal `done`/`verified` states, which release their worktree.
+ */
+const NON_TERMINAL_WORKTREE_STATUSES: TaskStatus[] = [
+  "backlog",
+  "planning",
+  "improve",
+  "plan_ready",
+  "plan_review",
+  "implementing",
+  "review",
+  "verify",
+  "blocked_external",
+];
+
+export interface WorktreeReferenceQuery {
+  projectId: string;
+  branchName: string | null;
+  worktreePath: string;
+  excludeTaskId: string;
+}
+
+/**
+ * How many OTHER live (non-terminal) tasks still reference the same physical
+ * worktree folder. Cleanup refuses to remove a worktree while this is non-zero,
+ * so a shared/deferred folder is never yanked out from under a live task.
+ */
+export function countOtherLiveTasksReferencingWorktree(input: WorktreeReferenceQuery): number {
+  const row = getDb()
+    .select({ cnt: count() })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.projectId, input.projectId),
+        eq(tasks.worktreePath, input.worktreePath),
+        ne(tasks.id, input.excludeTaskId),
+        inArray(tasks.status, NON_TERMINAL_WORKTREE_STATUSES),
+      ),
+    )
+    .get();
+  return row?.cnt ?? 0;
+}
+
+export interface ActiveTaskWorktreeRow {
+  id: string;
+  projectId: string;
+  branchName: string | null;
+  worktreePath: string;
+  status: TaskStatus;
+}
+
+/** Live tasks that declare a worktree folder (reconciliation input). */
+export function listActiveTasksWithWorktrees(projectId: string): ActiveTaskWorktreeRow[] {
+  const rows = getDb()
+    .select({
+      id: tasks.id,
+      projectId: tasks.projectId,
+      branchName: tasks.branchName,
+      worktreePath: tasks.worktreePath,
+      status: tasks.status,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.projectId, projectId),
+        isNotNull(tasks.worktreePath),
+        inArray(tasks.status, NON_TERMINAL_WORKTREE_STATUSES),
+      ),
+    )
+    .all();
+
+  return rows.flatMap((row) =>
+    row.worktreePath
+      ? [
+          {
+            id: row.id,
+            projectId: row.projectId,
+            branchName: row.branchName,
+            worktreePath: row.worktreePath,
+            status: row.status,
+          },
+        ]
+      : [],
+  );
+}
+
+export interface ClearDanglingVcsLinksResult {
+  githubLinksCleared: number;
+  gitlabLinksCleared: number;
+}
+
+/**
+ * Clear VCS-issue → task links whose task row no longer exists. The FK uses
+ * `onDelete: set null`, which SQLite only enforces when `PRAGMA foreign_keys`
+ * is ON; in practice deleted tasks can leave dangling `task_id` values behind.
+ */
+export function clearDanglingVcsIssueLinks(): ClearDanglingVcsLinksResult {
+  const db = getDb();
+  const existingTaskIds = new Set(db.select({ id: tasks.id }).from(tasks).all().map((row) => row.id));
+
+  let githubLinksCleared = 0;
+  const githubRows = db
+    .select({
+      projectId: githubIssues.projectId,
+      issueNumber: githubIssues.issueNumber,
+      taskId: githubIssues.taskId,
+    })
+    .from(githubIssues)
+    .where(isNotNull(githubIssues.taskId))
+    .all();
+  for (const row of githubRows) {
+    if (!row.taskId || existingTaskIds.has(row.taskId)) continue;
+    db.update(githubIssues)
+      .set({ taskId: null })
+      .where(
+        and(
+          eq(githubIssues.projectId, row.projectId),
+          eq(githubIssues.issueNumber, row.issueNumber),
+        ),
+      )
+      .run();
+    githubLinksCleared += 1;
+  }
+
+  let gitlabLinksCleared = 0;
+  const gitlabRows = db
+    .select({ projectId: gitlabIssues.projectId, iid: gitlabIssues.iid, taskId: gitlabIssues.taskId })
+    .from(gitlabIssues)
+    .where(isNotNull(gitlabIssues.taskId))
+    .all();
+  for (const row of gitlabRows) {
+    if (!row.taskId || existingTaskIds.has(row.taskId)) continue;
+    db.update(gitlabIssues)
+      .set({ taskId: null })
+      .where(and(eq(gitlabIssues.projectId, row.projectId), eq(gitlabIssues.iid, row.iid)))
+      .run();
+    gitlabLinksCleared += 1;
+  }
+
+  return { githubLinksCleared, gitlabLinksCleared };
 }
 
 /** Extend lock expiry for a task owned by this coordinator. */

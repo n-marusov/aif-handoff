@@ -293,9 +293,13 @@ function runGit(
     const stdout = error.stdout ? error.stdout.toString().trim() : "";
     const stderr = error.stderr ? error.stderr.toString().trim() : String(err);
     const status = typeof error.status === "number" ? error.status : 1;
-    if (!opts.ignoreExit) {
-      log.debug({ cwd, args, status, stderr }, "git command failed");
-    }
+    // Always surface the failing command at DEBUG, even for `ignoreExit: true`
+    // probes — a swallowed git error was invisible during the worktree
+    // incident, which made the failure impossible to diagnose from logs.
+    log.debug(
+      { cwd, args, status, stderr, ignoreExit: opts.ignoreExit ?? false },
+      "git command failed",
+    );
     return { stdout, stderr, status };
   }
 }
