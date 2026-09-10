@@ -259,7 +259,9 @@ export function listWorktrees(projectRoot: string): WorktreeEntry[] {
       current.bare = true;
     } else if (line === "detached") {
       current.detached = true;
-    } else if (line === "prunable") {
+    } else if (line.startsWith("prunable")) {
+      // git appends a reason, e.g. "prunable gitdir file points to
+      // non-existent location" — an exact match would never fire.
       current.prunable = true;
     }
   }
@@ -269,6 +271,43 @@ export function listWorktrees(projectRoot: string): WorktreeEntry[] {
 
 function findWorktreeForBranch(entries: WorktreeEntry[], branchName: string): WorktreeEntry | null {
   return entries.find((entry) => !entry.bare && entry.branch === branchName) ?? null;
+}
+
+/**
+ * True when the path is a usable git checkout (git can resolve HEAD there) and,
+ * when `expectedBranch` is given, that branch is the one checked out.
+ * A registered-but-broken worktree (folder deleted, `.git` link gone, detached
+ * HEAD) returns false — adopting it would poison every later git operation.
+ */
+export function isWorktreeUsable(path: string, expectedBranch?: string | null): boolean {
+  if (!path || !existsSync(path)) return false;
+  const current = getCurrentBranch(path);
+  if (!current) return false;
+  return !expectedBranch || current === expectedBranch;
+}
+
+function isAdoptableWorktree(entry: WorktreeEntry, branchName: string): boolean {
+  return !entry.prunable && isWorktreeUsable(entry.path, branchName);
+}
+
+/**
+ * Drop stale worktree registrations (missing/broken working trees). Returns the
+ * number of registrations git reported as pruned (0 when git printed nothing).
+ */
+export function pruneWorktrees(projectRoot: string): number {
+  const { stdout, status } = runGit(projectRoot, ["worktree", "prune", "--verbose"], {
+    ignoreExit: true,
+  });
+  if (status !== 0 || !stdout) return 0;
+  return stdout.split("\n").filter((line) => line.trim().length > 0).length;
+}
+
+/** Best-effort `git worktree remove --force`; false when git refused. */
+export function removeWorktreeForce(projectRoot: string, worktreePath: string): boolean {
+  const { status } = runGit(projectRoot, ["worktree", "remove", "--force", worktreePath], {
+    ignoreExit: true,
+  });
+  return status === 0;
 }
 
 function runGit(
@@ -762,13 +801,20 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     ? resolve(explicitWorktreePath.trim())
     : buildTaskWorktreePath({ projectRoot, branchName, projectId });
 
-  // Adopt-don't-fail: when the branch is ALREADY checked out in some worktree,
-  // reuse that checkout instead of attempting `git worktree add` on a path that
-  // git will refuse (a branch can only be checked out in one worktree). This is
-  // what converts the retained-worktree incident into a no-op resume.
+  // Adopt-don't-fail: when the branch is ALREADY checked out in a HEALTHY
+  // worktree, reuse that checkout instead of attempting `git worktree add` on a
+  // path that git will refuse (a branch can only be checked out in one
+  // worktree). This is what converts the retained-worktree incident into a
+  // no-op resume.
+  //
+  // A registration alone is NOT proof of usability: git keeps listing worktrees
+  // whose folder was deleted or whose `.git` link is gone (usually flagged
+  // `prunable`). Adopting such a folder poisons every later stage with
+  // `branch_drift` / "not a git repository", so unhealthy registrations are
+  // pruned and provisioning falls through to a fresh checkout.
   const existingEntries = listWorktrees(projectRoot);
   const occupant = findWorktreeForBranch(existingEntries, branchName);
-  if (occupant) {
+  if (occupant && isAdoptableWorktree(occupant, branchName)) {
     if (normalizePathForCompare(occupant.path) !== normalizePathForCompare(expectedWorktreePath)) {
       log.info(
         {
@@ -784,8 +830,25 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     return { action: "reused", branchName, worktreePath: occupant.path };
   }
 
+  if (occupant) {
+    // Free the branch before attempting a fresh `worktree add`.
+    const prunedRegistrations = pruneWorktrees(projectRoot);
+    log.warn(
+      {
+        taskId,
+        branchName,
+        staleWorktreePath: occupant.path,
+        stalePrunable: occupant.prunable,
+        staleFolderExists: existsSync(occupant.path),
+        prunedRegistrations,
+        expectedWorktreePath,
+      },
+      "Skipped stale worktree registration for branch; pruning before fresh provisioning",
+    );
+  }
+
   if (existsSync(expectedWorktreePath)) {
-    if (isGitRepo(expectedWorktreePath) && getCurrentBranch(expectedWorktreePath) === branchName) {
+    if (isWorktreeUsable(expectedWorktreePath, branchName)) {
       copyProjectContextToWorktree(projectRoot, expectedWorktreePath);
       return { action: "reused", branchName, worktreePath: expectedWorktreePath };
     }
@@ -860,7 +923,7 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     lastArgs = args;
 
     const raced = findWorktreeForBranch(listWorktrees(projectRoot), branchName);
-    if (raced) {
+    if (raced && isAdoptableWorktree(raced, branchName)) {
       log.info(
         { taskId, branchName, worktreePath: raced.path },
         "Adopted existing worktree for branch",

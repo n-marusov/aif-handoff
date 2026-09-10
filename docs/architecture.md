@@ -371,6 +371,16 @@ The database is the source of truth for worktree structure; folders are reconcil
 parallel-eligible: they mutate the shared checkout and run only when nothing else for the
 project is in flight.
 
+#### Stale and broken registrations
+
+A worktree-registration row in `.git/worktrees/` sometimes survives the deletion of its
+working folder (usually flagged `prunable` by `git worktree list`). `ensureTaskWorktree`
+never adopts an unhealthy registration: it verifies that the folder exists, that `git` can
+resolve HEAD there, and that the expected branch is checked out. If any check fails, the
+registration is pruned and provisioning falls through to a fresh canonical checkout. The
+reconciliation sweep handles the same case outside the provisioning path, and also attempts
+best-effort `git worktree remove --force` on orphaned unhealthy entries.
+
 ### Agent Definitions
 
 All agents are defined as markdown files in `.claude/agents/*.md` and loaded by runtimes that support agent definitions (e.g. Claude adapter via `settingSources: ["project"]`). The `agent` package orchestrates _when_ to invoke them; the markdown files define _what_ they do. For runtimes without agent definition support, the prompt policy falls back to slash-command injection.
