@@ -75,23 +75,7 @@ describe("task state machine", () => {
 
   it("keeps improve and verify as coordinator-only statuses", () => {
     expect(applyHumanTaskEvent(makeTask("improve"), "start_implementation").ok).toBe(false);
-    expect(applyHumanTaskEvent(makeTask("verify"), "approve_done").ok).toBe(false);
-  });
-
-  it("allows accept_existing_plan from backlog", () => {
-    const result = applyHumanTaskEvent(makeTask("backlog"), "accept_existing_plan");
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.patch.status).toBe("plan_ready");
-      expect(result.patch.reviewIterationCount).toBe(0);
-      expect(result.patch.manualReviewRequired).toBe(false);
-      expect(result.patch.autoReviewState).toBeNull();
-    }
-  });
-
-  it("rejects accept_existing_plan from non-backlog statuses", () => {
-    const result = applyHumanTaskEvent(makeTask("planning"), "accept_existing_plan");
-    expect(result.ok).toBe(false);
+    expect(applyHumanTaskEvent(makeTask("verify"), "start_ai").ok).toBe(false);
   });
 
   it("allows approve_done from done", () => {

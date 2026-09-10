@@ -69,7 +69,6 @@ const LEGACY_ACTION_BUTTONS_BY_STATUS: Partial<Record<TaskStatus, TaskActionButt
 
 const ACTION_BUTTONS_BY_EVENT: Record<TaskEvent, TaskActionButton> = {
   start_ai: { label: "Start AI", event: "start_ai" },
-  accept_existing_plan: { label: "Use existing plan", event: "accept_existing_plan" },
   start_human_work: { label: "Start work", event: "start_human_work" },
   mark_plan_ready: { label: "Mark plan ready", event: "mark_plan_ready" },
   // Plan-review gate events are VCS-driven: publishing/approving/requesting

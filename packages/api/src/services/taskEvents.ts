@@ -1,8 +1,7 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   assertCurrentBranch,
-  ensureFeatureBranch,
   isBranchIsolationError,
   looksLikeFullPlanUpdate,
   getProjectConfig,
@@ -259,112 +258,6 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
   return { ok: true, task: updated, broadcastType: "task:moved" };
 }
 
-function handleAcceptExistingPlan(input: EventHandlerInput): EventHandlerResult {
-  const task = findTaskById(input.taskId);
-  if (!task) {
-    return { ok: false, status: 404, error: "Task not found" };
-  }
-  if (task.status !== "backlog") {
-    return { ok: false, status: 409, error: "accept_existing_plan is only allowed from backlog" };
-  }
-
-  const project = findProjectById(task.projectId);
-  if (!project) {
-    return { ok: false, status: 404, error: "Project not found for task" };
-  }
-
-  // Branch handling MUST happen before resolving/reading the plan file:
-  // task.branchName is a source-of-truth contract, and an already-bound
-  // task whose HEAD has drifted to a different branch would otherwise read
-  // the plan file from the wrong work-tree state and persist that content
-  // onto the bound branch. Two paths:
-  //   - Already-bound (task.branchName set): restorePersistedBranch — config
-  //     drift / missing branch / dirty tree fail loud, fail-closed.
-  //   - Unbound (no task.branchName): ensureFeatureBranch creates the
-  //     feature branch from base, then we read the plan from that branch.
-  // Fix tasks keep the legacy no-branch behavior.
-  let boundBranchName: string | null = task.branchName ?? null;
-  let executionRoot = task.worktreePath ?? project.rootPath;
-  if (!task.isFix && boundBranchName) {
-    const branchError = restoreTaskBranchForMutation(task, executionRoot);
-    if (branchError) return branchError;
-  } else if (!task.isFix && !boundBranchName) {
-    try {
-      const branchResult = ensureFeatureBranch({
-        projectRoot: project.rootPath,
-        taskId: task.id,
-        title: task.title,
-      });
-      if (branchResult.action !== "skipped" && branchResult.branchName) {
-        boundBranchName = branchResult.branchName;
-      }
-    } catch (err) {
-      const error = isBranchIsolationError(err)
-        ? `Branch isolation failure (${err.kind}): ${err.message}`
-        : err instanceof Error
-          ? err.message
-          : String(err);
-      return { ok: false, status: 409, error };
-    }
-  }
-
-  const cfg = getProjectConfig(executionRoot);
-  const planFilePath = task.isFix
-    ? resolve(executionRoot, cfg.paths.fix_plan)
-    : resolve(executionRoot, task.planPath || cfg.paths.plan);
-
-  if (!existsSync(planFilePath)) {
-    return { ok: false, status: 404, error: "Plan file not found on disk" };
-  }
-
-  const filePlan = readFileSync(planFilePath, "utf8");
-  if (!filePlan.trim()) {
-    return { ok: false, status: 409, error: "Plan file is empty" };
-  }
-
-  const nowIso = new Date().toISOString();
-  persistTaskPlanForTask({
-    taskId: input.taskId,
-    planText: filePlan,
-    projectRoot: executionRoot,
-    isFix: task.isFix,
-    planPath: task.planPath ?? undefined,
-    updatedAt: nowIso,
-  });
-
-  const transition = applyTaskAction({
-    taskId: input.taskId,
-    event: "accept_existing_plan",
-    participantsModeEnabled: input.participantsModeEnabled ?? false,
-    actor: input.actor ?? {
-      kind: "anonymous",
-      id: null,
-      displayNameSnapshot: null,
-    },
-    participantRole: input.participantRole,
-    participantActive: input.participantActive,
-    expectedStatus: task.status,
-    extra: { branchName: boundBranchName },
-  });
-  if (!transition.ok) {
-    const authorizationDenied =
-      transition.code === "actor_not_authorized" || transition.code === "assignment_required";
-    return {
-      ok: false,
-      status: transition.code === "not_found" ? 404 : authorizationDenied ? 403 : 409,
-      code: transition.code,
-      error: transition.message,
-    };
-  }
-
-  const updated = findTaskById(input.taskId);
-  if (!updated) {
-    return { ok: false, status: 404, error: "Task not found after update" };
-  }
-
-  return { ok: true, task: updated, broadcastType: "task:moved" };
-}
-
 export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHandlerResult> {
   try {
     if (input.participantsModeEnabled) {
@@ -408,9 +301,6 @@ export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHa
     }
     if (input.event === "fast_fix") {
       return await handleFastFix(input);
-    }
-    if (input.event === "accept_existing_plan") {
-      return handleAcceptExistingPlan(input);
     }
     return handleRegularTransition(input);
   } catch (error) {

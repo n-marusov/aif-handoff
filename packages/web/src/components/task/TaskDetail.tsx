@@ -353,15 +353,6 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
           </p>
           <div className="mt-4 flex flex-col gap-2">
             <Button
-              size="sm"
-              onClick={() => {
-                actions.setShowStartAiConfirm(false);
-                actions.handleAcceptExistingPlan();
-              }}
-            >
-              Use Existing Plan
-            </Button>
-            <Button
               variant="outline"
               size="sm"
               onClick={() => {

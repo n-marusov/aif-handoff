@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   findProjectById,
@@ -167,27 +167,35 @@ function clearPlanFileBeforeFreshPlanning(input: {
 }): void {
   if (input.isFix || input.hasPlanReviewFeedback || input.hasPersistedPlan) return;
 
-  const planFileOnDisk = resolve(input.executionRoot, input.planPath);
-  if (!existsSync(planFileOnDisk)) return;
+  const cfg = getProjectConfig(input.executionRoot);
+  const canonicalPath = resolve(input.executionRoot, input.planPath);
+  const genericFallbackPaths = [
+    resolve(input.executionRoot, cfg.paths.plan),
+    resolve(input.executionRoot, "PLAN.md"),
+  ];
+  const pathsToDelete = [canonicalPath, ...genericFallbackPaths];
 
-  try {
-    rmSync(planFileOnDisk, { force: true });
-    log.warn(
-      { taskId: input.taskId, planPath: planFileOnDisk },
-      "[FIX] Deleted pre-existing plan file before fresh planning; planner will generate a new task-specific plan",
-    );
-  } catch (error) {
-    log.error(
-      {
-        taskId: input.taskId,
-        planPath: planFileOnDisk,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      "[FIX] Failed to delete pre-existing plan file before fresh planning",
-    );
-    throw new StageManualBlockError(
-      `Unable to prepare a fresh plan file for task ${input.taskId}. Inspect ${planFileOnDisk} and retry.`,
-    );
+  for (const planFileOnDisk of pathsToDelete) {
+    if (!existsSync(planFileOnDisk)) continue;
+    try {
+      unlinkSync(planFileOnDisk);
+      log.warn(
+        { taskId: input.taskId, planPath: planFileOnDisk },
+        "[FIX] Deleted pre-existing plan file before fresh planning; planner will generate a new task-specific plan",
+      );
+    } catch (error) {
+      log.error(
+        {
+          taskId: input.taskId,
+          planPath: planFileOnDisk,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "[FIX] Failed to delete pre-existing plan file before fresh planning",
+      );
+      throw new StageManualBlockError(
+        `Unable to prepare a fresh plan file for task ${input.taskId}. Inspect ${planFileOnDisk} and retry.`,
+      );
+    }
   }
 }
 

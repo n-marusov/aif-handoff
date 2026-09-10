@@ -79,10 +79,6 @@ function resolveLegacyAction(
       return task.status === "backlog"
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
         : denied("action_not_allowed", "start_ai is only allowed from backlog");
-    case "accept_existing_plan":
-      return task.status === "backlog"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_ready" } }
-        : denied("action_not_allowed", "accept_existing_plan is only allowed from backlog");
     case "start_implementation":
       if (task.status !== "plan_ready") {
         return denied("action_not_allowed", "start_implementation is only allowed from plan_ready");
@@ -245,7 +241,6 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
     case "retry_from_blocked":
       return resolveLegacyAction(task, event);
     case "start_ai":
-    case "accept_existing_plan":
     case "request_replanning":
     case "fast_fix":
     case "publish_plan":
@@ -356,7 +351,6 @@ export function resolveTaskPermissions(
 
 const TASK_ACTION_LOOKUP: Record<TaskEvent, true> = {
   start_ai: true,
-  accept_existing_plan: true,
   start_human_work: true,
   mark_plan_ready: true,
   start_implementation: true,
