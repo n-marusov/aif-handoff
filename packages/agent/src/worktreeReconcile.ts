@@ -8,7 +8,15 @@ import {
   setTaskFields,
   updateTaskStatus,
 } from "@aif/data";
-import { ensureTaskWorktree, listWorktrees, logger, resolveWorktreeRoot } from "@aif/shared";
+import {
+  ensureTaskWorktree,
+  isWorktreeUsable,
+  listWorktrees,
+  logger,
+  pruneWorktrees,
+  removeWorktreeForce,
+  resolveWorktreeRoot,
+} from "@aif/shared";
 import { withProjectGitLock } from "./gitOperationLock.js";
 import { stashAndRemoveWorktree } from "./worktreeLifecycle.js";
 
@@ -73,7 +81,10 @@ function parkTask(taskId: string, reason: string): void {
  *
  *  - remove + prune worktrees no live task references (the incident's root
  *    cause: an ownerless worktree holding a branch);
- *  - recreate a missing folder for a live task, else park it blocked_external;
+ *  - drop unhealthy registrations (folder deleted / `.git` link gone) so they
+ *    stop holding a branch hostage;
+ *  - recreate a missing or unusable folder for a live task at its canonical
+ *    path, else park it blocked_external;
  *  - clear dangling `github_issues`/`gitlab_issues` task links.
  *
  * Best-effort: a failure here must never crash the poll cycle.
@@ -112,6 +123,40 @@ export async function reconcileWorktrees(
       continue;
     }
 
+    const healthy = !entry.prunable && isWorktreeUsable(entry.path, entry.branch);
+    if (!healthy) {
+      // A stale registration (missing folder, broken `.git` link) holds the
+      // branch hostage and cannot be stashed. Drop it so the next provision can
+      // check the branch out again.
+      const forceRemoved = await withProjectGitLock(
+        { projectRoot, operation: "reconcile-remove-unhealthy" },
+        () => removeWorktreeForce(projectRoot, entry.path),
+      );
+      const prunedRegistrations = await withProjectGitLock(
+        { projectRoot, operation: "reconcile-prune" },
+        () => pruneWorktrees(projectRoot),
+      );
+      const registrationCleared =
+        forceRemoved || !listWorktrees(projectRoot).some((item) => item.path === entry.path);
+      if (registrationCleared) removed += 1;
+      log.warn(
+        {
+          projectId,
+          projectRoot,
+          worktreePath: entry.path,
+          branch: entry.branch,
+          prunable: entry.prunable,
+          forceRemoved,
+          prunedRegistrations,
+          registrationCleared,
+        },
+        registrationCleared
+          ? "Removed unhealthy worktree registration"
+          : "Could not remove unhealthy worktree registration; manual cleanup required",
+      );
+      continue;
+    }
+
     const result = await stashAndRemoveWorktree({
       taskId: `orphan:${entry.path}`,
       projectId,
@@ -130,7 +175,29 @@ export async function reconcileWorktrees(
   }
 
   for (const task of activeTasks) {
-    if (existsSync(task.worktreePath)) continue;
+    if (isWorktreeUsable(task.worktreePath, task.branchName)) continue;
+
+    // Missing folder OR a folder that is no longer a usable checkout (a stale
+    // registration left behind by a failed/partial removal). Drop stale
+    // registrations first so the branch is free, then provision the CANONICAL
+    // branch-scoped worktree instead of resurrecting a poisoned legacy path.
+    const recordedPath = task.worktreePath;
+    const recordedPathExists = existsSync(recordedPath);
+    const prunedRegistrations = await withProjectGitLock(
+      { projectRoot, operation: "reconcile-prune" },
+      () => pruneWorktrees(projectRoot),
+    );
+    log.warn(
+      {
+        taskId: task.id,
+        recordedWorktreePath: recordedPath,
+        recordedPathExists,
+        branchName: task.branchName,
+        prunedRegistrations,
+      },
+      "Task worktree is missing or unusable; provisioning a fresh canonical worktree",
+    );
+
     const title = findTaskById(task.id)?.title ?? task.id;
     try {
       const result = await withProjectGitLock({ projectRoot, operation: "reconcile-repair" }, () =>
@@ -140,7 +207,6 @@ export async function reconcileWorktrees(
           title,
           projectId,
           explicitBranchName: task.branchName,
-          explicitWorktreePath: task.worktreePath,
         }),
       );
       if (result.worktreePath) {
@@ -152,25 +218,28 @@ export async function reconcileWorktrees(
         log.warn(
           {
             taskId: task.id,
-            previousWorktreePath: task.worktreePath,
+            previousWorktreePath: recordedPath,
             worktreePath: result.worktreePath,
           },
-          "Repaired missing task worktree folder",
+          "Repaired task worktree",
         );
       } else {
         parkTask(
           task.id,
-          `Worktree folder ${task.worktreePath} is missing and could not be recreated (${
+          `Worktree ${recordedPath} is missing or unusable and could not be recreated (${
             result.reason ?? "unknown reason"
           }).`,
         );
       }
     } catch (error) {
+      const manualHint = recordedPathExists
+        ? ` Leftover folder at ${recordedPath} may still hold the branch; remove it or run 'git worktree prune'.`
+        : "";
       parkTask(
         task.id,
-        `Worktree folder ${task.worktreePath} is missing and recreation failed: ${
+        `Worktree ${recordedPath} is missing or unusable and recreation failed: ${
           error instanceof Error ? error.message : String(error)
-        }`,
+        }.${manualHint}`,
       );
     }
   }

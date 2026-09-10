@@ -20,6 +20,7 @@ import {
   getHeadCommitSha,
   isBranchIsolationError,
   isGitRepo,
+  isWorktreeUsable,
   listWorktrees,
   projectUsesSharedBranchIsolation,
   resolveWorktreeRoot,
@@ -250,6 +251,44 @@ describe("gitIsolation", () => {
       expect(result.action).toBe("reused");
       expect(result.branchName).toBe(branchName);
       expect(result.worktreePath).toBe(legacyPath);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "does not adopt a stale (prunable) registration and provisions a fresh worktree",
+    () => {
+      initRepo(projectRoot);
+      writeConfig(
+        projectRoot,
+        "git:\n  enabled: true\n  base_branch: main\n  create_branches: true\n",
+      );
+
+      const branchName = "feature/stale-branch";
+      const stalePath = buildTaskWorktreePath({ projectRoot, branchName });
+      extraPaths.push(stalePath, resolveWorktreeRoot(projectRoot).worktreeRoot);
+      // Register a worktree for the branch, then delete its folder WITHOUT
+      // telling git: the registration survives and git reports it prunable.
+      // Adopting it used to poison every later stage (branch_drift / not-a-repo).
+      git(projectRoot, ["worktree", "add", "-b", branchName, stalePath, "main"]);
+      rmSync(stalePath, { recursive: true, force: true });
+
+      expect(listWorktrees(projectRoot).some((entry) => entry.branch === branchName)).toBe(true);
+      expect(listWorktrees(projectRoot).some((entry) => entry.prunable)).toBe(true);
+
+      const result = ensureTaskWorktree({
+        projectRoot,
+        taskId: "task-stale",
+        title: "Stale",
+        explicitBranchName: branchName,
+      });
+
+      expect(result.action).toBe("created");
+      expect(result.worktreePath).toBe(stalePath);
+      expect(isWorktreeUsable(stalePath, branchName)).toBe(true);
+      expect(
+        listWorktrees(projectRoot).filter((entry) => entry.branch === branchName),
+      ).toHaveLength(1);
     },
     GIT_TEST_TIMEOUT_MS,
   );

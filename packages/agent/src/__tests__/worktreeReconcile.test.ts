@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildTaskWorktreePath, resolveWorktreeRoot } from "@aif/shared";
+import { buildTaskWorktreePath, listWorktrees, resolveWorktreeRoot } from "@aif/shared";
 
 const mocks = vi.hoisted(() => ({
   listActiveTasksWithWorktrees: vi.fn(() => [] as unknown[]),
@@ -79,6 +79,27 @@ describe(
       expect(mocks.clearDanglingVcsIssueLinks).toHaveBeenCalledOnce();
     });
 
+    it("drops an unhealthy (prunable) registration under the canonical root", async () => {
+      const unhealthyPath = buildTaskWorktreePath({
+        projectRoot,
+        branchName: "feature/unhealthy",
+      });
+      extraPaths.push(unhealthyPath, resolveWorktreeRoot(projectRoot).worktreeRoot);
+      git(projectRoot, ["worktree", "add", "-b", "feature/unhealthy", unhealthyPath, "main"]);
+      rmSync(unhealthyPath, { recursive: true, force: true });
+
+      const summary = await reconcileWorktrees({
+        projectId: "p1",
+        projectRoot,
+        reason: "test",
+      });
+
+      expect(summary.removed).toBe(1);
+      expect(listWorktrees(projectRoot).some((entry) => entry.branch === "feature/unhealthy")).toBe(
+        false,
+      );
+    });
+
     it("retains a worktree referenced by a live task", async () => {
       const livePath = buildTaskWorktreePath({ projectRoot, branchName: "feature/live" });
       extraPaths.push(livePath, resolveWorktreeRoot(projectRoot).worktreeRoot);
@@ -104,7 +125,11 @@ describe(
     });
 
     it("repairs a missing folder for a live task", async () => {
-      const canonicalPath = buildTaskWorktreePath({ projectRoot, branchName: "feature/repair" });
+      const canonicalPath = buildTaskWorktreePath({
+        projectRoot,
+        branchName: "feature/repair",
+        projectId: "p1",
+      });
       extraPaths.push(canonicalPath, resolveWorktreeRoot(projectRoot).worktreeRoot);
       mocks.listActiveTasksWithWorktrees.mockReturnValue([
         {
