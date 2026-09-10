@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   findProjectById,
@@ -21,6 +21,7 @@ import {
 } from "../gitBranch.js";
 import { withProjectGitLock } from "../gitOperationLock.js";
 import { resolveIssueBranchName, type IssueProvider } from "../gitConventions.js";
+import { computePlanLayers } from "../planLayers.js";
 import { logActivity } from "../hooks.js";
 
 const log = logger("planner");
@@ -326,6 +327,32 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
         log.debug({ taskId, reason: branchResult.reason }, "Branch creation skipped");
       }
     });
+  }
+
+  // If the plan file at the target path already exists and ALL its tasks are
+  // marked completed, it is a stale artifact (e.g. a plan left from a previous
+  // run of the same GitHub/GitLab issue). Replanning (
+  // `planReviewFeedback` set) deliberately reuses the same file, but a first-
+  // time planner must start fresh — otherwise every downstream stage sees a
+  // fully-done checklist and silently skips execution.
+  if (!planReviewFeedback && !task.isFix) {
+    const planFileOnDisk = resolve(executionRoot, planPath);
+    try {
+      if (existsSync(planFileOnDisk)) {
+        const content = readFileSync(planFileOnDisk, "utf8");
+        const { tasks } = computePlanLayers(content);
+        if (tasks.length > 0 && tasks.every((t) => t.completed)) {
+          rmSync(planFileOnDisk);
+          log.warn(
+            { taskId, planPath: planFileOnDisk },
+            "Deleted stale plan file — all tasks already completed; subagent will generate a fresh plan",
+          );
+        }
+      }
+    } catch {
+      // Non-fatal: unparseable plan text or filesystem race — the subagent
+      // will overwrite it normally.
+    }
   }
 
   const taskContext = `Title: ${task.title}
