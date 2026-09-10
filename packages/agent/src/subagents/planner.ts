@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   findProjectById,
@@ -21,7 +21,6 @@ import {
 } from "../gitBranch.js";
 import { withProjectGitLock } from "../gitOperationLock.js";
 import { resolveIssueBranchName, type IssueProvider } from "../gitConventions.js";
-import { computePlanLayers } from "../planLayers.js";
 import { logActivity } from "../hooks.js";
 
 const log = logger("planner");
@@ -82,34 +81,66 @@ function normalizePlanPath(path: string | null | undefined, projectRoot: string)
   return path.trim().replace(/^@+/, "") || defaultPlan;
 }
 
+function isExplicitTaskPlanPath(
+  customPlanPath: string | null | undefined,
+  normalizedPlanPath: string,
+  defaultPlanPath: string,
+): boolean {
+  return Boolean(customPlanPath?.trim()) && normalizedPlanPath !== defaultPlanPath;
+}
+
 function readPlanFromDisk(
   projectRoot: string,
   resultText: string,
   isFix: boolean,
   customPlanPath?: string,
+  minModifiedMs?: number,
 ): string | null {
   const cfg = getProjectConfig(projectRoot);
   const normalizedPlanPath = normalizePlanPath(customPlanPath, projectRoot);
   const canonicalPlanPath = resolve(projectRoot, isFix ? cfg.paths.fix_plan : normalizedPlanPath);
-  const candidatePaths = new Set<string>([canonicalPlanPath]);
+  const explicitTaskPlanPath =
+    !isFix && isExplicitTaskPlanPath(customPlanPath, normalizedPlanPath, cfg.paths.plan);
+  const candidatePaths: string[] = [canonicalPlanPath];
   const pathFromResult = extractPlanPathFromResult(resultText);
   if (pathFromResult) {
     const resolved = pathFromResult.startsWith("/")
       ? pathFromResult
       : resolve(projectRoot, pathFromResult);
-    candidatePaths.add(resolved);
+    candidatePaths.push(resolved);
   }
 
-  // Skill runs may write fallback paths even when @path is requested.
+  // Skill runs may write fallback paths even when the default @path is requested.
   if (isFix) {
-    candidatePaths.add(resolve(projectRoot, "FIX_PLAN.md"));
+    candidatePaths.push(resolve(projectRoot, "FIX_PLAN.md"));
+  } else if (!explicitTaskPlanPath) {
+    candidatePaths.push(resolve(projectRoot, cfg.paths.plan));
+    candidatePaths.push(resolve(projectRoot, "PLAN.md"));
   } else {
-    candidatePaths.add(resolve(projectRoot, cfg.paths.plan));
-    candidatePaths.add(resolve(projectRoot, "PLAN.md"));
+    log.warn(
+      {
+        requestedPlanPath: canonicalPlanPath,
+        skippedFallbackPlanPaths: [
+          resolve(projectRoot, cfg.paths.plan),
+          resolve(projectRoot, "PLAN.md"),
+        ],
+      },
+      "[FIX] Skipping generic plan fallback paths because an explicit task plan path was requested",
+    );
   }
 
+  const seen = new Set<string>();
   for (const candidatePath of candidatePaths) {
+    if (seen.has(candidatePath)) continue;
+    seen.add(candidatePath);
     if (!existsSync(candidatePath)) continue;
+    if (minModifiedMs != null && statSync(candidatePath).mtimeMs < minModifiedMs) {
+      log.warn(
+        { planPath: candidatePath, minModifiedMs },
+        "[FIX] Ignoring stale plan file that was not modified during this planning run",
+      );
+      continue;
+    }
     const content = readFileSync(candidatePath, "utf8").trim();
     if (content.length > 0) return content;
   }
@@ -124,6 +155,48 @@ function normalizePlannerResult(resultText: string): string {
     .trim();
 
   return cleaned.length > 0 ? cleaned : resultText.trim();
+}
+
+function clearPlanFileBeforeFreshPlanning(input: {
+  taskId: string;
+  executionRoot: string;
+  planPath: string;
+  hasPersistedPlan: boolean;
+  hasPlanReviewFeedback: boolean;
+  isFix: boolean;
+}): void {
+  if (input.isFix || input.hasPlanReviewFeedback || input.hasPersistedPlan) return;
+
+  const cfg = getProjectConfig(input.executionRoot);
+  const canonicalPath = resolve(input.executionRoot, input.planPath);
+  const genericFallbackPaths = [
+    resolve(input.executionRoot, cfg.paths.plan),
+    resolve(input.executionRoot, "PLAN.md"),
+  ];
+  const pathsToDelete = [canonicalPath, ...genericFallbackPaths];
+
+  for (const planFileOnDisk of pathsToDelete) {
+    if (!existsSync(planFileOnDisk)) continue;
+    try {
+      unlinkSync(planFileOnDisk);
+      log.warn(
+        { taskId: input.taskId, planPath: planFileOnDisk },
+        "[FIX] Deleted pre-existing plan file before fresh planning; planner will generate a new task-specific plan",
+      );
+    } catch (error) {
+      log.error(
+        {
+          taskId: input.taskId,
+          planPath: planFileOnDisk,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "[FIX] Failed to delete pre-existing plan file before fresh planning",
+      );
+      throw new StageManualBlockError(
+        `Unable to prepare a fresh plan file for task ${input.taskId}. Inspect ${planFileOnDisk} and retry.`,
+      );
+    }
+  }
 }
 
 function formatCommentsForPrompt(
@@ -329,31 +402,24 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     });
   }
 
-  // If the plan file at the target path already exists and ALL its tasks are
-  // marked completed, it is a stale artifact (e.g. a plan left from a previous
-  // run of the same GitHub/GitLab issue). Replanning (
-  // `planReviewFeedback` set) deliberately reuses the same file, but a first-
-  // time planner must start fresh — otherwise every downstream stage sees a
-  // fully-done checklist and silently skips execution.
-  if (!planReviewFeedback && !task.isFix) {
-    const planFileOnDisk = resolve(executionRoot, planPath);
-    try {
-      if (existsSync(planFileOnDisk)) {
-        const content = readFileSync(planFileOnDisk, "utf8");
-        const { tasks } = computePlanLayers(content);
-        if (tasks.length > 0 && tasks.every((t) => t.completed)) {
-          rmSync(planFileOnDisk);
-          log.warn(
-            { taskId, planPath: planFileOnDisk },
-            "Deleted stale plan file — all tasks already completed; subagent will generate a fresh plan",
-          );
-        }
-      }
-    } catch {
-      // Non-fatal: unparseable plan text or filesystem race — the subagent
-      // will overwrite it normally.
-    }
-  }
+  // A fresh Handoff task must not treat an existing plan artifact in the
+  // prepared branch/worktree as context. VCS issue tasks use deterministic
+  // branch names and plan paths (`github-issue-N.md` / `gitlab-issue-N.md`),
+  // so deleting and recreating a task for the same external issue can check out
+  // a branch that still contains an old plan file. If we leave that file in
+  // place, `/aif-plan` and the post-run disk read can pick it up and downstream
+  // implementer logic may no-op against the old checklist. Replanning and tasks
+  // that already have a persisted DB plan intentionally keep their artifact.
+  const shouldRequireFreshPlanFile = !task.isFix && !planReviewFeedback && !task.plan?.trim();
+
+  clearPlanFileBeforeFreshPlanning({
+    taskId,
+    executionRoot,
+    planPath,
+    hasPersistedPlan: Boolean(task.plan?.trim()),
+    hasPlanReviewFeedback: Boolean(planReviewFeedback),
+    isFix: task.isFix,
+  });
 
   const taskContext = `Title: ${task.title}
 Description: ${task.description}
@@ -435,6 +501,7 @@ ${taskContext}`;
     });
   }
 
+  const planRunStartedAtMs = shouldRequireFreshPlanFile ? Date.now() : undefined;
   const { resultText: rawResult } = await executeSubagentQuery({
     taskId,
     projectRoot: executionRoot,
@@ -457,7 +524,13 @@ ${taskContext}`;
     assertCurrentBranch(executionRoot, preparedBranch);
   }
 
-  const diskPlan = readPlanFromDisk(executionRoot, rawResult, !!task.isFix, planPath);
+  const diskPlan = readPlanFromDisk(
+    executionRoot,
+    rawResult,
+    !!task.isFix,
+    planPath,
+    planRunStartedAtMs,
+  );
   const resultText = diskPlan ?? normalizePlannerResult(rawResult);
 
   persistTaskPlanForTask({

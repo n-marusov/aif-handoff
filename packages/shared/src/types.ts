@@ -645,7 +645,6 @@ export interface UpdateTaskInput {
 
 export const TASK_EVENTS = [
   "start_ai",
-  "accept_existing_plan",
   "start_human_work",
   "mark_plan_ready",
   "start_implementation",
