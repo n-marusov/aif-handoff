@@ -265,26 +265,59 @@ export class GitHubClient {
   }
 
   async getCommitChecks(owner: string, repository: string, sha: string): Promise<GitHubCheckState> {
-    const [status, checkRuns] = await Promise.all([
+    // Commit checks are best-effort diagnostics. PR publication must never
+    // fail because a checks endpoint is unavailable (e.g. token lacks the
+    // Checks permission). Fall back to whichever endpoint succeeds.
+    const [statusResult, checksResult] = await Promise.all([
       this.request<GitHubCombinedStatusResponse>(
         `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/commits/${encodeURIComponent(sha)}/status`,
+      ).then(
+        (status) => ({ ok: true as const, status }),
+        (error: unknown) => ({ ok: false as const, error }),
       ),
-      this.listCheckRuns(owner, repository, sha),
+      this.listCheckRuns(owner, repository, sha).then(
+        (checkRuns) => ({ ok: true as const, checkRuns }),
+        (error: unknown) => ({ ok: false as const, error }),
+      ),
     ]);
-    const states: Exclude<GitHubCheckState, null>[] = [];
-    const legacyCount = status.total_count ?? status.statuses?.length;
-    if (legacyCount === undefined || legacyCount > 0) {
-      states.push(status.state === "error" ? "failure" : status.state);
+    if (!statusResult.ok && !checksResult.ok) {
+      log.warn(
+        { owner, repository, sha },
+        "Both commit status and check-runs endpoints unavailable; returning null checks",
+      );
+      return null;
     }
-    for (const run of checkRuns) {
-      if (run.status !== "completed") {
-        states.push("pending");
-      } else {
-        states.push(
-          run.conclusion && SUCCESSFUL_CHECK_CONCLUSIONS.has(run.conclusion)
-            ? "success"
-            : "failure",
-        );
+    if (!statusResult.ok) {
+      log.warn(
+        { owner, repository, sha },
+        "Commit status endpoint unavailable; falling back to check-runs only",
+      );
+    }
+    if (!checksResult.ok) {
+      log.warn(
+        { owner, repository, sha },
+        "Check-runs endpoint unavailable (token may lack Checks permission); falling back to commit status only",
+      );
+    }
+    const states: Exclude<GitHubCheckState, null>[] = [];
+    if (statusResult.ok) {
+      const status = statusResult.status;
+      const legacyCount = status.total_count ?? status.statuses?.length;
+      if (legacyCount === undefined || legacyCount > 0) {
+        states.push(status.state === "error" ? "failure" : status.state);
+      }
+    }
+    if (checksResult.ok) {
+      for (const run of checksResult.checkRuns) {
+        if (run.status !== "completed") {
+          states.push("pending");
+        } else {
+          states.push(
+            run.conclusion && SUCCESSFUL_CHECK_CONCLUSIONS.has(run.conclusion)
+              ? "success"
+              : "failure",
+          );
+        }
       }
     }
     const result: GitHubCheckState = states.includes("failure")
@@ -299,8 +332,8 @@ export class GitHubClient {
         owner,
         repository,
         sha,
-        legacyCount: legacyCount ?? null,
-        checkRunCount: checkRuns.length,
+        legacyCount: statusResult.ok ? (statusResult.status.total_count ?? null) : null,
+        checkRunCount: checksResult.ok ? checksResult.checkRuns.length : 0,
         result,
       },
       "Combined GitHub commit statuses and check runs",
