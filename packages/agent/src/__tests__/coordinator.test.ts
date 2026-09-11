@@ -80,6 +80,9 @@ vi.mock("../subagents/planChecker.js", () => ({
 }));
 vi.mock("../subagents/implementer.js", () => ({
   runImplementer: vi.fn().mockResolvedValue(undefined),
+  hasImplementationNoOp: vi.fn(() => false),
+  IMPLEMENTATION_NOOP_MARKER:
+    "[error] The approved plan expected implementation changes but NO files were changed",
 }));
 vi.mock("../subagents/reviewer.js", () => ({
   runReviewer: vi.fn().mockResolvedValue(undefined),

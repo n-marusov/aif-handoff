@@ -18,8 +18,9 @@ export interface PlanTaskNode {
 
 const EMPTY_CHANGE_SCOPE: PlanTaskChangeScope = { files: [], declared: false, artifactTypes: [] };
 
-const FILE_BULLET = /^\s*-\s*(?:Modify|Create|Test|Delete)\s*:\s*(.+)$/i;
-const SCOPE_ARTIFACT_BULLET = /^\s*-\s*(?:New|Modified)\s+artifacts?\b([^:]*):/i;
+const FILE_BULLET =
+  /^\s*-\s*(?:Modify|Create|Test|Delete|Изменить|Создать|Проверить|Удалить)(?:\s+file|\s+файл)?\s*:\s*(.+)$/i;
+const EN_SCOPE_ARTIFACT_BULLET = /^\s*-\s*(?:New|Modified)\s+artifacts?\b([^:]*):/i;
 const ARTIFACT_TYPE = /\(([^)]+)\)/;
 
 function looksLikePath(value: string): boolean {
@@ -52,7 +53,7 @@ export function parseTaskChangeScope(blockLines: string[]): PlanTaskChangeScope 
       for (const file of extractDeclaredPaths(fileMatch[1])) files.add(file);
       continue;
     }
-    const artifactMatch = SCOPE_ARTIFACT_BULLET.exec(line);
+    const artifactMatch = EN_SCOPE_ARTIFACT_BULLET.exec(line);
     if (artifactMatch) {
       const typeMatch = ARTIFACT_TYPE.exec(artifactMatch[1] ?? "");
       const label = typeMatch?.[1]?.trim().toLowerCase();
@@ -374,6 +375,30 @@ export function collectDeclaredFiles(tasks: PlanTaskNode[]): string[] {
     for (const file of task.changeScope.files) files.add(file);
   }
   return Array.from(files).sort();
+}
+
+/**
+ * Best-effort declared file extraction from the full plan text.
+ *
+ * Some plan-checker output uses plain localized checklist items such as
+ * `- [ ] Создать файл: test.md` instead of the strict `Task N` structure used
+ * for layer scheduling. This helper feeds validation/retry prompts without
+ * changing the stricter dependency parser.
+ */
+export function collectDeclaredFilesFromPlanText(planText: string | null | undefined): string[] {
+  if (!planText) return [];
+  const files = new Set<string>();
+  for (const rawLine of planText.split("\n")) {
+    const line = rawLine.replace(/^\s*[-*]\s+\[(?: |x|X|~|!)\]\s+/, "- ");
+    const fileMatch = FILE_BULLET.exec(line);
+    if (!fileMatch) continue;
+    for (const file of extractDeclaredPaths(fileMatch[1])) files.add(file);
+  }
+  return Array.from(files).sort();
+}
+
+export function hasPendingChecklistItems(planText: string | null | undefined): boolean {
+  return Boolean(planText && /^\s*[-*]\s+\[(?: |~|!)\]\s+\S/m.test(planText));
 }
 
 /** True when the path is outside the declared scope (case/separator-insensitive). */

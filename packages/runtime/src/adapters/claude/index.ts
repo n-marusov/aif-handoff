@@ -110,6 +110,7 @@ const SDK_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: true,
   supportsApprovals: true,
   supportsCustomEndpoint: true,
+  supportsWorkspaceTools: true,
   usageReporting: UsageReporting.FULL,
   supportsInteractiveQuestions: true,
 };
@@ -127,6 +128,7 @@ const CLI_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: true,
   supportsApprovals: false,
   supportsCustomEndpoint: false,
+  supportsWorkspaceTools: true,
   usageReporting: UsageReporting.FULL,
   supportsInteractiveQuestions: true,
 };
@@ -141,6 +143,7 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: true,
   supportsApprovals: false,
   supportsCustomEndpoint: true,
+  supportsWorkspaceTools: false,
   usageReporting: UsageReporting.FULL,
 };
 

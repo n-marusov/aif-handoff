@@ -47,6 +47,7 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: true,
   supportsApprovals: false,
   supportsCustomEndpoint: true,
+  supportsWorkspaceTools: false,
   usageReporting: UsageReporting.FULL,
 };
 

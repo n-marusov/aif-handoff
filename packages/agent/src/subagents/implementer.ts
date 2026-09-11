@@ -25,16 +25,24 @@ import { taskRequiresPlanReview } from "../planReviewPublisher.js";
 import {
   analyzeLayerDisjointness,
   collectDeclaredFiles,
+  collectDeclaredFilesFromPlanText,
   computePendingPlanLayers,
   computePlanLayers,
   formatLayerDecisions,
   formatLayerSummary,
+  hasPendingChecklistItems,
   isOutsideDeclaredScope,
 } from "../planLayers.js";
 import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 
 const log = logger("implementer");
 const AGENT_NAME = "implement-coordinator";
+export const IMPLEMENTATION_NOOP_MARKER =
+  "[error] The approved plan expected implementation changes but NO files were changed";
+
+export function hasImplementationNoOp(implementationLog: string | null | undefined): boolean {
+  return implementationLog?.includes(IMPLEMENTATION_NOOP_MARKER) ?? false;
+}
 
 function formatReworkCommentForPrompt(
   comment: {
@@ -237,6 +245,17 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     : { tasks: [], layers: [] };
   const parsedTaskCount = parsedPlanComputation.tasks.length;
   const pendingTaskCount = layerComputation.tasks.length;
+  const expectedPlanFiles = Array.from(
+    new Set([
+      ...collectDeclaredFiles(parsedPlanComputation.tasks),
+      ...collectDeclaredFilesFromPlanText(selectedPlan),
+    ]),
+  ).sort();
+  const planHasImplementationIntent =
+    pendingTaskCount > 0 || expectedPlanFiles.length > 0 || hasPendingChecklistItems(selectedPlan);
+  const requiresPlanReviewImplementationEvidence = taskRequiresPlanReview(taskId);
+  const shouldEnforceImplementationChanges =
+    requiresPlanReviewImplementationEvidence && planHasImplementationIntent;
   const latestReworkComment = task.reworkRequested
     ? (getLatestReworkComment(taskId) ?? null)
     : null;
@@ -256,7 +275,14 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
       ].join("; ")
     : "No executor handoff history.";
 
-  if (selectedPlan && parsedTaskCount > 0 && pendingTaskCount === 0 && !task.reworkRequested) {
+  if (
+    selectedPlan &&
+    parsedTaskCount > 0 &&
+    pendingTaskCount === 0 &&
+    !task.reworkRequested &&
+    expectedPlanFiles.length === 0 &&
+    !hasPendingChecklistItems(selectedPlan)
+  ) {
     const nowIso = new Date().toISOString();
     const noOpResult =
       "No pending tasks detected in plan (all tasks already completed). " +
@@ -297,6 +323,10 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
       maxWorkers,
       maxWorkersSource,
       declaredFiles,
+      expectedPlanFiles,
+      parsedTaskCount,
+      pendingTaskCount,
+      planHasImplementationIntent,
     },
     "Resolved implementer fan-out plan",
   );
@@ -457,7 +487,9 @@ Execution rules:
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "implementer",
     prompt,
-    requiredCapabilities: useSubagents ? ["supportsAgentDefinitions"] : [],
+    requiredCapabilities: useSubagents
+      ? ["supportsAgentDefinitions", "supportsWorkspaceTools"]
+      : ["supportsWorkspaceTools"],
     agentDefinitionName: useSubagents ? AGENT_NAME : undefined,
     fallbackSlashCommand: implementSlashCommand,
     fallbackStrategy: useSubagents ? "slash_command" : "none",
@@ -484,18 +516,89 @@ Execution rules:
     "Implementer starting a fresh session",
   );
 
-  const { resultText } = await executeSubagentQuery({
-    taskId,
-    projectRoot,
-    agentName: executionName,
-    prompt,
-    maxBudgetUsd: implementerBudget,
-    agent: useSubagents ? AGENT_NAME : undefined,
-    skipReview: task.skipReview ?? false,
-    workflowSpec,
-    workflowKind: "implementer",
-    fallbackSlashCommand: implementSlashCommand,
-  });
+  let runResultText = "";
+  let noOpRetryAttempted = false;
+
+  const executeImplementationRun = async (runPrompt: string): Promise<string> => {
+    const { resultText } = await executeSubagentQuery({
+      taskId,
+      projectRoot,
+      agentName: executionName,
+      prompt: runPrompt,
+      maxBudgetUsd: implementerBudget,
+      agent: useSubagents ? AGENT_NAME : undefined,
+      skipReview: task.skipReview ?? false,
+      workflowSpec: {
+        ...workflowSpec,
+        promptInput: {
+          ...workflowSpec.promptInput,
+          prompt: runPrompt,
+        },
+      },
+      fallbackSlashCommand: implementSlashCommand,
+    });
+
+    if (task.branchName && !task.isFix) {
+      assertCurrentBranch(projectRoot, task.branchName);
+    }
+
+    return resultText;
+  };
+
+  runResultText = await executeImplementationRun(prompt);
+
+  const changedFilesAfterFirstRun = Array.from(
+    new Set([
+      ...(layerBaselineSha && task.branchName && !task.isFix
+        ? listChangedFiles(projectRoot, layerBaselineSha)
+        : []),
+      ...listChangedFiles(projectRoot),
+    ]),
+  ).sort();
+
+  if (shouldEnforceImplementationChanges && changedFilesAfterFirstRun.length === 0) {
+    noOpRetryAttempted = true;
+    const expectedFilesLine =
+      expectedPlanFiles.length > 0
+        ? expectedPlanFiles.join(", ")
+        : "(files not parsable from plan)";
+    log.warn(
+      {
+        taskId,
+        expectedPlanFiles,
+        parsedTaskCount,
+        pendingTaskCount,
+      },
+      "[FIX] Implementer produced no file changes; retrying with corrective execution prompt",
+    );
+    logActivity(
+      taskId,
+      "Agent",
+      `[FIX] Implementer produced no file changes; retrying approved plan execution. Expected files: ${expectedFilesLine}`,
+    );
+
+    const correctivePrompt = `${prompt}
+
+================================================
+CORRECTIVE RETRY — PREVIOUS ATTEMPT MADE NO FILE CHANGES
+================================================
+The immediately previous implementation attempt returned this text but changed ZERO files:
+<<<PREVIOUS_RESULT
+${runResultText}
+PREVIOUS_RESULT
+
+This is not acceptable for the approved plan. You MUST now make concrete file-system changes inside ${projectRoot}.
+Expected file targets from the approved plan: ${expectedFilesLine}
+
+Rules for this retry:
+1. Do not claim success until git status or equivalent file checks show the required files exist/changed.
+2. If the plan says to create a simple file such as test.md or hello.md, create that file now with the exact requested content.
+3. After editing, run concrete verification commands such as ls/cat/test/grep as appropriate.
+4. Final response MUST include a "Changed files" section listing the actual files created or modified.
+5. If you still cannot change files, return "STATUS: BLOCKED" and explain the exact tool/permission failure.`;
+
+    runResultText = await executeImplementationRun(correctivePrompt);
+  }
 
   // Post-run drift check: if the subagent switched branches during execution
   // (e.g. a rogue skill ran `git checkout` or plan-polisher followed legacy
@@ -505,9 +608,9 @@ Execution rules:
     assertCurrentBranch(projectRoot, task.branchName);
   }
 
-  let finalResultText = resultText;
+  let finalResultText = runResultText;
 
-  if (isBlockedImplementationResult(resultText)) {
+  if (isBlockedImplementationResult(runResultText)) {
     throw new Error("Implementer blocked by permissions");
   }
 
@@ -585,6 +688,11 @@ Execution rules:
   }
 
   const finalResultNotes: string[] = [];
+  if (noOpRetryAttempted) {
+    finalResultNotes.push(
+      "[fix] First implementation attempt changed no files; coordinator automatically retried the approved plan execution.",
+    );
+  }
   if (checklistAutoSynced) {
     finalResultNotes.push("[note] Plan checklist auto-synced after implementation.");
   }
@@ -622,21 +730,22 @@ Execution rules:
   // Change verification — if the plan expected product changes but this run
   // touched nothing, surface a loud warning so an empty "I implemented it"
   // result cannot pass silently. Uses the union of tracked + untracked files.
-  const planDeclaredFiles = collectDeclaredFiles(layerComputation.tasks);
-  if (layerComputation.tasks.length > 0 && changedFiles.length === 0) {
+  const planDeclaredFiles = expectedPlanFiles;
+  if (shouldEnforceImplementationChanges && changedFiles.length === 0) {
     const scope =
       planDeclaredFiles.length > 0
         ? planDeclaredFiles.join(", ")
         : "(files not parsable from plan)";
     const warning =
-      `[error] The plan had ${layerComputation.tasks.length} pending task(s) but NO files were changed: ${scope}. ` +
-      `The implementation produced no work-tree changes — inspect the implementation log and work tree.`;
+      `[error] The approved plan expected implementation changes but NO files were changed: ${scope}. ` +
+      `The implementation produced no work-tree changes even after corrective retry — inspect the implementation log and work tree.`;
     finalResultNotes.push(warning);
     log.error(
       {
         taskId,
         pendingTaskCount: layerComputation.tasks.length,
-        declaredFiles: planDeclaredFiles,
+        expectedPlanFiles: planDeclaredFiles,
+        retryAttempted: noOpRetryAttempted,
         changedFiles,
       },
       "Implementer completed without changing any files despite pending plan tasks",

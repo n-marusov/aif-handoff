@@ -6,6 +6,7 @@ import {
   computePlanLayers,
   formatLayerDecisions,
   formatLayerSummary,
+  hasPendingChecklistItems,
   isOutsideDeclaredScope,
 } from "../planLayers.js";
 
@@ -91,14 +92,15 @@ describe("plan layer parsing", () => {
     expect(layers).toEqual([[2]]);
   });
 
-  it("treats [~] Task as in-progress (pending)", () => {
+  it("extracts localized declared files from checklist items", async () => {
     const plan = `
-### Phase 1
-- [x] Task 1: Base setup
-- [~] Task 2: Coordinator is working now (depends on 1)
+## План реализации
+- [ ] Создать файл: test.md
+- [ ] Проверить содержимое: test.md
 `;
-    const { layers } = computePendingPlanLayers(plan);
-    expect(layers).toEqual([[2]]);
+    const { collectDeclaredFilesFromPlanText } = await import("../planLayers.js");
+    expect(collectDeclaredFilesFromPlanText(plan)).toEqual(["test.md"]);
+    expect(hasPendingChecklistItems(plan)).toBe(true);
   });
 });
 

@@ -103,6 +103,8 @@ export interface RuntimeCapabilities {
   supportsSessionFork: boolean;
   /** Adapter can list/get sessions via listSessions(), getSession(), listSessionEvents(). */
   supportsSessionList: boolean;
+  /** Adapter can execute workspace/file edits through local or server-side tools. */
+  supportsWorkspaceTools?: boolean;
   /** Adapter supports .claude/agents/ definitions (agentDefinitionName in execution intent). */
   supportsAgentDefinitions: boolean;
   /** Adapter emits streaming events during run(). */
@@ -147,6 +149,7 @@ export const DEFAULT_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: false,
   supportsApprovals: false,
   supportsCustomEndpoint: false,
+  supportsWorkspaceTools: false,
   supportsIsolatedSubagentWorkflows: false,
   supportsNativeSubagentWorkflows: false,
   usageReporting: UsageReporting.NONE,

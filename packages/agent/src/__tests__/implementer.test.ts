@@ -575,7 +575,9 @@ describe("runImplementer rework behavior", () => {
 
       await runImplementer("task-plan-approved", projectRoot);
 
-      expect(queryMock).toHaveBeenCalledTimes(1);
+      // Plan-review implementation that produces no worktree changes triggers
+      // one corrective retry before the final result is written.
+      expect(queryMock).toHaveBeenCalledTimes(2);
     } finally {
       delete process.env.AIF_PLAN_REVIEW_PR_ENABLED;
       delete process.env.AIF_GITHUB_ISSUE_PR_ENABLED;
