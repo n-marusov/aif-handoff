@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { projects, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
@@ -140,5 +141,52 @@ describe("ensurePlanReviewCommit", () => {
     const report = ensurePlanReviewCommit({ taskId: "task", projectRoot: rootPath });
     expect(report.status).toBe("blocked_missing_plan");
     expect(report.commitSha).toBeNull();
+  });
+
+  it("sets a fallback git identity when user.email is unconfigured", () => {
+    const rootPath = mkdtempSync(join(tmpdir(), "plan-review-commit-identity-"));
+    execFileSync("git", ["init", "--initial-branch=main"], {
+      cwd: rootPath,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], {
+      cwd: rootPath,
+      stdio: "ignore",
+    });
+    writeFileSync(join(rootPath, "README.md"), "# test\n");
+    execFileSync("git", ["add", "-A"], { cwd: rootPath, stdio: "ignore" });
+    // Deterministic base commit authored via env identity (no local config).
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@t.local",
+        "commit",
+        "-m",
+        "test: init",
+        "--no-verify",
+      ],
+      {
+        cwd: rootPath,
+        stdio: "ignore",
+      },
+    );
+
+    seedTask(rootPath);
+    writePlan(rootPath);
+    const report = ensurePlanReviewCommit({ taskId: "task", projectRoot: rootPath });
+
+    expect(report.status).toBe("committed");
+    expect(report.commitSha).toBeTruthy();
+    // Commit author must be resolved (either from fallback or pre-existing
+    // system config) — never "unknown".
+    const author = execFileSync("git", ["log", "-1", "--format=%an <%ae>"], {
+      cwd: rootPath,
+      encoding: "utf8",
+    }).trim();
+    expect(author).toBeTruthy();
+    expect(author).not.toMatch(/unknown/i);
   });
 });

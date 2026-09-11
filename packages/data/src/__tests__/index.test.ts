@@ -1947,7 +1947,7 @@ describe("data layer", () => {
     });
 
     it("hasActiveBranchBoundTasksForProject true for a queued backlog task that already has branchName", () => {
-      // accept_existing_plan / replan can leave a branch-bound task in
+      // replan can leave a branch-bound task in
       // backlog briefly; serialization must already kick in.
       const a = createTask({ projectId: "proj-1", title: "A", description: "" });
       setTaskFields(a!.id, { branchName: "feature/a-prepared" });

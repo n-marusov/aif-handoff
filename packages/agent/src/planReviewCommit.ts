@@ -152,6 +152,18 @@ export function ensurePlanReviewCommit(input: {
     };
   }
 
+  // Ensure Git identity is configured locally so deterministic commits work
+  // even in environments (e.g. Docker containers) that lack a global config.
+  const who = runGit(executionRoot, ["config", "user.email"]);
+  if (!who.stdout.trim()) {
+    runGit(executionRoot, ["config", "user.name", "AI Factory Agent"]);
+    runGit(executionRoot, ["config", "user.email", "agent@aif.handoff"]);
+    log.debug(
+      { taskId: task.id, executionRoot },
+      "Set fallback Git identity for plan review commit",
+    );
+  }
+
   const conventions = input.conventions ?? resolveTargetProjectGitConventions(executionRoot);
   const planRel = normalizePlanPath(task.planPath, executionRoot);
   const planAbs = resolve(executionRoot, planRel);

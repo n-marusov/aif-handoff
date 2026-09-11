@@ -2455,7 +2455,7 @@ export function countActivePipelineTasksForProject(projectId: string): number {
  * tasks that still mutate the shared worktree on stage transitions.
  *
  * Includes `backlog` so a queued task whose branch was prepared (e.g. via
- * `accept_existing_plan`) does not let the scheduler open the parallel pool
+ * `replan`) does not let the scheduler open the parallel pool
  * before its first stage starts.
  */
 export function hasActiveBranchBoundTasksForProject(projectId: string): boolean {

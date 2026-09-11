@@ -1231,7 +1231,7 @@ Transitions a task through the state machine.
 
 | Current Status     | Valid Events                                             |
 | ------------------ | -------------------------------------------------------- |
-| `backlog`          | `start_ai`, `accept_existing_plan`                       |
+| `backlog`          | `start_ai`                                               |
 | `plan_ready`       | `start_implementation`, `request_replanning`, `fast_fix` |
 | `blocked_external` | `retry_from_blocked`                                     |
 | `done`             | `approve_done`, `request_changes`                        |
@@ -1262,7 +1262,6 @@ expose no legacy manual action. Human-owned tasks use the explicit actions above
 Additional constraints:
 
 - `start_implementation` requires `autoMode=false` (manual gate). For `autoMode=true`, implementation is picked automatically by the coordinator.
-- `accept_existing_plan` reads the plan file from disk, saves it to the database, and transitions directly to `plan_ready` — skipping the planning stage entirely. Returns `404` if the plan file does not exist on disk.
 - `fast_fix` requires `autoMode=false` and at least one human comment on the task.
 - `request_changes` transitions `done -> implementing`, sets `reworkRequested=true`, and resets watchdog retry state (`retryCount=0`).
 - With `autoMode=true`, coordinator can trigger this same `request_changes`-style rework loop automatically after review if blocking findings are extracted from `reviewComments`.
