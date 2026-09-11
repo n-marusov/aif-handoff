@@ -178,7 +178,6 @@ export async function ensureAutoQueueTaskCommit(input: {
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "commit",
     prompt,
-    fallbackSlashCommand: "/aif-commit",
     sessionReusePolicy: "never",
     systemPromptAppend: PROJECT_SCOPE_APPEND,
   });
@@ -204,7 +203,6 @@ export async function ensureAutoQueueTaskCommit(input: {
       profileMode: "task",
       workflowSpec,
       workflowKind: "commit",
-      fallbackSlashCommand: "/aif-commit",
       sessionReusePolicy: "never",
       systemPromptAppend: PROJECT_SCOPE_APPEND,
       usageSource: UsageSource.COMMIT,
