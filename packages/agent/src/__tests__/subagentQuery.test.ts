@@ -525,6 +525,74 @@ describe("executeSubagentQuery attribution", () => {
       }),
     );
   });
+
+  it("expands the API skill workflow when an explicit spec omitted its fallback", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        [
+          `data: ${JSON.stringify({
+            id: "gen-plan-1",
+            choices: [{ delta: { content: "- [ ] Verify the requested change" } }],
+          })}`,
+          "data: [DONE]",
+          "",
+        ].join("\n"),
+        { headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    mockEnvOverrides.OPENROUTER_API_KEY = "openrouter-test-key";
+    findTaskByIdMock.mockReturnValue({
+      id: "task-api-plan",
+      projectId: "project-api",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+    resolveEffectiveRuntimeProfileMock.mockReturnValue({
+      source: "project",
+      profile: {
+        id: "openrouter-profile",
+        runtimeId: "openrouter",
+        providerId: "openrouter",
+        transport: "api",
+        defaultModel: "openai/gpt-5.3-codex",
+      },
+      taskRuntimeProfileId: null,
+      projectRuntimeProfileId: "openrouter-profile",
+      systemRuntimeProfileId: null,
+    });
+
+    await executeSubagentQuery({
+      taskId: "task-api-plan",
+      projectRoot: "/tmp/project",
+      agentName: "plan-coordinator",
+      prompt: "Plan the requested task without implementing it.",
+      workflowKind: "planner",
+      fallbackSlashCommand: "/aif-plan fast @.ai-factory/PLAN.md docs:false tests:false",
+      workflowSpec: {
+        workflowKind: "planner",
+        promptInput: { prompt: "Plan the requested task without implementing it." },
+        requiredCapabilities: [],
+        fallbackStrategy: "none",
+        sessionReusePolicy: "new_session",
+        executionMode: "standard",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const userPrompt = request.messages.find(
+      (message: { role: string }) => message.role === "user",
+    )?.content;
+    expect(userPrompt).toContain("API transport workflow contract:");
+    expect(userPrompt).toContain("Planning is read-only");
+    expect(userPrompt).toContain(
+      "Requested workflow command: /aif-plan fast @.ai-factory/PLAN.md docs:false tests:false",
+    );
+    expect(userPrompt).not.toBe("/aif-plan fast @.ai-factory/PLAN.md docs:false tests:false");
+    expect(userPrompt).not.toContain("*** Begin Patch");
+    expect(queryMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("subagent app-default runtime resolution", () => {

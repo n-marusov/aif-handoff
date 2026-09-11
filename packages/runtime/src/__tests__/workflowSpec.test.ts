@@ -447,6 +447,59 @@ describe("runtime workflow spec + prompt policy", () => {
   });
 });
 
+describe("API slash-command prompt policy", () => {
+  it("expands API slash fallback into explicit skill instructions", () => {
+    const workflow = createRuntimeWorkflowSpec({
+      workflowKind: "planner",
+      prompt: "HANDOFF_MODE: 1\nPlan file: @.ai-factory/PLAN.md",
+      fallbackSlashCommand: "/aif-plan fast @.ai-factory/PLAN.md docs:false tests:false",
+      fallbackStrategy: "slash_command",
+    });
+
+    const resolved = resolveRuntimePromptPolicy({
+      runtimeId: "openrouter",
+      transport: "api",
+      capabilities: {
+        ...CODEX_CAPABILITIES,
+        supportsIsolatedSubagentWorkflows: false,
+        supportsNativeSubagentWorkflows: false,
+      },
+      workflow,
+    });
+
+    expect(resolved.usedApiSkillExpansion).toBe(true);
+    expect(resolved.prompt).toContain("API transport workflow contract:");
+    expect(resolved.prompt).toContain("Planning is read-only");
+    expect(resolved.prompt).toContain("Requested workflow command: /aif-plan fast");
+    expect(resolved.prompt).not.toContain("*** Begin Patch");
+  });
+
+  it("uses a safe inline API skill fallback when the project skill is unavailable", () => {
+    const workflow = createRuntimeWorkflowSpec({
+      workflowKind: "planner",
+      prompt: "Plan this task",
+      fallbackSlashCommand: "/aif-plan fast",
+      fallbackStrategy: "slash_command",
+    });
+    const messages: string[] = [];
+
+    const resolved = resolveRuntimePromptPolicy({
+      runtimeId: "openrouter",
+      transport: "api",
+      projectRoot: "/path/that/does/not/exist",
+      capabilities: { ...CODEX_CAPABILITIES, supportsIsolatedSubagentWorkflows: false },
+      workflow,
+      logger: { debug: (_context, message) => messages.push(message) },
+    });
+
+    expect(resolved.usedApiSkillExpansion).toBe(true);
+    expect(resolved.prompt).toContain("do not create, modify, or delete project files");
+    expect(messages).toContain(
+      "[FIX] API slash command skill file unavailable; using safe inline fallback",
+    );
+  });
+});
+
 describe("transformSkillCommandPrefix", () => {
   it("transforms /aif-plan to $aif-plan", () => {
     expect(transformSkillCommandPrefix("/aif-plan fast", "$")).toBe("$aif-plan fast");
