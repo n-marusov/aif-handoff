@@ -226,6 +226,16 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           closingPull ?? (await client.getPullRequest(connection.owner, connection.name, prNumber));
         const reviews = await client.listReviews(connection.owner, connection.name, prNumber);
         const review = latestReviewState(reviews);
+        // Fallback: when the PR author cannot officially approve (GitHub
+        // restriction), a COMMENTED review body containing "/approve" acts
+        // as a lightweight approval signal.
+        const approveComment = reviews
+          .filter((r) => r.state === "COMMENTED" && r.body?.includes("/approve"))
+          .sort((left, right) =>
+            (right.submitted_at ?? "").localeCompare(left.submitted_at ?? ""),
+          )[0];
+        const effectiveReviewState = approveComment ? "approved" : review.state;
+        const effectiveReviewId = approveComment ? approveComment.id : review.id;
         const prState = pull.merged_at ? "merged" : pull.state;
         const checks = await client.getCommitChecks(
           connection.owner,
@@ -239,8 +249,8 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           prUrl: pull.html_url,
           prState,
           prChecksStatus: checks,
-          reviewState: review.state,
-          lastReviewId: review.id,
+          reviewState: effectiveReviewState,
+          lastReviewId: effectiveReviewId,
         });
         let task = findTaskById(result.taskId);
         const discoveredPullNeedsDone =
@@ -296,13 +306,14 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           task &&
           task.status === "plan_review" &&
           existing?.prMode === "plan_review" &&
-          review.id !== null &&
-          review.id !== (existing?.lastReviewId ?? null)
+          effectiveReviewId !== null &&
+          effectiveReviewId !== (existing?.lastReviewId ?? null)
         ) {
           // Plan-review gate: an approved plan PR/MR is the only event allowed
           // to move the task into implementing; a changes-requested review
           // sends it back to planning for replanning on the same branch/PR.
-          if (review.state === "approved") {
+          // A COMMENTED review containing "/approve" is treated as approval.
+          if (effectiveReviewState === "approved") {
             markTaskPlanApproved({
               taskId: task.id,
               actor: {
@@ -316,11 +327,12 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
                 taskId: task.id,
                 issueNumber: issue.number,
                 prNumber: pull.number,
-                reviewId: review.id,
+                reviewId: effectiveReviewId,
+                viaComment: Boolean(approveComment),
               },
               "GitHub plan review approved; task resumed at implementing",
             );
-          } else if (review.state === "changes_requested") {
+          } else if (effectiveReviewState === "changes_requested") {
             const feedback =
               review.body && review.body.trim().length > 0 ? review.body : task.planReviewFeedback;
             markTaskPlanChangesRequested({
@@ -337,7 +349,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
                 taskId: task.id,
                 issueNumber: issue.number,
                 prNumber: pull.number,
-                reviewId: review.id,
+                reviewId: effectiveReviewId,
                 feedbackLength: feedback?.length ?? 0,
               },
               "GitHub plan review requested changes; task returned to planning",
@@ -346,16 +358,16 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
         } else if (
           task &&
           task.status === "plan_review" &&
-          review.id !== null &&
-          review.id === (existing?.lastReviewId ?? null)
+          effectiveReviewId !== null &&
+          effectiveReviewId === (existing?.lastReviewId ?? null)
         ) {
           log.debug(
             {
               taskId: task.id,
               issueNumber: issue.number,
               prNumber: pull.number,
-              reviewId: review.id,
-              reviewState: review.state,
+              reviewId: effectiveReviewId,
+              reviewState: effectiveReviewState,
             },
             "GitHub plan review event already processed; skipping",
           );
