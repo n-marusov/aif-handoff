@@ -466,6 +466,7 @@ Plan file: @${planPath}
 ${taskContext}
 
 Create or refine an implementation-ready markdown checklist plan.
+CRITICAL: Do NOT modify, create, or delete any files during planning. Do NOT write any code, create any new files (such as test.md), or make any changes to the project. Your ONLY task is to write a checklist plan document to @${planPath}. The plan must contain actionable checklist items in format "- [ ] Step description". Never mark items as completed "- [x]" — all items start unchecked.
 Always write the final plan to @${planPath}.`;
     workflowSpec = createRuntimeWorkflowSpec({
       workflowKind: "planner",

@@ -234,7 +234,7 @@ export function ensurePlanReviewCommit(input: {
     };
   }
 
-  const dirtyAllowed = dirty.filter((path) => dirtyAbs.has(resolve(executionRoot, path)));
+  const dirtyAllowed = dirty.filter((path) => allowedAbs.has(resolve(executionRoot, path)));
   if (dirtyAllowed.length === 0) {
     log.debug(
       { taskId: task.id, executionRoot, planRel, conventionSource: conventions.source },
