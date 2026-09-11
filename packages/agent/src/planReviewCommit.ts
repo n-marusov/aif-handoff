@@ -182,9 +182,19 @@ export function ensurePlanReviewCommit(input: {
     [...allowedAbs].map((abs) => toPosixPath(relative(executionRoot, abs))),
   );
 
+  // Infrastructure directory prefixes — scaffolding created by the tooling
+  // (planner, initProject), never product/implementation code. Allow files
+  // under these prefixes in the plan commit so plan review doesn't block on
+  // setup artifacts while still catching real product files.
+  const INFRASTRUCTURE_PREFIXES = [".ai-factory/", ".claude/"];
+
   const dirty = listDirtyPaths(executionRoot);
   const dirtyAbs = new Set(dirty.map((path) => resolve(executionRoot, path)));
-  const dirtyProductPaths = dirty.filter((path) => !allowedAbs.has(resolve(executionRoot, path)));
+  const dirtyProductPaths = dirty.filter((path) => {
+    if (allowedAbs.has(resolve(executionRoot, path))) return false;
+    const rel = toPosixPath(path);
+    return !INFRASTRUCTURE_PREFIXES.some((prefix) => rel.startsWith(prefix));
+  });
 
   if (dirtyProductPaths.length > 0) {
     const preview = dirtyProductPaths.slice(0, MAX_DIRTY_PREVIEW);
