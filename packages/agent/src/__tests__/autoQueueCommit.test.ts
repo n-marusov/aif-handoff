@@ -87,11 +87,11 @@ describe("ensureAutoQueueTaskCommit", () => {
     expect(executeSubagentQueryMock).toHaveBeenCalledWith(
       expect.objectContaining({
         workflowKind: "commit",
-        fallbackSlashCommand: "/aif-commit",
         sessionReusePolicy: "never",
         usageSource: UsageSource.COMMIT,
       }),
     );
+    expect(executeSubagentQueryMock.mock.calls[0][0]).not.toHaveProperty("fallbackSlashCommand");
   });
 
   it("records no_changes without creating an empty commit", async () => {
