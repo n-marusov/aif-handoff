@@ -581,6 +581,58 @@ Execution rules:
       `[warning] Files changed outside the declared layer scope: ${shown}${suffix}. The layer was scheduled for parallel fan-out — review before merging.`,
     );
   }
+
+  // Concrete change summary — surface exactly which files this implementer
+  // run touched so the PR/activity clearly reflects the plan work instead of
+  // relying on the model's prose (which can claim success without any edits).
+  // `listChangedFiles(projectRoot, ref)` only reports tracked changes, so also
+  // capture untracked files (new files created but not yet `git add`ed) via
+  // the porcelain variant and merge both lists.
+  const trackedChanges =
+    layerBaselineSha && task.branchName && !task.isFix
+      ? listChangedFiles(projectRoot, layerBaselineSha)
+      : [];
+  const allDirty = listChangedFiles(projectRoot);
+  const changedFiles = Array.from(new Set([...trackedChanges, ...allDirty])).sort();
+  if (changedFiles.length > 0) {
+    finalResultNotes.push(
+      `[files] Files changed by this implementation:\n${changedFiles
+        .map((file) => `- ${file}`)
+        .join("\n")}`,
+    );
+  }
+
+  // Change verification — if the plan expected product changes but this run
+  // touched nothing, surface a loud warning so an empty "I implemented it"
+  // result cannot pass silently. Uses the union of tracked + untracked files.
+  const planDeclaredFiles = collectDeclaredFiles(layerComputation.tasks);
+  if (layerComputation.tasks.length > 0 && changedFiles.length === 0) {
+    const scope =
+      planDeclaredFiles.length > 0
+        ? planDeclaredFiles.join(", ")
+        : "(files not parsable from plan)";
+    const warning =
+      `[error] The plan had ${layerComputation.tasks.length} pending task(s) but NO files were changed: ${scope}. ` +
+      `The implementation produced no work-tree changes — inspect the implementation log and work tree.`;
+    finalResultNotes.push(warning);
+    log.error(
+      {
+        taskId,
+        pendingTaskCount: layerComputation.tasks.length,
+        declaredFiles: planDeclaredFiles,
+        changedFiles,
+      },
+      "Implementer completed without changing any files despite pending plan tasks",
+    );
+  } else if (planDeclaredFiles.length > 0) {
+    const missed = planDeclaredFiles.filter((file) => !changedFiles.includes(file));
+    if (missed.length > 0) {
+      finalResultNotes.push(
+        `[warning] Plan declared file(s) not modified: ${missed.join(", ")}. Review before proceeding.`,
+      );
+    }
+  }
+
   const enrichedResult =
     finalResultNotes.length > 0
       ? `${finalResultText}\n\n${finalResultNotes.join("\n")}`
