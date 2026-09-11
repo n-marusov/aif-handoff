@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +63,7 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                 isCheckingStartAi={actions.isCheckingStartAiPlanFile}
                 planChangeSuccess={actions.planChangeSuccess}
                 onOpenHandoff={() => setShowHandoffDialog(true)}
+                onDeleteClick={() => actions.setShowDeleteConfirm(true)}
                 onClose={onClose}
               />
 
@@ -225,16 +225,6 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                   >
                     <TaskPlan plan={task.plan} />
                   </Section>
-
-                  <div className="border-t border-border pt-4">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => actions.setShowDeleteConfirm(true)}
-                    >
-                      <Trash2 className="mr-1 h-3 w-3" /> Delete task
-                    </Button>
-                  </div>
                 </div>
 
                 {/* Right column */}

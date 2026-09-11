@@ -1,7 +1,7 @@
 import type { Task, TaskEvent, TaskStatus } from "@aif/shared/browser";
 import { STATUS_CONFIG } from "@aif/shared/browser";
 import { statusColorStyle } from "@/hooks/useStatusColor";
-import { Pause, Play, Clock, AlertTriangle } from "lucide-react";
+import { Pause, Play, Clock, AlertTriangle, Trash2 } from "lucide-react";
 import { SheetHeader, SheetTitle, SheetClose } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { TaskTagsList } from "@/components/ui/task-tags-list";
@@ -120,6 +120,7 @@ interface TaskDetailHeaderProps {
   isCheckingStartAi: boolean;
   planChangeSuccess: string | null;
   onOpenHandoff?: () => void;
+  onDeleteClick?: () => void;
   onClose: () => void;
 }
 
@@ -133,6 +134,7 @@ export function TaskDetailHeader({
   isCheckingStartAi,
   planChangeSuccess,
   onOpenHandoff = () => undefined,
+  onDeleteClick,
   onClose,
 }: TaskDetailHeaderProps) {
   const planReviewTarget = (() => {
@@ -312,7 +314,7 @@ export function TaskDetailHeader({
         </AlertBox>
       )}
 
-      {(showPauseButton || canManageOwnership || visibleActions.length > 0) && (
+      {(showPauseButton || canManageOwnership || visibleActions.length > 0 || !!onDeleteClick) && (
         <div className="border border-border bg-background/60 p-3">
           <label className="mb-2 block text-xs text-muted-foreground">Actions</label>
           <div className="flex flex-wrap items-center gap-2">
@@ -351,6 +353,11 @@ export function TaskDetailHeader({
                 {action.event === "start_ai" && isCheckingStartAi ? "Checking..." : action.label}
               </Button>
             ))}
+            {onDeleteClick && (
+              <Button variant="destructive" size="sm" className="gap-1.5" onClick={onDeleteClick}>
+                <Trash2 className="h-3.5 w-3.5" /> Delete task
+              </Button>
+            )}
           </div>
           {planChangeSuccess && (
             <AlertBox variant="success" className="mt-2 px-2 py-1.5 text-xs">
