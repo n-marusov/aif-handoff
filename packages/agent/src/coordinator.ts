@@ -41,10 +41,10 @@ import {
 import { runPlanner } from "./subagents/planner.js";
 import { runImprover } from "./subagents/improver.js";
 import { runPlanChecker } from "./subagents/planChecker.js";
-import { runImplementer } from "./subagents/implementer.js";
+import { runImplementer, hasImplementationNoOp } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
-import { reconcileAllProjectWorktrees } from "./worktreeReconcile.js";
 import { runVerifier } from "./subagents/verifier.js";
+import { reconcileAllProjectWorktrees } from "./worktreeReconcile.js";
 import { runPlanReviewPublisher, taskRequiresPlanReview } from "./planReviewPublisher.js";
 import {
   describeDirtyWorkingTree,
@@ -52,7 +52,7 @@ import {
   projectSupportsTaskWorktrees,
   projectUsesSharedBranchIsolation,
 } from "./gitBranch.js";
-import { flushActivityQueue } from "./hooks.js";
+import { flushActivityQueue, logActivity } from "./hooks.js";
 import {
   notifyTaskBroadcast,
   notifyProjectBroadcast,
@@ -674,6 +674,32 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     }
 
     if (stage.label === "implementer") {
+      const implementationTask = findTaskById(task.id);
+      if (hasImplementationNoOp(implementationTask?.implementationLog)) {
+        const retryAt = new Date().toISOString();
+        setTaskFields(task.id, {
+          reworkRequested: true,
+          autoQueueCommitStatus: "pending",
+          autoQueueCommitBaseSha: null,
+          commitSha: null,
+          autoQueueCommitError: null,
+          autoQueueCommitCompletedAt: null,
+          lastHeartbeatAt: retryAt,
+          updatedAt: retryAt,
+        });
+        logActivity(
+          task.id,
+          "Agent",
+          "[FIX] Approved plan was not implemented; scheduling another implementation attempt",
+        );
+        log.warn(
+          { taskId: task.id },
+          "[FIX] Implementation produced no files after corrective retry; keeping task in implementing for automatic retry",
+        );
+        flushActivityQueue(task.id);
+        return true;
+      }
+
       await publishGitHubTask(task.id, project.rootPath);
       await publishGitLabTask(task.id, project.rootPath);
       flushActivityQueue(task.id);

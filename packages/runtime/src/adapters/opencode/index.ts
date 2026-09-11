@@ -46,6 +46,7 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: true,
   supportsApprovals: false,
   supportsCustomEndpoint: true,
+  supportsWorkspaceTools: true,
   // OpenCode server returns messages but does not surface token counts in its
   // message payload. The run() path never populates RuntimeRunResult.usage,
   // so declare the contract honestly as NONE — dashboards will show this

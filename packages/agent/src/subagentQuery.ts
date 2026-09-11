@@ -572,6 +572,88 @@ function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
   });
 }
 
+function needsWorkspaceTools(workflow: RuntimeWorkflowSpec): boolean {
+  return (
+    workflow.workflowKind === "implementer" &&
+    workflow.requiredCapabilities.includes("supportsWorkspaceTools")
+  );
+}
+
+async function fallbackToWorkspaceToolRuntime(input: {
+  options: SubagentQueryOptions;
+  workflow: RuntimeWorkflowSpec;
+  resolved: ResolvedRuntimeProfile;
+  registry: RuntimeRegistry;
+}): Promise<{ resolved: ResolvedRuntimeProfile; capabilities: RuntimeCapabilities }> {
+  const currentAdapter = input.registry.resolveRuntime(input.resolved.runtimeId);
+  const currentCapabilities = resolveAdapterCapabilities(currentAdapter, input.resolved.transport);
+  if (!needsWorkspaceTools(input.workflow) || currentCapabilities.supportsWorkspaceTools === true) {
+    return { resolved: input.resolved, capabilities: currentCapabilities };
+  }
+
+  const preferredIds = ["claude", "codex", "opencode"];
+  const candidates = input.registry.listRuntimes().sort((left, right) => {
+    const leftIndex = preferredIds.indexOf(left.id);
+    const rightIndex = preferredIds.indexOf(right.id);
+    return (
+      (leftIndex < 0 ? preferredIds.length : leftIndex) -
+      (rightIndex < 0 ? preferredIds.length : rightIndex)
+    );
+  });
+
+  for (const descriptor of candidates) {
+    if (descriptor.id === input.resolved.runtimeId) continue;
+    const candidate = input.registry.resolveRuntime(descriptor.id);
+    const candidateResolved = resolveRuntimeProfile({
+      source: "implementation-capability-fallback",
+      profile: null,
+      workflow: input.workflow,
+      modelOverride: input.options.modelOverride ?? null,
+      fallbackRuntimeId: descriptor.id,
+      fallbackProviderId: descriptor.providerId,
+      suppressModelFallback: input.options.suppressModelFallback,
+      env: process.env,
+      logger: {
+        debug(context, message) {
+          log.debug({ ...context }, `[runtime-resolution] ${message}`);
+        },
+        info(context, message) {
+          log.info({ ...context }, `INFO [runtime-resolution] ${message}`);
+        },
+        warn(context, message) {
+          log.warn({ ...context }, `WARN [runtime-resolution] ${message}`);
+        },
+      },
+    });
+    const candidateCapabilities = resolveAdapterCapabilities(
+      candidate,
+      candidateResolved.transport,
+    );
+    if (candidateCapabilities.supportsWorkspaceTools !== true) continue;
+
+    log.warn(
+      {
+        taskId: input.options.taskId,
+        workflowKind: input.workflow.workflowKind,
+        fromRuntimeId: input.resolved.runtimeId,
+        fromTransport: input.resolved.transport,
+        toRuntimeId: candidateResolved.runtimeId,
+        toTransport: candidateResolved.transport,
+        reason: "selected_runtime_lacks_workspace_tools",
+      },
+      "[FIX] Falling back to a workspace-capable runtime for implementation",
+    );
+    logActivity(
+      input.options.taskId,
+      "Agent",
+      `[FIX] Implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace; using ${candidateResolved.runtimeId}/${candidateResolved.transport}.`,
+    );
+    return { resolved: candidateResolved, capabilities: candidateCapabilities };
+  }
+
+  return { resolved: input.resolved, capabilities: currentCapabilities };
+}
+
 async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   workflow: RuntimeWorkflowSpec;
   runtimeId: string;
@@ -674,15 +756,37 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   }
   const suppressModelFallback = options.suppressModelFallback === true;
 
-  // Resolve adapter after profile — lightModel is NOT injected into the
-  // general resolution chain. Callers that need lightModel (reviewGate)
-  // pass it explicitly via modelOverride.
   const registry = await getRuntimeRegistry();
-  const adapter = registry.resolveRuntime(resolved.runtimeId);
+  const runtimeSelection = await fallbackToWorkspaceToolRuntime({
+    options,
+    workflow,
+    resolved,
+    registry,
+  });
+  const selectionChanged =
+    runtimeSelection.resolved.runtimeId !== resolved.runtimeId ||
+    runtimeSelection.resolved.transport !== resolved.transport ||
+    runtimeSelection.resolved.profileId !== resolved.profileId;
+  resolved = runtimeSelection.resolved;
+  const capabilities = runtimeSelection.capabilities;
 
-  // Use transport-aware capabilities — adapters like Codex expose different
-  // capabilities depending on the active transport (SDK vs CLI vs API).
-  const capabilities = resolveAdapterCapabilities(adapter, resolved.transport);
+  if (stageRuntimePinEnabled && task?.status && (!canUsePinnedSelection || selectionChanged)) {
+    saveTaskActiveRuntimeSelection(options.taskId, {
+      status: task.status,
+      profileMode,
+      source: resolved.source,
+      profileId: resolved.profileId,
+      runtimeId: resolved.runtimeId,
+      providerId: resolved.providerId,
+      transport: resolved.transport,
+      model: resolved.model,
+      baseUrl: resolved.baseUrl,
+      apiKeyEnvVar: resolved.apiKeyEnvVar,
+      headers: resolved.headers,
+      options: resolved.options,
+      pinnedAt: new Date().toISOString(),
+    });
+  }
 
   // Assert hard requirements, but exclude supportsAgentDefinitions —
   // promptPolicy handles fallback to slash commands when agent defs are unsupported.
