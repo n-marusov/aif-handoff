@@ -1,4 +1,6 @@
-import type { RuntimeCapabilities } from "./types.js";
+import { existsSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
+import { RuntimeTransport, type RuntimeCapabilities } from "./types.js";
 import type { RuntimeWorkflowSpec } from "./workflowSpec.js";
 import {
   CODEX_SUBAGENT_STRATEGIES,
@@ -20,6 +22,7 @@ export interface RuntimePromptPolicyInput {
   workflow: RuntimeWorkflowSpec;
   codexNativeSubagentsEnabled?: boolean;
   logger?: RuntimePromptPolicyLogger;
+  transport?: RuntimeTransport;
 }
 
 export interface RuntimePromptPolicyResult {
@@ -29,6 +32,7 @@ export interface RuntimePromptPolicyResult {
   usedFallbackSlashCommand: boolean;
   usedIsolatedSkillCommand: boolean;
   usedNativeSubagentWorkflow: boolean;
+  usedApiSkillExpansion: boolean;
   nativeSubagentFallbackReason?: string;
 }
 
@@ -57,6 +61,82 @@ function prependSlashFallbackPrompt(prompt: string, fallbackSlashCommand: string
   const trimmedPrompt = prompt.trim();
   if (trimmedPrompt.startsWith(trimmedCommand)) return prompt;
   return `${trimmedCommand}\n\n${prompt}`;
+}
+
+const API_SKILL_COMMAND_PATTERN = /^\/(aif-[a-z0-9-]+)(?:\s|$)/i;
+
+const API_SKILL_FALLBACKS: Record<string, string> = {
+  "aif-plan":
+    "Create or refine an implementation-ready markdown checklist plan. Planning is read-only: do not create, modify, or delete project files and do not execute implementation steps. Return actionable unchecked items using '- [ ]'.",
+  "aif-improve":
+    "Improve the existing implementation plan only. Do not implement code or modify product files. Preserve the plan structure and return actionable unchecked checklist items.",
+  "aif-implement":
+    "Implement the requested plan in the current workspace. Make only task-scoped changes, run relevant tests, and report the files changed and validation performed.",
+  "aif-review":
+    "Review the current task diff for correctness, security, regressions, and missing tests. Do not modify files. Return concrete findings with severity and file references.",
+  "aif-security-checklist":
+    "Perform a read-only OWASP-oriented security review of the current task diff. Do not modify files. Return concrete findings with severity, evidence, and remediation.",
+  "aif-verify":
+    "Verify the requested implementation and its tests. Do not modify files. Report blockers, missing work, and validation results in a structured verification summary.",
+  "aif-fix":
+    "Analyze the reported bug and produce a fix plan only unless the command explicitly requests implementation. For plan-first mode, do not modify files and return an unchecked actionable checklist.",
+};
+
+function readApiSkillInstructions(
+  projectRoot: string | null | undefined,
+  skillName: string,
+): { content: string; source: "project" | "fallback" } {
+  const fallback =
+    API_SKILL_FALLBACKS[skillName] ??
+    "Follow the requested workflow as a read-only planning or review task unless the prompt explicitly grants implementation permission. Do not claim to have used tools or changed files when no workspace tool is available.";
+  if (!projectRoot) return { content: fallback, source: "fallback" };
+
+  const skillPath = resolve(projectRoot, ".agents", "skills", skillName, "SKILL.md");
+  const relativeSkillPath = relative(resolve(projectRoot), skillPath);
+  if (relativeSkillPath.startsWith("..") || relativeSkillPath.includes("..")) {
+    return { content: fallback, source: "fallback" };
+  }
+  try {
+    if (!existsSync(skillPath)) return { content: fallback, source: "fallback" };
+    const content = readFileSync(skillPath, "utf8").trim();
+    return content.length > 0
+      ? { content, source: "project" }
+      : { content: fallback, source: "fallback" };
+  } catch {
+    return { content: fallback, source: "fallback" };
+  }
+}
+
+function expandApiSkillCommand(
+  prompt: string,
+  fallbackSlashCommand: string,
+  projectRoot: string | null | undefined,
+  logger?: RuntimePromptPolicyLogger,
+): string {
+  const commandMatch = fallbackSlashCommand.trim().match(API_SKILL_COMMAND_PATTERN);
+  if (!commandMatch) return prompt;
+
+  const skillName = commandMatch[1].toLowerCase();
+  const skill = readApiSkillInstructions(projectRoot, skillName);
+  const command = fallbackSlashCommand.trim();
+  logger?.debug?.(
+    { skillName, source: skill.source, projectRoot: projectRoot ?? null },
+    skill.source === "project"
+      ? "[FIX] Expanded API slash command into skill instructions"
+      : "[FIX] API slash command skill file unavailable; using safe inline fallback",
+  );
+
+  return [
+    "API transport workflow contract:",
+    "The following slash command is a workflow label, not an executable command. Do not claim that the slash command ran and do not invent tool output.",
+    `Requested workflow command: ${command}`,
+    "",
+    "Skill instructions:",
+    skill.content,
+    "",
+    "Apply the workflow instructions to the task context below. The API model has no local workspace tools unless the prompt explicitly provides their results.",
+    prompt,
+  ].join("\n");
 }
 
 function prependNativeSubagentPrompt(
@@ -243,23 +323,32 @@ export function resolveRuntimePromptPolicy(
     );
   }
 
+  const useApiSkillExpansion = input.transport === RuntimeTransport.API && useSlashFallback;
+
   const prompt = useNativeSubagentWorkflow
     ? prependNativeSubagentPrompt(
         input.workflow,
         input.workflow.promptInput.prompt,
         input.workflow.agentDefinitionName ?? "",
       )
-    : useIsolatedSkillCommand
-      ? prependSlashFallbackPrompt(
+    : useApiSkillExpansion
+      ? expandApiSkillCommand(
           input.workflow.promptInput.prompt,
           input.workflow.promptInput.fallbackSlashCommand ?? "",
+          input.projectRoot,
+          input.logger,
         )
-      : useSlashFallback
+      : useIsolatedSkillCommand
         ? prependSlashFallbackPrompt(
             input.workflow.promptInput.prompt,
             input.workflow.promptInput.fallbackSlashCommand ?? "",
           )
-        : input.workflow.promptInput.prompt;
+        : useSlashFallback
+          ? prependSlashFallbackPrompt(
+              input.workflow.promptInput.prompt,
+              input.workflow.promptInput.fallbackSlashCommand ?? "",
+            )
+          : input.workflow.promptInput.prompt;
   const systemPromptAppend = input.workflow.promptInput.systemPromptAppend ?? "";
   const agentDefinitionName = canUseAgentDefinition
     ? input.workflow.agentDefinitionName
@@ -272,6 +361,7 @@ export function resolveRuntimePromptPolicy(
       usedFallbackSlashCommand: useSlashFallback,
       usedIsolatedSkillCommand: useIsolatedSkillCommand,
       usedNativeSubagentWorkflow: useNativeSubagentWorkflow,
+      usedApiSkillExpansion: useApiSkillExpansion,
       nativeSubagentFallbackReason:
         input.runtimeId === "codex" &&
         wantsNativeSubagentWorkflow &&
@@ -298,6 +388,7 @@ export function resolveRuntimePromptPolicy(
     usedFallbackSlashCommand: useSlashFallback,
     usedIsolatedSkillCommand: useIsolatedSkillCommand,
     usedNativeSubagentWorkflow: useNativeSubagentWorkflow,
+    usedApiSkillExpansion: useApiSkillExpansion,
     nativeSubagentFallbackReason:
       input.runtimeId === "codex" &&
       wantsNativeSubagentWorkflow &&

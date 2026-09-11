@@ -35,6 +35,7 @@ import {
   resolveRuntimeProfile,
   resolveRuntimePromptPolicy,
   RuntimeExecutionError,
+  RuntimeTransport,
   RUNTIME_TRUST_TOKEN,
   UsageSource,
   type RuntimeAdapter,
@@ -45,7 +46,6 @@ import {
   type RuntimeRegistryLogger,
   type RuntimeLimitSnapshot,
   type RuntimeSessionReusePolicy,
-  type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
 import {
@@ -559,7 +559,30 @@ export async function resolveAdapterForTask(
 }
 
 function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
-  if (options.workflowSpec) return options.workflowSpec;
+  if (options.workflowSpec) {
+    const workflow = options.workflowSpec;
+    const fallbackSlashCommand = options.fallbackSlashCommand?.trim();
+    if (fallbackSlashCommand && !workflow.promptInput.fallbackSlashCommand?.trim()) {
+      log.debug(
+        {
+          taskId: options.taskId,
+          workflowKind: workflow.workflowKind,
+          fallbackSlashCommand,
+        },
+        "[FIX] Preserved slash fallback supplied alongside explicit workflow spec",
+      );
+      return {
+        ...workflow,
+        promptInput: {
+          ...workflow.promptInput,
+          fallbackSlashCommand,
+        },
+        fallbackStrategy:
+          workflow.fallbackStrategy === "none" ? "slash_command" : workflow.fallbackStrategy,
+      };
+    }
+    return workflow;
+  }
 
   return createRuntimeWorkflowSpec({
     workflowKind: options.workflowKind ?? options.agentName,
@@ -671,6 +694,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   canResume: boolean;
   usedIsolatedSkillCommand: boolean;
   usedNativeSubagentWorkflow: boolean;
+  usedApiSkillExpansion: boolean;
 }> {
   const task = findTaskById(options.taskId);
   const profileMode = options.profileMode ?? "task";
@@ -816,6 +840,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     capabilities,
     runtimeOptions: resolved.options,
     workflow,
+    transport: resolved.transport,
     codexNativeSubagentsEnabled: getEnv().AIF_RUNTIME_CODEX_NATIVE_SUBAGENTS_ENABLED,
     logger: {
       debug(context, message) {
@@ -860,6 +885,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       usedFallbackSlashCommand: promptPolicy.usedFallbackSlashCommand,
       usedIsolatedSkillCommand: promptPolicy.usedIsolatedSkillCommand,
       usedNativeSubagentWorkflow: promptPolicy.usedNativeSubagentWorkflow,
+      usedApiSkillExpansion: promptPolicy.usedApiSkillExpansion,
       nativeSubagentFallbackReason: promptPolicy.nativeSubagentFallbackReason ?? null,
       suppressModelFallback,
       canResume,
@@ -900,6 +926,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     canResume,
     usedIsolatedSkillCommand: promptPolicy.usedIsolatedSkillCommand,
     usedNativeSubagentWorkflow: promptPolicy.usedNativeSubagentWorkflow,
+    usedApiSkillExpansion: promptPolicy.usedApiSkillExpansion,
   };
 }
 
@@ -1018,6 +1045,7 @@ export async function executeSubagentQuery(
         maxBudgetUsd: options.maxBudgetUsd ?? null,
         usedIsolatedSkillCommand: context.usedIsolatedSkillCommand,
         usedNativeSubagentWorkflow: context.usedNativeSubagentWorkflow,
+        usedApiSkillExpansion: context.usedApiSkillExpansion,
       },
     });
 
