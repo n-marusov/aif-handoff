@@ -406,6 +406,21 @@ Rework handling protocol:
   const topReworkHeader = useSubagents ? reworkHeaderBlock : "";
   const bodyReworkHeader = useSubagents ? "" : reworkHeaderBlock;
 
+  const nonSubagentExecutionBlock = useSubagents
+    ? ""
+    : `AUTOMATED EXECUTION INSTRUCTIONS (read carefully):
+This is an automated implementation run. You MUST execute bash commands
+or use file-writing tools to create/modify the required files. Do NOT just
+describe what should be done — actually do it.
+
+1. Read the plan at ${planSection}.
+2. For each pending task in the plan, implement it by running concrete
+   bash commands (echo, mkdir, cat, writeFile, etc.).
+3. After creating/modifying files, verify they exist with ls/cat.
+4. Update the plan's checklist (mark completed tasks as [x]).
+5. If tests are required by the plan, run them and report results.
+6. Output a brief summary of what was created/modified.`;
+
   const prompt = `${topReworkHeader}${useSubagents ? "Implement the task using the provided plan." : implementSlashCommand}
 
 ${
@@ -436,7 +451,9 @@ Execution rules:
 - Respect task dependencies and checklist state from the plan file.
 - Keep plan checklist state accurate while implementing.
 - Run tests/lint/verification relevant to the changes.
-- IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.${fanOutLine}${layerPlanSection}${workerContractBlock}${reworkProtocolBlock}`;
+- IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.${fanOutLine}${layerPlanSection}${workerContractBlock}${
+    useSubagents ? "" : `\n\n${nonSubagentExecutionBlock}`
+  }${reworkProtocolBlock}`;
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "implementer",
     prompt,
