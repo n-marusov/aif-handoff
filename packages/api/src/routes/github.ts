@@ -15,6 +15,7 @@ import {
   recordGitHubRepositorySync,
   setTaskFields,
   updateGitHubPullRequest,
+  updateGitHubPullRequestLastReviewId,
   updateGitHubPullRequestMode,
   updateTaskStatus,
   upsertGitHubRepository,
@@ -250,7 +251,10 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           prState,
           prChecksStatus: checks,
           reviewState: effectiveReviewState,
-          lastReviewId: effectiveReviewId,
+          // lastReviewId is deliberately NOT set here — the plan review
+          // approval check below must succeed before we record the review
+          // ID, otherwise a transient failure in markTaskPlanApproved
+          // would permanently prevent retry on the next sync cycle.
         });
         let task = findTaskById(result.taskId);
         const discoveredPullNeedsDone =
@@ -314,7 +318,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           // sends it back to planning for replanning on the same branch/PR.
           // A COMMENTED review containing "/approve" is treated as approval.
           if (effectiveReviewState === "approved") {
-            markTaskPlanApproved({
+            const approved = markTaskPlanApproved({
               taskId: task.id,
               actor: {
                 kind: "system",
@@ -322,20 +326,41 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
                 displayNameSnapshot: "GitHub Sync",
               },
             });
-            log.info(
-              {
-                taskId: task.id,
+            if (approved.ok) {
+              // Record the review ID only after a successful transition
+              // so a transient failure does not block retry on the next sync.
+              updateGitHubPullRequestLastReviewId({
+                projectId,
                 issueNumber: issue.number,
-                prNumber: pull.number,
-                reviewId: effectiveReviewId,
-                viaComment: Boolean(approveComment),
-              },
-              "GitHub plan review approved; task resumed at implementing",
-            );
+                lastReviewId: effectiveReviewId,
+              });
+              log.info(
+                {
+                  taskId: task.id,
+                  issueNumber: issue.number,
+                  prNumber: pull.number,
+                  reviewId: effectiveReviewId,
+                  viaComment: Boolean(approveComment),
+                },
+                "GitHub plan review approved; task resumed at implementing",
+              );
+            } else {
+              log.error(
+                {
+                  taskId: task.id,
+                  issueNumber: issue.number,
+                  prNumber: pull.number,
+                  reviewId: effectiveReviewId,
+                  code: approved.code,
+                  currentStatus: approved.currentStatus ?? null,
+                },
+                "markTaskPlanApproved failed; task will retry on next sync",
+              );
+            }
           } else if (effectiveReviewState === "changes_requested") {
             const feedback =
               review.body && review.body.trim().length > 0 ? review.body : task.planReviewFeedback;
-            markTaskPlanChangesRequested({
+            const requested = markTaskPlanChangesRequested({
               taskId: task.id,
               feedback,
               actor: {
@@ -344,16 +369,35 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
                 displayNameSnapshot: "GitHub Review",
               },
             });
-            log.info(
-              {
-                taskId: task.id,
+            if (requested.ok) {
+              updateGitHubPullRequestLastReviewId({
+                projectId,
                 issueNumber: issue.number,
-                prNumber: pull.number,
-                reviewId: effectiveReviewId,
-                feedbackLength: feedback?.length ?? 0,
-              },
-              "GitHub plan review requested changes; task returned to planning",
-            );
+                lastReviewId: effectiveReviewId,
+              });
+              log.info(
+                {
+                  taskId: task.id,
+                  issueNumber: issue.number,
+                  prNumber: pull.number,
+                  reviewId: effectiveReviewId,
+                  feedbackLength: feedback?.length ?? 0,
+                },
+                "GitHub plan review requested changes; task returned to planning",
+              );
+            } else {
+              log.error(
+                {
+                  taskId: task.id,
+                  issueNumber: issue.number,
+                  prNumber: pull.number,
+                  reviewId: effectiveReviewId,
+                  code: requested.code,
+                  currentStatus: requested.currentStatus ?? null,
+                },
+                "markTaskPlanChangesRequested failed; task will retry on next sync",
+              );
+            }
           }
         } else if (
           task &&

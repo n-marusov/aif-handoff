@@ -522,3 +522,29 @@ export function getGitHubIssueReviewFingerprint(projectId: string, issueNumber: 
     .where(and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)))
     .get()?.value ?? null;
 }
+
+/**
+ * Update only the lastReviewId field on a GitHub issue record after a plan
+ * review event (approved or changes_requested) has been successfully processed.
+ * This is intentionally a separate, single-field update so the review ID is
+ * NOT recorded until the state transition succeeds — preventing a permanent
+ * skip on retry when markTaskPlanApproved or markTaskPlanChangesRequested
+ * experiences a transient CAS conflict.
+ */
+export function updateGitHubPullRequestLastReviewId(input: {
+  projectId: string;
+  issueNumber: number;
+  lastReviewId: number | null;
+}): GitHubIssueLink | undefined {
+  const now = new Date().toISOString();
+  getDb()
+    .update(githubIssues)
+    .set({ lastReviewId: input.lastReviewId, lastSyncedAt: now, updatedAt: now })
+    .where(and(eq(githubIssues.projectId, input.projectId), eq(githubIssues.issueNumber, input.issueNumber)))
+    .run();
+  log.debug(
+    { projectId: input.projectId, issueNumber: input.issueNumber, lastReviewId: input.lastReviewId },
+    "GitHub pull request lastReviewId updated",
+  );
+  return findGitHubIssue(input.projectId, input.issueNumber);
+}
