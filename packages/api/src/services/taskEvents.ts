@@ -43,7 +43,7 @@ function restoreTaskBranchForMutation(
   if (!task.branchName || task.isFix) return null;
   try {
     // task.branchName is a source-of-truth contract: every mutation path
-    // (fast-fix, regular transition, accept_existing_plan) must land on the
+    // (fast-fix, regular transition) must land on the
     // persisted branch or fail loud. Use `restorePersistedBranch` instead of
     // `ensureFeatureBranch({switchOnly:true})` so config drift
     // (`git.enabled` / `create_branches` toggled off after planner) cannot
