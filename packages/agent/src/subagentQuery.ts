@@ -654,6 +654,28 @@ async function fallbackToWorkspaceToolRuntime(input: {
     );
     if (candidateCapabilities.supportsWorkspaceTools !== true) continue;
 
+    // Verify the candidate is actually configured before falling back.
+    // An ad-hoc profile (profile: null) with no credentials means the runtime
+    // is not configured and will fail at execution time.
+    const isApiTransport = candidateResolved.transport === RuntimeTransport.API;
+    const needsApiKey = isApiTransport || candidateResolved.transport === RuntimeTransport.SDK;
+    const missingCredentials =
+      !candidateResolved.profileId && needsApiKey && !candidateResolved.apiKey;
+    if (missingCredentials) {
+      log.warn(
+        {
+          taskId: input.options.taskId,
+          workflowKind: input.workflow.workflowKind,
+          runtimeId: candidateResolved.runtimeId,
+          transport: candidateResolved.transport,
+          apiKeyEnvVar: candidateResolved.apiKeyEnvVar,
+          hasApiKey: Boolean(candidateResolved.apiKey),
+        },
+        "[FIX] Skipping unconfigured fallback runtime candidate — no API key set",
+      );
+      continue;
+    }
+
     log.warn(
       {
         taskId: input.options.taskId,
@@ -674,6 +696,20 @@ async function fallbackToWorkspaceToolRuntime(input: {
     return { resolved: candidateResolved, capabilities: candidateCapabilities };
   }
 
+  log.warn(
+    {
+      taskId: input.options.taskId,
+      workflowKind: input.workflow.workflowKind,
+      runtimeId: input.resolved.runtimeId,
+      transport: input.resolved.transport,
+    },
+    "[FIX] No configured workspace-capable fallback runtime found — proceeding with original runtime",
+  );
+  logActivity(
+    input.options.taskId,
+    "Agent",
+    `[FIX] Implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace and no configured fallback runtime is available. To use workspace tools, add a runtime profile with workspace capabilities (e.g., Claude SDK) or set the appropriate API key (ANTHROPIC_API_KEY).`,
+  );
   return { resolved: input.resolved, capabilities: currentCapabilities };
 }
 
