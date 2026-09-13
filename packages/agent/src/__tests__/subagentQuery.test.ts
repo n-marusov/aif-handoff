@@ -222,6 +222,7 @@ beforeEach(() => {
   saveTaskActiveRuntimeSelectionMock.mockReset();
   getTaskActiveRuntimeSelectionMock.mockReset();
   getTaskActiveRuntimeSelectionMock.mockReturnValue(null);
+  queryMock.mockReset();
   expireStaleRuntimeWarmupSessionsMock.mockReset();
   expireStaleRuntimeWarmupSessionsMock.mockReturnValue(0);
   findActiveReadyRuntimeWarmupSessionMock.mockReset();
@@ -1708,8 +1709,8 @@ describe("executeSubagentQuery model fallback policy", () => {
       workflowKind: "review-gate",
     });
 
-    const callOptions = queryMock.mock.calls[0][0].options as Record<string, unknown>;
-    expect(callOptions.model).toBe("profile-model");
+    const callInput = queryMock.mock.calls[0][0];
+    expect(callInput.model).toBe("profile-model");
     expect(resolveEffectiveRuntimeProfileMock).toHaveBeenCalled();
     expect(getTaskActiveRuntimeSelectionMock).not.toHaveBeenCalled();
     expect(saveTaskActiveRuntimeSelectionMock).not.toHaveBeenCalled();
@@ -1734,8 +1735,8 @@ describe("executeSubagentQuery model fallback policy", () => {
       workflowKind: "review-gate",
     });
 
-    const callOptions = queryMock.mock.calls[0][0].options as Record<string, unknown>;
-    expect(callOptions.model).toBe("profile-model");
+    const callInput = queryMock.mock.calls[0][0];
+    expect(callInput.model).toBe("profile-model");
     expect(saveTaskActiveRuntimeSelectionMock).toHaveBeenCalledWith(
       "task-1",
       expect.objectContaining({
@@ -1796,9 +1797,9 @@ describe("executeSubagentQuery model fallback policy", () => {
       workflowKind: "review-gate",
     });
 
-    const callOptions = queryMock.mock.calls[0][0].options as Record<string, unknown>;
-    expect(callOptions.model).toBe("pinned-model");
-    expect(callOptions.effort).toBe("medium");
+    const callInput = queryMock.mock.calls[0][0];
+    expect(callInput.model).toBe("pinned-model");
+    expect(callInput.options.effort).toBe("medium");
     expect(resolveEffectiveRuntimeProfileMock).not.toHaveBeenCalled();
     expect(saveTaskActiveRuntimeSelectionMock).not.toHaveBeenCalled();
     delete mockEnvOverrides.AIF_STAGE_RUNTIME_PIN_ENABLED;

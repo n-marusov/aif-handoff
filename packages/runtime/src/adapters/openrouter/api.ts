@@ -9,6 +9,7 @@ import type {
   RuntimeModelListInput,
   RuntimeRunInput,
   RuntimeRunResult,
+  RuntimeToolCall,
   RuntimeUsage,
 } from "../../types.js";
 import { RuntimeExecutionError, type RuntimeExecutionErrorMetadata } from "../../errors.js";
@@ -83,7 +84,14 @@ function resolveApiKey(
   input: RuntimeRunInput | RuntimeConnectionValidationInput | RuntimeModelListInput,
 ): string | null {
   const options = asRecord((input as RuntimeRunInput).options);
-  return readString(options.apiKey) ?? readString(process.env.OPENROUTER_API_KEY);
+  const configuredApiKeyEnvVar =
+    "apiKeyEnvVar" in input
+      ? readString((input as RuntimeRunInput & { apiKeyEnvVar?: string }).apiKeyEnvVar)
+      : null;
+  const apiKeyEnvVar = configuredApiKeyEnvVar ?? readString(options.apiKeyEnvVar);
+  return apiKeyEnvVar
+    ? readString(process.env[apiKeyEnvVar])
+    : (readString(options.apiKey) ?? readString(process.env.OPENROUTER_API_KEY));
 }
 
 function resolveHttpReferer(
@@ -121,7 +129,10 @@ function buildHeaders(
     headers.set("X-Title", appTitle);
   }
 
-  const rawHeaders = asRecord(asRecord((input as RuntimeRunInput).options).headers);
+  const rawHeaders = {
+    ...asRecord(asRecord((input as RuntimeRunInput).options).headers),
+    ...("headers" in input ? asRecord((input as RuntimeRunInput).headers) : {}),
+  };
   for (const [key, value] of Object.entries(rawHeaders)) {
     if (typeof value === "string") {
       headers.set(key, value);
@@ -136,23 +147,32 @@ function buildHeaders(
 // ---------------------------------------------------------------------------
 
 interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  tool_call_id?: string;
+  tool_calls?: RuntimeToolCall[];
 }
 
 function buildMessages(input: RuntimeRunInput): ChatMessage[] {
-  const messages: ChatMessage[] = [];
+  if (input.messages?.length) {
+    return input.messages.map(
+      (message): ChatMessage => ({
+        role: message.role,
+        content: message.content ?? null,
+        ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+        ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
+      }),
+    );
+  }
 
+  const messages: ChatMessage[] = [];
   let systemContent = input.systemPrompt ?? "";
   if (input.execution?.systemPromptAppend) {
     systemContent = systemContent
       ? `${systemContent}\n\n${input.execution.systemPromptAppend}`
       : input.execution.systemPromptAppend;
   }
-  if (systemContent) {
-    messages.push({ role: "system", content: systemContent });
-  }
-
+  if (systemContent) messages.push({ role: "system", content: systemContent });
   messages.push({ role: "user", content: input.prompt });
   return messages;
 }
@@ -163,6 +183,8 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
     messages: buildMessages(input),
     stream,
   };
+  if (input.tools?.length) body.tools = input.tools;
+  if (input.toolChoice) body.tool_choice = input.toolChoice;
 
   if (input.execution?.outputSchema) {
     body.response_format = {
@@ -184,9 +206,75 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
   return body;
 }
 
-// ---------------------------------------------------------------------------
-// Usage normalization
-// ---------------------------------------------------------------------------
+function parseToolCalls(value: unknown): RuntimeToolCall[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((call): RuntimeToolCall[] => {
+    if (!call || typeof call !== "object") return [];
+    const record = call as Record<string, unknown>;
+    const fn = record.function;
+    if (!fn || typeof fn !== "object") return [];
+    const functionRecord = fn as Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof functionRecord.name !== "string") return [];
+    return [
+      {
+        id: record.id,
+        type: "function",
+        function: {
+          name: functionRecord.name,
+          arguments: typeof functionRecord.arguments === "string" ? functionRecord.arguments : "{}",
+        },
+      },
+    ];
+  });
+}
+
+type StreamingToolCallSlot = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
+function collectStreamingToolCallDelta(
+  slots: Map<number, StreamingToolCallSlot>,
+  rawToolCalls: unknown,
+): void {
+  if (!Array.isArray(rawToolCalls)) return;
+  for (const raw of rawToolCalls) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const index = typeof record.index === "number" ? record.index : null;
+    if (index == null) continue;
+    const current = slots.get(index) ?? { id: "", name: "", arguments: "" };
+    if (typeof record.id === "string") current.id = record.id;
+    const fn = record.function;
+    if (fn && typeof fn === "object") {
+      const functionRecord = fn as Record<string, unknown>;
+      if (typeof functionRecord.name === "string") current.name = functionRecord.name;
+      if (typeof functionRecord.arguments === "string") {
+        current.arguments += functionRecord.arguments;
+      }
+    }
+    slots.set(index, current);
+  }
+}
+
+function finalizeStreamingToolCalls(slots: Map<number, StreamingToolCallSlot>): RuntimeToolCall[] {
+  return [...slots.entries()]
+    .sort(([left], [right]) => left - right)
+    .flatMap(([, slot]): RuntimeToolCall[] => {
+      if (!slot.id || !slot.name) return [];
+      return [
+        {
+          id: slot.id,
+          type: "function",
+          function: {
+            name: slot.name,
+            arguments: slot.arguments || "{}",
+          },
+        },
+      ];
+    });
+}
 
 function normalizeUsage(usage: unknown): RuntimeUsage | null {
   if (!usage || typeof usage !== "object") return null;
@@ -417,7 +505,9 @@ export async function runOpenRouterApi(
 
     const payload = rawText.trim().length > 0 ? JSON.parse(rawText) : {};
     const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
-    const outputText = choice?.message?.content ?? "";
+    const message = choice?.message;
+    const outputText = typeof message?.content === "string" ? message.content : "";
+    const toolCalls = parseToolCalls(message?.tool_calls);
     const events: RuntimeEvent[] = [];
     emitLimitSnapshotEvent(input, events, limitSnapshot, logger);
 
@@ -435,6 +525,8 @@ export async function runOpenRouterApi(
       sessionId: payload.id ?? null,
       usage: normalizeUsage(payload.usage),
       ...(events.length > 0 ? { events } : {}),
+      toolCalls,
+      finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
       raw: payload,
     };
   } catch (error) {
@@ -499,6 +591,8 @@ async function runOpenRouterStreamingAttempt(
   let outputText = "";
   let sessionId: string | null = null;
   let usage: RuntimeUsage | null = null;
+  let finishReason: string | null = null;
+  const toolCallSlots = new Map<number, StreamingToolCallSlot>();
   const events: RuntimeEvent[] = [];
   emitLimitSnapshotEvent(input, events, limitSnapshot, logger);
 
@@ -551,6 +645,10 @@ async function runOpenRouterStreamingAttempt(
           }
 
           const delta = parsed.choices?.[0]?.delta;
+          const choiceFinishReason = parsed.choices?.[0]?.finish_reason;
+          if (typeof choiceFinishReason === "string") {
+            finishReason = choiceFinishReason;
+          }
           if (delta?.content) {
             outputText += delta.content;
             const event: RuntimeEvent = {
@@ -561,6 +659,8 @@ async function runOpenRouterStreamingAttempt(
             events.push(event);
             input.execution?.onEvent?.(event);
           }
+
+          collectStreamingToolCallDelta(toolCallSlots, delta?.tool_calls);
 
           if (parsed.usage) {
             usage = normalizeUsage(parsed.usage);
@@ -589,20 +689,15 @@ async function runOpenRouterStreamingAttempt(
     throw err;
   }
 
-  logger?.debug?.(
-    {
-      runtimeId: input.runtimeId,
-      outputLength: outputText.length,
-      eventCount: events.length,
-    },
-    "OpenRouter API streaming run completed",
-  );
+  const toolCalls = finalizeStreamingToolCalls(toolCallSlots);
 
   return {
     outputText,
     sessionId,
     usage,
     events,
+    toolCalls,
+    finishReason,
     raw: { streaming: true, eventCount: events.length },
   };
 }

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { RuntimeExecutionError } from "@aif/runtime";
+import {
+  RuntimeExecutionError,
+  RuntimeCapabilityError,
+  RuntimeResolutionError,
+  RuntimeValidationError,
+} from "@aif/runtime";
 import { isExternalFailure, isFastRetryableFailure, truncateReason } from "../errorClassifier.js";
 
 describe("isExternalFailure", () => {
@@ -27,13 +32,26 @@ describe("isExternalFailure", () => {
     },
   );
 
-  // Secondary path: capability errors (not RuntimeExecutionError)
-  it.each([
-    "runtime capability check failed",
-    "required capabilities not met",
-    "unsupported capabilities for this adapter",
-  ])("returns true for capability error message: %s", (message) => {
-    expect(isExternalFailure(new Error(message))).toBe(true);
+  // Secondary path: capability/configuration errors (not RuntimeExecutionError, use instanceof)
+  const capabilityError = new RuntimeCapabilityError("runtime does not support workspace tools");
+  const resolutionError = new Error("wrapped resolution failure", {
+    cause: new RuntimeResolutionError("profile not found"),
+  });
+  const validationError = new RuntimeValidationError("invalid arguments");
+  const instanceCases: Array<[string, Error, boolean]> = [
+    ["RuntimeCapabilityError", capabilityError, true],
+    ["RuntimeResolutionError (wrapped)", resolutionError, true],
+    ["RuntimeValidationError", validationError, true],
+    ["plain Error with matching text", new Error("runtime capability check failed"), false],
+    ["plain Error with 'required capabilities'", new Error("required capabilities not met"), false],
+    [
+      "plain Error with 'unsupported capabilities'",
+      new Error("unsupported capabilities for this adapter"),
+      false,
+    ],
+  ];
+  it.each(instanceCases)("returns %s for %s", (_label, err, expected) => {
+    expect(isExternalFailure(err)).toBe(expected);
   });
 
   // Plain errors without category are NOT classified as external

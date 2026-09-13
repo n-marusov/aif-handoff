@@ -6,7 +6,13 @@
  * for non-RuntimeExecutionError errors (e.g., RuntimeCapabilityError).
  */
 
-import { RuntimeExecutionError, isExternalFailureCategory } from "@aif/runtime";
+import {
+  RuntimeCapabilityError,
+  RuntimeExecutionError,
+  RuntimeResolutionError,
+  RuntimeValidationError,
+  isExternalFailureCategory,
+} from "@aif/runtime";
 import { BranchIsolationError } from "./gitBranch.js";
 
 export function findBranchIsolationError(err: unknown): BranchIsolationError | null {
@@ -17,12 +23,21 @@ export function findBranchIsolationError(err: unknown): BranchIsolationError | n
   return null;
 }
 
-/** Capability errors surface as RuntimeCapabilityError with these message fragments. */
-const CAPABILITY_FAILURE_PATTERNS = [
-  "runtime capability",
-  "required capabilities",
-  "unsupported capabilities",
-];
+export function findConfigurationError(
+  err: unknown,
+): RuntimeCapabilityError | RuntimeResolutionError | RuntimeValidationError | null {
+  if (
+    err instanceof RuntimeCapabilityError ||
+    err instanceof RuntimeResolutionError ||
+    err instanceof RuntimeValidationError
+  ) {
+    return err;
+  }
+  if (err instanceof Error && "cause" in err && err.cause) {
+    return findConfigurationError(err.cause);
+  }
+  return null;
+}
 
 const FAST_RETRY_PATTERNS: Array<(lower: string) => boolean> = [
   (lower) => lower.includes("stream interrupted before implement-worker dispatch"),
@@ -50,9 +65,9 @@ export function isExternalFailure(err: unknown): boolean {
     return isExternalFailureCategory(runtimeError.category);
   }
 
-  // Secondary: capability errors (RuntimeCapabilityError, not RuntimeExecutionError)
-  const lower = errorText(err);
-  return CAPABILITY_FAILURE_PATTERNS.some((pattern) => lower.includes(pattern));
+  const configurationError = findConfigurationError(err);
+  if (configurationError) return true;
+  return false;
 }
 
 export function isFastRetryableFailure(err: unknown): boolean {

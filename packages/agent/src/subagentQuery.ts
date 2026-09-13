@@ -3,9 +3,12 @@ import {
   createDbUsageSink,
   expireStaleRuntimeWarmupSessions,
   findActiveReadyRuntimeWarmupSession,
+  findRuntimeProfileById,
+  isRuntimeProfileVisibleToProject,
   findTaskById,
   getAppDefaultRuntimeProfileId,
   getTaskActiveRuntimeSelection,
+  clearTaskActiveRuntimeSelection,
   getTaskSessionId,
   persistRuntimeProfileLimitSnapshot,
   renewTaskClaim,
@@ -35,10 +38,13 @@ import {
   resolveRuntimeProfile,
   resolveRuntimePromptPolicy,
   RuntimeExecutionError,
+  RuntimeCapabilityError,
+  RuntimeValidationError,
   RuntimeTransport,
   RUNTIME_TRUST_TOKEN,
   UsageSource,
   type RuntimeAdapter,
+  type RuntimeConversationMessage,
   type RuntimeCapabilities,
   type RuntimeCapabilityName,
   type ResolvedRuntimeProfile,
@@ -56,6 +62,7 @@ import {
   type TaskCurrentTool,
 } from "@aif/shared";
 import { logActivity } from "./hooks.js";
+import { WorkspaceToolExecutor, WORKSPACE_TOOL_DEFINITIONS } from "./workspaceTools.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
 import { LoopGuard } from "./loopGuard.js";
@@ -466,6 +473,40 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isPinnedRuntimeProfileCurrent(
+  selection: ReturnType<typeof getTaskActiveRuntimeSelection>,
+  taskProjectId: string | null | undefined,
+): boolean {
+  if (!selection || !taskProjectId) return false;
+  if (selection.profileId) {
+    const profile = findRuntimeProfileById(selection.profileId);
+    if (!profile || !profile.enabled) return false;
+    if (
+      !isRuntimeProfileVisibleToProject({ projectId: taskProjectId, runtimeProfileId: profile.id })
+    )
+      return false;
+    let profileHeaders: Record<string, string>;
+    let profileOptions: Record<string, unknown>;
+    try {
+      profileHeaders = JSON.parse(profile.headersJson) as Record<string, string>;
+      profileOptions = JSON.parse(profile.optionsJson) as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    return (
+      profile.runtimeId === selection.runtimeId &&
+      profile.providerId === selection.providerId &&
+      (profile.transport ?? null) === selection.transport &&
+      (profile.baseUrl ?? null) === selection.baseUrl &&
+      (profile.apiKeyEnvVar ?? null) === selection.apiKeyEnvVar &&
+      (profile.defaultModel ?? null) === selection.model &&
+      JSON.stringify(profileHeaders) === JSON.stringify(selection.headers) &&
+      JSON.stringify(profileOptions) === JSON.stringify(selection.options)
+    );
+  }
+  return selection != null;
+}
+
 function hydratePinnedRuntimeProfile(
   selection: ReturnType<typeof getTaskActiveRuntimeSelection>,
   workflow: RuntimeWorkflowSpec,
@@ -608,109 +649,38 @@ async function fallbackToWorkspaceToolRuntime(input: {
   resolved: ResolvedRuntimeProfile;
   registry: RuntimeRegistry;
 }): Promise<{ resolved: ResolvedRuntimeProfile; capabilities: RuntimeCapabilities }> {
-  const currentAdapter = input.registry.resolveRuntime(input.resolved.runtimeId);
-  const currentCapabilities = resolveAdapterCapabilities(currentAdapter, input.resolved.transport);
-  if (!needsWorkspaceTools(input.workflow) || currentCapabilities.supportsWorkspaceTools === true) {
-    return { resolved: input.resolved, capabilities: currentCapabilities };
+  const adapter = input.registry.resolveRuntime(input.resolved.runtimeId);
+  const capabilities = resolveAdapterCapabilities(adapter, input.resolved.transport);
+  if (
+    !needsWorkspaceTools(input.workflow) ||
+    capabilities.supportsWorkspaceTools === true ||
+    capabilities.supportsToolCalling === true
+  ) {
+    return { resolved: input.resolved, capabilities };
   }
 
-  const preferredIds = ["claude", "codex", "opencode"];
-  const candidates = input.registry.listRuntimes().sort((left, right) => {
-    const leftIndex = preferredIds.indexOf(left.id);
-    const rightIndex = preferredIds.indexOf(right.id);
-    return (
-      (leftIndex < 0 ? preferredIds.length : leftIndex) -
-      (rightIndex < 0 ? preferredIds.length : rightIndex)
-    );
-  });
-
-  for (const descriptor of candidates) {
-    if (descriptor.id === input.resolved.runtimeId) continue;
-    const candidate = input.registry.resolveRuntime(descriptor.id);
-    const candidateResolved = resolveRuntimeProfile({
-      source: "implementation-capability-fallback",
-      profile: null,
-      workflow: input.workflow,
-      modelOverride: input.options.modelOverride ?? null,
-      fallbackRuntimeId: descriptor.id,
-      fallbackProviderId: descriptor.providerId,
-      suppressModelFallback: input.options.suppressModelFallback,
-      env: process.env,
-      logger: {
-        debug(context, message) {
-          log.debug({ ...context }, `[runtime-resolution] ${message}`);
-        },
-        info(context, message) {
-          log.info({ ...context }, `INFO [runtime-resolution] ${message}`);
-        },
-        warn(context, message) {
-          log.warn({ ...context }, `WARN [runtime-resolution] ${message}`);
-        },
-      },
-    });
-    const candidateCapabilities = resolveAdapterCapabilities(
-      candidate,
-      candidateResolved.transport,
-    );
-    if (candidateCapabilities.supportsWorkspaceTools !== true) continue;
-
-    // Verify the candidate is actually configured before falling back.
-    // An ad-hoc profile (profile: null) with no credentials means the runtime
-    // is not configured and will fail at execution time.
-    const isApiTransport = candidateResolved.transport === RuntimeTransport.API;
-    const needsApiKey = isApiTransport || candidateResolved.transport === RuntimeTransport.SDK;
-    const missingCredentials =
-      !candidateResolved.profileId && needsApiKey && !candidateResolved.apiKey;
-    if (missingCredentials) {
-      log.warn(
-        {
-          taskId: input.options.taskId,
-          workflowKind: input.workflow.workflowKind,
-          runtimeId: candidateResolved.runtimeId,
-          transport: candidateResolved.transport,
-          apiKeyEnvVar: candidateResolved.apiKeyEnvVar,
-          hasApiKey: Boolean(candidateResolved.apiKey),
-        },
-        "[FIX] Skipping unconfigured fallback runtime candidate — no API key set",
-      );
-      continue;
-    }
-
-    log.warn(
-      {
-        taskId: input.options.taskId,
-        workflowKind: input.workflow.workflowKind,
-        fromRuntimeId: input.resolved.runtimeId,
-        fromTransport: input.resolved.transport,
-        toRuntimeId: candidateResolved.runtimeId,
-        toTransport: candidateResolved.transport,
-        reason: "selected_runtime_lacks_workspace_tools",
-      },
-      "[FIX] Falling back to a workspace-capable runtime for implementation",
-    );
-    logActivity(
-      input.options.taskId,
-      "Agent",
-      `[FIX] Implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace; using ${candidateResolved.runtimeId}/${candidateResolved.transport}.`,
-    );
-    return { resolved: candidateResolved, capabilities: candidateCapabilities };
-  }
-
+  // A runtime profile selected in the GUI is authoritative. Never replace it
+  // with an adapter discovered in the registry: registration is not proof that
+  // the runtime is configured, authenticated, or approved for this project.
   log.warn(
     {
       taskId: input.options.taskId,
       workflowKind: input.workflow.workflowKind,
       runtimeId: input.resolved.runtimeId,
+      providerId: input.resolved.providerId,
+      profileId: input.resolved.profileId,
       transport: input.resolved.transport,
     },
-    "[FIX] No configured workspace-capable fallback runtime found — proceeding with original runtime",
+    "[FIX] Selected runtime lacks workspace execution capability; refusing implicit runtime fallback",
   );
   logActivity(
     input.options.taskId,
     "Agent",
-    `[FIX] Implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace and no configured fallback runtime is available. To use workspace tools, add a runtime profile with workspace capabilities (e.g., Claude SDK) or set the appropriate API key (ANTHROPIC_API_KEY).`,
+    `[FIX] Selected implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace. Configure a workspace-capable GUI runtime profile or enable API tool execution.`,
   );
-  return { resolved: input.resolved, capabilities: currentCapabilities };
+  throw new RuntimeCapabilityError(
+    `Selected runtime "${input.resolved.runtimeId}" does not support workspace tools for workflow "${input.workflow.workflowKind}"`,
+  );
 }
 
 async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
@@ -745,9 +715,19 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     task?.status != null &&
     pinnedSelection.status === task.status &&
     pinnedSelection.profileMode === profileMode;
-  let resolved = canUsePinnedSelection
-    ? hydratePinnedRuntimeProfile(pinnedSelection, workflow)
-    : null;
+  if (!isPinnedRuntimeProfileCurrent(pinnedSelection, task?.projectId)) {
+    if (canUsePinnedSelection) {
+      log.warn(
+        { taskId: options.taskId, profileId: pinnedSelection?.profileId ?? null },
+        "[FIX] Discarding stale or unavailable pinned runtime profile",
+      );
+      clearTaskActiveRuntimeSelection(options.taskId);
+    }
+  }
+  let resolved =
+    canUsePinnedSelection && isPinnedRuntimeProfileCurrent(pinnedSelection, task?.projectId)
+      ? hydratePinnedRuntimeProfile(pinnedSelection, workflow)
+      : null;
 
   if (!resolved) {
     const effective = resolveEffectiveRuntimeProfile({
@@ -851,7 +831,9 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   // Assert hard requirements, but exclude supportsAgentDefinitions —
   // promptPolicy handles fallback to slash commands when agent defs are unsupported.
   const hardRequired = workflow.requiredCapabilities.filter(
-    (cap) => cap !== "supportsAgentDefinitions",
+    (cap) =>
+      cap !== "supportsAgentDefinitions" &&
+      !(cap === "supportsWorkspaceTools" && capabilities.supportsToolCalling === true),
   );
   if (hardRequired.length > 0) {
     assertRuntimeCapabilities({
@@ -1293,7 +1275,23 @@ export async function executeSubagentQuery(
         workflowKind: context.workflow.workflowKind,
         transport: context.transport,
         prompt: context.prompt,
-        model: context.model ?? undefined,
+        messages:
+          context.transport === RuntimeTransport.API && context.capabilities.supportsToolCalling
+            ? ([
+                ...(context.systemPromptAppend
+                  ? [{ role: "system" as const, content: context.systemPromptAppend }]
+                  : []),
+                { role: "user" as const, content: context.prompt },
+              ] satisfies RuntimeConversationMessage[])
+            : undefined,
+        tools:
+          context.transport === RuntimeTransport.API && context.capabilities.supportsToolCalling
+            ? WORKSPACE_TOOL_DEFINITIONS
+            : undefined,
+        toolChoice:
+          context.transport === RuntimeTransport.API && context.capabilities.supportsToolCalling
+            ? ("auto" as const)
+            : undefined,
         sessionId: existingSessionId,
         resume: shouldResume,
         projectRoot,
@@ -1316,11 +1314,43 @@ export async function executeSubagentQuery(
             sourceSessionId: warmupSourceSessionId,
           });
           usedWarmupFork = true;
+        } else if (shouldResume && adapter.resume) {
+          result = await adapter.resume({ ...runInput, sessionId: existingSessionId as string });
         } else {
-          result =
-            shouldResume && adapter.resume
-              ? await adapter.resume({ ...runInput, sessionId: existingSessionId as string })
-              : await adapter.run(runInput);
+          const toolExecutor =
+            context.transport === RuntimeTransport.API && context.capabilities.supportsToolCalling
+              ? new WorkspaceToolExecutor(projectRoot)
+              : null;
+          let conversation: RuntimeConversationMessage[] | undefined = runInput.messages;
+          for (let toolStep = 0; ; toolStep += 1) {
+            if (toolStep >= 20) {
+              throw new RuntimeValidationError("Workspace tool loop exceeded 20 steps");
+            }
+            const currentInput = conversation ? { ...runInput, messages: conversation } : runInput;
+            result = await adapter.run(currentInput);
+            const toolCalls = result.toolCalls ?? [];
+            if (!toolExecutor || toolCalls.length === 0) break;
+            conversation = [
+              ...(conversation ?? []),
+              {
+                role: "assistant" as const,
+                content: result.outputText ?? null,
+                toolCalls,
+              },
+            ];
+            for (const toolCall of toolCalls) {
+              const toolResult = await toolExecutor
+                .execute(toolCall)
+                .catch(
+                  (error) => `ERROR: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              conversation.push({
+                role: "tool" as const,
+                toolCallId: toolCall.id,
+                content: toolResult.slice(0, 8_000),
+              });
+            }
+          }
         }
         // Success — break out of retry loop
         watchdog.clear();

@@ -58,7 +58,7 @@ export function releaseDueBlockedTasks(): void {
         blockedReason: null,
         blockedFromStatus: null,
         retryAfter: null,
-        retryCount: 0,
+        retryCount: task.retryCount ?? 0,
       },
       actor: WATCHDOG_ACTOR,
       action: "task.watchdog_released",

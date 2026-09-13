@@ -17,6 +17,7 @@ import { logActivity } from "./hooks.js";
 import { AiLoopDetectedError } from "./loopGuard.js";
 import {
   findBranchIsolationError,
+  findConfigurationError,
   findRuntimeExecutionError,
   isExternalFailure,
   isFastRetryableFailure,
@@ -29,6 +30,7 @@ const log = logger("stage-error-handler");
 type RetryAfterSource = "resetAt" | "retryAfterSeconds" | "random_backoff" | "none";
 
 const NON_RETRYABLE_RUNTIME_CATEGORIES = new Set([
+  "auth",
   "model_not_found",
   "context_length",
   "content_filter",
@@ -268,6 +270,33 @@ export function classifyStageError(input: StageErrorInput): ErrorRecovery {
         worktreeSnapshot: buildWorktreeSnapshot(branchErr.projectRoot),
       },
       "Subagent stage aborted due to branch isolation failure",
+    );
+    return {
+      kind: "blocked_external",
+      blockedReason,
+      retryAfter: null,
+      retryAfterSource: "none",
+      retryCount: input.retryCount ?? 0,
+      limitSnapshot: null,
+    };
+  }
+
+  const configurationError = findConfigurationError(err);
+  if (configurationError) {
+    const blockedReason = "Runtime configuration or capability requires manual action.";
+    logActivity(
+      taskId,
+      "Agent",
+      `coordinator moved to blocked_external from ${sourceStatus} at ${stageLabel}; retryAfter=manual; source=none; reason=${truncateReason(blockedReason)}`,
+    );
+    log.warn(
+      {
+        taskId,
+        stage: stageLabel,
+        errorName: configurationError.name,
+        code: configurationError.code,
+      },
+      "Subagent failed with non-retryable runtime configuration error",
     );
     return {
       kind: "blocked_external",

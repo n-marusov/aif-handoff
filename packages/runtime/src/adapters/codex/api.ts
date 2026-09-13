@@ -8,6 +8,7 @@ import type {
   RuntimeModelListInput,
   RuntimeRunInput,
   RuntimeRunResult,
+  RuntimeToolCall,
   RuntimeUsage,
 } from "../../types.js";
 import { redactProviderText, redactProviderTextForLogs } from "@aif/shared";
@@ -214,23 +215,31 @@ async function fetchWithRetries(
 // ---------------------------------------------------------------------------
 
 interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  tool_call_id?: string;
+  tool_calls?: RuntimeToolCall[];
 }
 
 function buildMessages(input: RuntimeRunInput): ChatMessage[] {
+  if (input.messages?.length) {
+    return input.messages.map(
+      (message): ChatMessage => ({
+        role: message.role,
+        content: message.content ?? null,
+        ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+        ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
+      }),
+    );
+  }
   const messages: ChatMessage[] = [];
-
   let systemContent = input.systemPrompt ?? "";
   if (input.execution?.systemPromptAppend) {
     systemContent = systemContent
       ? `${systemContent}\n\n${input.execution.systemPromptAppend}`
       : input.execution.systemPromptAppend;
   }
-  if (systemContent) {
-    messages.push({ role: "system", content: systemContent });
-  }
-
+  if (systemContent) messages.push({ role: "system", content: systemContent });
   messages.push({ role: "user", content: input.prompt });
   return messages;
 }
@@ -241,6 +250,8 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
     messages: buildMessages(input),
     stream,
   };
+  if (input.tools?.length) body.tools = input.tools;
+  if (input.toolChoice) body.tool_choice = input.toolChoice;
 
   if (input.execution?.outputSchema) {
     body.response_format = {
@@ -256,9 +267,63 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
   return body;
 }
 
-// ---------------------------------------------------------------------------
-// Usage normalization
-// ---------------------------------------------------------------------------
+function parseToolCalls(value: unknown): RuntimeToolCall[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((call): RuntimeToolCall[] => {
+    if (!call || typeof call !== "object") return [];
+    const record = call as Record<string, unknown>;
+    const fn = record.function;
+    if (!fn || typeof fn !== "object" || typeof record.id !== "string") return [];
+    const functionRecord = fn as Record<string, unknown>;
+    if (typeof functionRecord.name !== "string") return [];
+    return [
+      {
+        id: record.id,
+        type: "function",
+        function: {
+          name: functionRecord.name,
+          arguments: typeof functionRecord.arguments === "string" ? functionRecord.arguments : "{}",
+        },
+      },
+    ];
+  });
+}
+
+type StreamingToolCallSlot = { id: string; name: string; arguments: string };
+function collectStreamingToolCallDelta(
+  slots: Map<number, StreamingToolCallSlot>,
+  raw: unknown,
+): void {
+  if (!Array.isArray(raw)) return;
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.index !== "number") continue;
+    const slot = slots.get(record.index) ?? { id: "", name: "", arguments: "" };
+    if (typeof record.id === "string") slot.id = record.id;
+    if (record.function && typeof record.function === "object") {
+      const fn = record.function as Record<string, unknown>;
+      if (typeof fn.name === "string") slot.name = fn.name;
+      if (typeof fn.arguments === "string") slot.arguments += fn.arguments;
+    }
+    slots.set(record.index, slot);
+  }
+}
+function finalizeStreamingToolCalls(slots: Map<number, StreamingToolCallSlot>): RuntimeToolCall[] {
+  return [...slots.entries()]
+    .sort(([a], [b]) => a - b)
+    .flatMap(([, slot]): RuntimeToolCall[] =>
+      slot.id && slot.name
+        ? [
+            {
+              id: slot.id,
+              type: "function",
+              function: { name: slot.name, arguments: slot.arguments || "{}" },
+            },
+          ]
+        : [],
+    );
+}
 
 function normalizeUsage(usage: unknown): RuntimeUsage | null {
   if (!usage || typeof usage !== "object") return null;
@@ -435,7 +500,9 @@ export async function runCodexAgentApi(
 
     const payload = rawText.trim().length > 0 ? JSON.parse(rawText) : {};
     const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
-    const outputText = choice?.message?.content ?? "";
+    const message = choice?.message;
+    const outputText = typeof message?.content === "string" ? message.content : "";
+    const toolCalls = parseToolCalls(message?.tool_calls);
     const events: RuntimeEvent[] = [];
     emitLimitSnapshotEvent(input, events, limitSnapshot, logger);
 
@@ -453,6 +520,8 @@ export async function runCodexAgentApi(
       sessionId: payload.id ?? null,
       usage: normalizeUsage(payload.usage),
       ...(events.length > 0 ? { events } : {}),
+      toolCalls,
+      finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null,
       raw: payload,
     };
   } catch (error) {
@@ -529,6 +598,8 @@ async function runCodexStreamingAttempt(
   let outputText = "";
   let sessionId: string | null = null;
   let usage: RuntimeUsage | null = null;
+  let finishReason: string | null = null;
+  const toolCallSlots = new Map<number, StreamingToolCallSlot>();
   const events: RuntimeEvent[] = [];
   emitLimitSnapshotEvent(input, events, limitSnapshot, logger);
 
@@ -581,6 +652,8 @@ async function runCodexStreamingAttempt(
           }
 
           const delta = parsed.choices?.[0]?.delta;
+          const choiceFinishReason = parsed.choices?.[0]?.finish_reason;
+          if (typeof choiceFinishReason === "string") finishReason = choiceFinishReason;
           if (delta?.content) {
             outputText += delta.content;
             const event: RuntimeEvent = {
@@ -591,6 +664,8 @@ async function runCodexStreamingAttempt(
             events.push(event);
             input.execution?.onEvent?.(event);
           }
+
+          collectStreamingToolCallDelta(toolCallSlots, delta?.tool_calls);
 
           if (parsed.usage) {
             usage = normalizeUsage(parsed.usage);
@@ -628,11 +703,14 @@ async function runCodexStreamingAttempt(
     "OpenAI API streaming run completed",
   );
 
+  const toolCalls = finalizeStreamingToolCalls(toolCallSlots);
   return {
     outputText,
     sessionId,
     usage,
     events,
+    toolCalls,
+    finishReason,
     raw: { streaming: true, eventCount: events.length },
   };
 }

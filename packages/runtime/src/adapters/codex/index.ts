@@ -142,6 +142,7 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   supportsApprovals: false,
   supportsCustomEndpoint: true,
   supportsWorkspaceTools: false,
+  supportsToolCalling: true,
   supportsIsolatedSubagentWorkflows: false,
   supportsNativeSubagentWorkflows: false,
   usageReporting: UsageReporting.FULL,

@@ -142,6 +142,7 @@ data/                    # SQLite database files (gitignored)
 | GitHub Demo     | docs/github-demo.md     | GitHub.com + router.ai runbook (Plan Review PR Gate) |
 | GitLab Demo     | docs/gitlab-demo.md     | End-to-end GitLab.com + router.ai demo runbook       |
 | Dev GUI Demo    | docs/dev-gui-demo.md    | Local dev + Web UI GitLab/router.ai runbook          |
+| Vision & Scope  | docs/vision.md          | Product vision, scope, and business context          |
 
 ## AI Context Files
 

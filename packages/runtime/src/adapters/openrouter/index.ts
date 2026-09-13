@@ -48,6 +48,7 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   supportsApprovals: false,
   supportsCustomEndpoint: true,
   supportsWorkspaceTools: false,
+  supportsToolCalling: true,
   usageReporting: UsageReporting.FULL,
 };
 

@@ -105,6 +105,8 @@ export interface RuntimeCapabilities {
   supportsSessionList: boolean;
   /** Adapter can execute workspace/file edits through local or server-side tools. */
   supportsWorkspaceTools?: boolean;
+  /** Adapter supports OpenAI-compatible function/tool calls returned to the host for local execution. */
+  supportsToolCalling?: boolean;
   /** Adapter supports .claude/agents/ definitions (agentDefinitionName in execution intent). */
   supportsAgentDefinitions: boolean;
   /** Adapter emits streaming events during run(). */
@@ -150,6 +152,7 @@ export const DEFAULT_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
   supportsApprovals: false,
   supportsCustomEndpoint: false,
   supportsWorkspaceTools: false,
+  supportsToolCalling: false,
   supportsIsolatedSubagentWorkflows: false,
   supportsNativeSubagentWorkflows: false,
   usageReporting: UsageReporting.NONE,
@@ -259,6 +262,31 @@ export interface RuntimeUsageContext {
   chatSessionId?: string | null;
 }
 
+export interface RuntimeToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface RuntimeToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface RuntimeConversationMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  toolCallId?: string;
+  toolCalls?: RuntimeToolCall[];
+}
+
 export interface RuntimeRunInput {
   runtimeId: string;
   providerId?: string;
@@ -266,6 +294,10 @@ export interface RuntimeRunInput {
   workflowKind?: string;
   transport?: RuntimeTransport;
   prompt: string;
+  /** Full conversation for API tool loops; adapters fall back to prompt when omitted. */
+  messages?: RuntimeConversationMessage[];
+  tools?: RuntimeToolDefinition[];
+  toolChoice?: "auto" | "none" | "required" | Record<string, unknown>;
   systemPrompt?: string;
   model?: string;
   sessionId?: string | null;
@@ -351,6 +383,8 @@ export interface RuntimeRunResult {
    */
   usage: RuntimeUsage | null;
   raw?: unknown;
+  toolCalls?: RuntimeToolCall[];
+  finishReason?: string | null;
 }
 
 /**
