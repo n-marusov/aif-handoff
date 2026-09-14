@@ -270,7 +270,7 @@ export {
   type WorktreeEntry,
 } from "./gitIsolation.js";
 
-export { buildCommitPrompt } from "./commitWorkflow.js";
+export { buildAutoQueueCommitPrompt, buildCommitPrompt } from "./commitWorkflow.js";
 
 // Attachment utilities
 export {

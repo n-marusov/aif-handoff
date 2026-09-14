@@ -72,13 +72,13 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 
 ## Текущее состояние
 
-На 2026-09-14 в каталоге **24 NFR**: формализация выполнена реверс-инжинирингом из кода и документации. Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
+На 2026-09-14 в каталоге **25 NFR**: формализация выполнена реверс-инжинирингом из кода и документации. Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
 
 | Показатель              | Значение                                                |
 | ----------------------- | ------------------------------------------------------- |
-| NFR всего (файлов)      | 24                                                      |
-| По приоритетам          | P0 — 4 · P1 — 13 · P2 — 7                               |
-| По классу               | `as is` — 16 · `to be` — 8                              |
+| NFR всего (файлов)      | 25                                                      |
+| По приоритетам          | P0 — 4 · P1 — 14 · P2 — 7                               |
+| По классу               | `as is` — 16 · `to be` — 9                              |
 | Покрытие областей       | api · security · data · infra · ops · integration       |
 | Покрытие квалификаторов | performance · availability · observability · compliance |
 
@@ -111,6 +111,7 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 | `REQ-NFR-api.compliance.rate-limit-requests`                 | P2        | to be | Rate-limit HTTP API (Фаза 3)                                   |
 | `REQ-NFR-ops.observability.activity-log-batching`            | P2        | as is | Пакетная запись activity log                                   |
 | `REQ-NFR-ops.observability.tool-error-readability`           | P1        | to be | Ошибки workspace tools возвращаются модели в читаемом формате  |
+| `REQ-NFR-infra.performance.implementation-commit-latency`    | P1        | to be | Коммит изменений реализации выполняется за ≤5 с (fallback)     |
 | `REQ-NFR-infra.compliance.worktree-isolation`                | P2        | as is | Git-worktree изоляция параллельных задач                       |
 
 ## Правила оформления

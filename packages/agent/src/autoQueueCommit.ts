@@ -2,7 +2,7 @@ import { appendTaskActivityLog, findTaskById, getAutoQueueMode, setTaskFields } 
 import { createRuntimeWorkflowSpec, UsageSource } from "@aif/runtime";
 import {
   assertCurrentBranch,
-  buildCommitPrompt,
+  buildAutoQueueCommitPrompt,
   countCommitsBetween,
   describeDirtyWorkingTree,
   getHeadCommitSha,
@@ -174,7 +174,7 @@ export async function ensureAutoQueueTaskCommit(input: {
     updatedAt: new Date().toISOString(),
   });
 
-  const prompt = buildCommitPrompt(false);
+  const prompt = buildAutoQueueCommitPrompt();
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "commit",
     prompt,
