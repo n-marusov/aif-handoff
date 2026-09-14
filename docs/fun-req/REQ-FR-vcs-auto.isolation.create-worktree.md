@@ -28,6 +28,7 @@
 8. Для autoQueue-проектов используется единый worktree с общим auto-queue коммитом.
 9. `worktreeReconcile.ts` и `worktreeLifecycle.ts` находят и очищают осиротевшие worktree-ы (stash-before-remove).
 10. `isFix=true` может использовать общую ветку с быстрым коммитом.
+11. Если `config.base_branch = "main"` не существует локально, Coordinator определяет базовую ветку по цепочке fallback: `origin/HEAD → "master" → getCurrentBranch() (HEAD)`. При неудаче всех шагов задача блокируется с `blocked_external` и кодом `base_branch_unavailable`.
 
 ## See Also
 

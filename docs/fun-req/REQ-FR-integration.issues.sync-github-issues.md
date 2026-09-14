@@ -19,13 +19,14 @@
 **Критерии приёмки:**
 
 1. Coordinator запускает синхронизацию по расписанию или по запросу (`synchronizeGitHubProjects` / `synchronizeGitLabProjects`).
-2. GitHubWorkflow читает конфигурацию репозитория (`githubRepositories`).
-3. Запрашивает Issues и MR через GitHub REST API / GitLab API.
-4. Обновляет `githubIssues`: создаёт новые записи, обновляет существующие (upsert).
-5. Пытается связать Issues с задачами AIF Handoff (по title/description/assignee).
-6. Обновляет статусы PR: открыт/закрыт/merged, CI-checks.
-7. Если `githubRepositories.enabled=false` — синхронизация пропускается.
-8. При ошибке `syncError` сохраняется для диагностики.
+2. Перед синхронизацией выполняется best-effort `git pull --ff-only origin <current-branch>` в локальном репозитории проекта (`pullDefaultBranch`). Неудача (нет remote, detached HEAD, пустой репозиторий, конфликт) не блокирует синхронизацию.
+3. GitHubWorkflow читает конфигурацию репозитория (`githubRepositories`).
+4. Запрашивает Issues и MR через GitHub REST API / GitLab API.
+5. Обновляет `githubIssues`: создаёт новые записи, обновляет существующие (upsert).
+6. Пытается связать Issues с задачами AIF Handoff (по title/description/assignee).
+7. Обновляет статусы PR: открыт/закрыт/merged, CI-checks.
+8. Если `githubRepositories.enabled=false` — синхронизация пропускается.
+9. При ошибке `syncError` сохраняется для диагностики.
 
 ## See Also
 

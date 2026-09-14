@@ -36,17 +36,19 @@ sequenceDiagram
 **Основной поток:**
 
 1. Coordinator запускает синхронизацию по расписанию или по запросу.
-2. GitHubWorkflow читает конфигурацию репозитория (`githubRepositories`).
-3. Запрашивает Issues и MR через GitHub REST API.
-4. Обновляет `githubIssues`: создаёт новые записи, обновляет существующие.
-5. Пытается связать Issues с задачами AIF Handoff (по title/description/assignee).
-6. Обновляет статусы PR: открыт/закрыт/merged, CI-checks.
+2. Best-effort `git pull --ff-only origin <current-branch>` в локальном репозитории проекта — обновление рабочей копии до состояния remote. Неудача (нет remote, пустой репозиторий, конфликт) не блокирует синхронизацию.
+3. GitHubWorkflow читает конфигурацию репозитория (`githubRepositories`).
+4. Запрашивает Issues и MR через GitHub REST API.
+5. Обновляет `githubIssues`: создаёт новые записи, обновляет существующие.
+6. Пытается связать Issues с задачами AIF Handoff (по title/description/assignee).
+7. Обновляет статусы PR: открыт/закрыт/merged, CI-checks.
 
 **Альтернативные потоки:**
 
 - **A1. GitLab:** `gitlabWorkflow.ts` — аналогичная синхронизация с GitLab Issues/MR.
 - **A2. Sync disabled:** `githubRepositories.enabled=false` — синхронизация пропускается.
 - **A3. Error:** `syncError` сохраняется для диагностики.
+- **A4. Git pull unavailable:** нет remote `origin`, detached HEAD или пустой репозиторий — `pullDefaultBranch` логирует причину на debug-уровне и продолжает синхронизацию без ошибки.
 
 **Постусловия:** GitHub Issues синхронизированы с задачами AIF Handoff.
 

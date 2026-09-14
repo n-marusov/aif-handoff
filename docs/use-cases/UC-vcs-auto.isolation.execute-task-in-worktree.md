@@ -52,6 +52,15 @@ sequenceDiagram
 - **A2. AutoQueue shared worktree:** для autoQueue-проектов используется единый worktree с общим auto-queue коммитом.
 - **A3. Stale worktree:** `worktreeReconcile.ts` и `worktreeLifecycle.ts` находят и очищают осиротевшие worktree-ы.
 - **A4. Branchless fix:** `isFix=true` может использовать общую ветку с быстрым коммитом.
+- **A5. Base branch resolution fallback:** Если `config.base_branch = "main"` не существует
+  локально, Coordinator определяет базовую ветку по цепочке fallback:
+  1. `origin/HEAD` (символическая ссылка remote, указывает на ветку по умолчанию).
+  2. Локальная ветка `"master"` (легаси-ветка, исторически стандартное имя).
+  3. `getCurrentBranch()` — чтение HEAD репозитория напрямую.
+     Это покрывает пустые репозитории ("No commits yet"), где `git show-ref` не находит
+     репозитории с нестандартным именем главной ветки ("master", "trunk",
+     "develop"). При неудаче всех шагов задача блокируется с `blocked_external` и
+     кодом `base_branch_unavailable`.
 
 **Постусловия:** Worktree создан и изолирован. Путь и ветка сохранены. Worktree будет очищен при завершении задачи.
 
