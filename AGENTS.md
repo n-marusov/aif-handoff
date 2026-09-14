@@ -130,23 +130,24 @@ data/                    # SQLite database files (gitignored)
 
 ## Documentation
 
-| Document        | Path                          | Description                                               |
-| --------------- | ----------------------------- | --------------------------------------------------------- |
-| README          | README.md                     | Project landing page                                      |
-| Getting Started | docs/getting-started.md       | Installation, setup, first steps                          |
-| Architecture    | docs/architecture.md          | Agent pipeline, state machine, data flow                  |
-| ADR             | docs/adr/README.md            | Architecture Decision Records (13 as-is decisions)        |
-| API Reference   | docs/api.md                   | REST endpoints, WebSocket events                          |
-| Configuration   | docs/configuration.md         | Environment variables, logging, auth                      |
-| Providers       | docs/providers.md             | Runtime profiles and adapter capabilities                 |
-| MCP Sync        | docs/mcp-sync.md              | MCP tools, transports, and authentication                 |
-| GitHub Demo     | docs/github-demo.md           | GitHub.com + router.ai runbook (Plan Review PR Gate)      |
-| GitLab Demo     | docs/gitlab-demo.md           | End-to-end GitLab.com + router.ai demo runbook            |
-| Dev GUI Demo    | docs/dev-gui-demo.md          | Local dev + Web UI GitLab/router.ai runbook               |
-| Use Cases       | docs/use-cases/README.md      | Use case index with 42 UC files mapped to HF1–HF12        |
-| Functional Reqs | docs/fun-req/README.md        | FR specification: ID format, priorities, quality criteria |
-| Business Rules  | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies    |
-| Vision & Scope  | docs/vision.md                | Product vision, scope, and business context               |
+| Document            | Path                          | Description                                                     |
+| ------------------- | ----------------------------- | --------------------------------------------------------------- |
+| README              | README.md                     | Project landing page                                            |
+| Getting Started     | docs/getting-started.md       | Installation, setup, first steps                                |
+| Architecture        | docs/architecture.md          | Agent pipeline, state machine, data flow                        |
+| ADR                 | docs/adr/README.md            | Architecture Decision Records (13 as-is decisions)              |
+| API Reference       | docs/api.md                   | REST endpoints, WebSocket events                                |
+| Configuration       | docs/configuration.md         | Environment variables, logging, auth                            |
+| Providers           | docs/providers.md             | Runtime profiles and adapter capabilities                       |
+| MCP Sync            | docs/mcp-sync.md              | MCP tools, transports, and authentication                       |
+| GitHub Demo         | docs/github-demo.md           | GitHub.com + router.ai runbook (Plan Review PR Gate)            |
+| GitLab Demo         | docs/gitlab-demo.md           | End-to-end GitLab.com + router.ai demo runbook                  |
+| Dev GUI Demo        | docs/dev-gui-demo.md          | Local dev + Web UI GitLab/router.ai runbook                     |
+| Use Cases           | docs/use-cases/README.md      | Use case index with 42 UC files mapped to HF1–HF12              |
+| Functional Reqs     | docs/fun-req/README.md        | FR specification: ID format, priorities, quality criteria       |
+| Non-Functional Reqs | docs/nonfun-req/README.md     | NFR specification: areas, quality criteria, project constraints |
+| Business Rules      | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies          |
+| Vision & Scope      | docs/vision.md                | Product vision, scope, and business context                     |
 
 ## AI Context Files
 
