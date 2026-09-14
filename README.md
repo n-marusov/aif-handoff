@@ -143,6 +143,30 @@ never deleted by `down -v` — remove them manually if needed.
 
 The agent coordinator reacts to task events via WebSocket in near real-time and falls back to 30-second polling. Activity logging can be switched to batch mode (`ACTIVITY_LOG_MODE=batch`) to reduce DB write amplification. See [Configuration](docs/configuration.md) for all tuning options.
 
+### Makefile Quick Reference
+
+A [Makefile](Makefile) provides shortcuts for common operations (cross-platform: Linux, macOS, Windows).
+
+```bash
+make help              # list all targets
+make init              # npm ci + db setup (first time)
+make dev               # start all dev servers (native)
+make build             # turbo build (all packages)
+make test              # turbo test (all packages)
+make test-fast         # fail-fast (for agent iterations)
+make lint              # turbo lint (eslint)
+make fmt               # prettier --write .
+make gate-fast         # quick check: build + test
+make gate              # full native gate: lint + build + test + coverage
+
+# Docker targets (requires Docker Engine)
+make docker-build      # docker compose build
+make docker-dev        # docker compose up (dev mode)
+make docker-logs       # tail all container logs
+make docker-prod-run   # production compose up
+make ci-gate           # full CI pipeline in Docker Compose
+```
+
 ### Authentication
 
 - **Without Docker:** Claude runtime profiles can use `~/.claude/` credentials by default (your active Claude subscription). No API key needed.
