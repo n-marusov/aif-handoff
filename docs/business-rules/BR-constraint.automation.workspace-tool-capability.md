@@ -39,5 +39,5 @@ Workspace tools, доступные субагенту-реализатору (i
 ## Связанные правила
 
 - [`BR-constraint.git.operation-lock`](BR-constraint.git.operation-lock.md) — сериализация Git-операций
-- [`BR-constraint.git.worktree-isolation`](BR-constraint.git.worktree-isolation.md) — изоляция и очистка рабочих деревьев
 - [`BR-constraint.automation.implementation-commit`](BR-constraint.automation.implementation-commit.md) — автоматический коммит изменений реализации (обеспечивается через `shell_exec`)
+- [`BR-constraint.automation.verify-single-run`](BR-constraint.automation.verify-single-run.md) — единичный прогон Verify

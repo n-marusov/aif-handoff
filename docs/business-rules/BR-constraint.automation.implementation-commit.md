@@ -41,4 +41,5 @@
 
 - [`BR-trigger.automation.completion-commit`](BR-trigger.automation.completion-commit.md) — коммит перед завершающим статусом
 - [`BR-constraint.automation.workspace-tool-capability`](BR-constraint.automation.workspace-tool-capability.md) — полнота операций workspace tools
+- [`BR-constraint.automation.verify-single-run`](BR-constraint.automation.verify-single-run.md) — единичный прогон Verify
 - [`BR-constraint.git.operation-lock`](BR-constraint.git.operation-lock.md) — сериализация Git-операций
