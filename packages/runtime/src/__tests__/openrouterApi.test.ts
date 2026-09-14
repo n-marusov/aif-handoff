@@ -317,6 +317,53 @@ describe("OpenRouter API transport", () => {
       ).rejects.toBeInstanceOf(OpenRouterRuntimeAdapterError);
       expect(fetchMock).toHaveBeenCalledTimes(3);
     });
+
+    it("throws on top-level error in non-streaming response", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ error: { code: 500, message: "provider error" } }),
+      );
+
+      await expect(
+        runOpenRouterApi(createRunInput({ options: { apiKey: "sk-test" } })),
+      ).rejects.toBeInstanceOf(OpenRouterRuntimeAdapterError);
+    });
+
+    it("throws on per-choice error in non-streaming response", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          choices: [{ error: { code: 400, message: "content filter" } }],
+        }),
+      );
+
+      await expect(
+        runOpenRouterApi(createRunInput({ options: { apiKey: "sk-test" } })),
+      ).rejects.toBeInstanceOf(OpenRouterRuntimeAdapterError);
+    });
+
+    it("retries on HTTP 503 and succeeds", async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response("server busy", { status: 503 }))
+        .mockResolvedValueOnce(
+          jsonResponse({ choices: [{ message: { content: "ok-after-503" } }] }),
+        );
+
+      const result = await runOpenRouterApi(createRunInput({ options: { apiKey: "sk-test" } }));
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(result.outputText).toBe("ok-after-503");
+    });
+
+    it("fails after max 503 retries", async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response("s1", { status: 503 }))
+        .mockResolvedValueOnce(new Response("s2", { status: 503 }))
+        .mockResolvedValueOnce(new Response("s3", { status: 503 }));
+
+      await expect(
+        runOpenRouterApi(createRunInput({ options: { apiKey: "sk-test" } })),
+      ).rejects.toBeInstanceOf(OpenRouterRuntimeAdapterError);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
   });
 
   // --- runOpenRouterApiStreaming ---
@@ -455,6 +502,25 @@ describe("OpenRouter API transport", () => {
         }),
         "Failed to parse SSE chunk, skipping",
       );
+    });
+
+    it("detects mid-stream error in SSE and returns finish_reason error", async () => {
+      fetchMock.mockResolvedValueOnce(
+        sseResponse([
+          'data: {"id":"gen-err","choices":[{"delta":{"content":"partial code"}}]}\n\n',
+          'data: {"error":{"code":500,"message":"provider failure"},"choices":[{"finish_reason":"error","error":{"code":500,"message":"provider failure"}}]}\n\n',
+          'data: {"id":"gen-err","choices":[{"delta":{"content":" should not appear"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+
+      const result = await runOpenRouterApiStreaming(
+        createRunInput({ options: { apiKey: "sk-test" } }),
+      );
+
+      expect(result.finishReason).toBe("error");
+      expect(result.toolCalls).toEqual([]);
+      expect(result.outputText).toBe("partial code");
     });
   });
 

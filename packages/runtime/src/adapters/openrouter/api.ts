@@ -34,8 +34,8 @@ export interface OpenRouterApiLogger {
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_APP_TITLE = "AIF Handoff";
-const RETRYABLE_STATUS = new Set([429]);
-const MAX_429_ATTEMPTS = 3;
+const RETRYABLE_STATUS = new Set([429, 503]);
+const MAX_RETRY_ATTEMPTS = 3;
 
 const SENSITIVE_OPTION_KEYS = new Set(["apiKey", "apikey", "api_key", "secret", "password"]);
 
@@ -399,14 +399,14 @@ function emitLimitSnapshotEvent(
   );
 }
 
-async function postChatCompletionsWith429Retry(
+async function postChatCompletionsWithRetry(
   input: RuntimeRunInput,
   url: string,
   stream: boolean,
   logger?: OpenRouterApiLogger,
   signal?: AbortSignal,
 ): Promise<Response> {
-  for (let attempt = 1; attempt <= MAX_429_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt += 1) {
     const response = await fetch(
       url,
       withProxyDispatcher(url, {
@@ -418,7 +418,7 @@ async function postChatCompletionsWith429Retry(
     );
 
     const isRetryable = RETRYABLE_STATUS.has(response.status);
-    const hasAttemptsLeft = attempt < MAX_429_ATTEMPTS;
+    const hasAttemptsLeft = attempt < MAX_RETRY_ATTEMPTS;
     if (!isRetryable || !hasAttemptsLeft) {
       return response;
     }
@@ -439,13 +439,13 @@ async function postChatCompletionsWith429Retry(
         retryAfterHeader: retryAfterHeader ?? null,
         errorPreview: redactProviderTextForLogs(rawText).slice(0, 240),
       },
-      "OpenRouter returned retryable 429, retrying request",
+      `OpenRouter returned retryable status ${response.status}, retrying request`,
     );
 
     await sleep(backoffMs);
   }
 
-  throw new Error("Unreachable: 429 retry loop exhausted");
+  throw new Error("Unreachable: retry loop exhausted");
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +473,7 @@ export async function runOpenRouterApi(
   );
 
   try {
-    const response = await postChatCompletionsWith429Retry(input, url, false, logger, signal);
+    const response = await postChatCompletionsWithRetry(input, url, false, logger, signal);
 
     const rawText = await response.text();
     const limitSnapshot = buildOpenRouterLimitSnapshot(
@@ -504,7 +504,45 @@ export async function runOpenRouterApi(
     }
 
     const payload = rawText.trim().length > 0 ? JSON.parse(rawText) : {};
+
+    // Check top-level error (pre-commit provider error on HTTP 200)
+    const topError = payload.error;
+    if (topError && typeof topError === "object") {
+      const errMsg =
+        typeof topError.message === "string"
+          ? topError.message
+          : "OpenRouter returned an error in non-streaming response";
+      return Promise.reject(
+        classifyOpenRouterRuntimeError(
+          new Error(safeProviderErrorMessage(errMsg, "OpenRouter request failed")),
+          undefined,
+          buildLimitErrorMetadata(limitSnapshot),
+        ),
+      );
+    }
+
     const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
+
+    // Check per-choice error (post-commit provider error on HTTP 200)
+    const choiceError = choice?.error;
+    if (choiceError && typeof choiceError === "object") {
+      const errMsg =
+        typeof choiceError.message === "string"
+          ? choiceError.message
+          : "OpenRouter per-choice error in non-streaming response";
+      logger?.warn?.(
+        { runtimeId: input.runtimeId, choiceError },
+        "[FIX] OpenRouter per-choice error in non-streaming response",
+      );
+      return Promise.reject(
+        classifyOpenRouterRuntimeError(
+          new Error(safeProviderErrorMessage(errMsg, "OpenRouter per-choice error")),
+          undefined,
+          buildLimitErrorMetadata(limitSnapshot),
+        ),
+      );
+    }
+
     const message = choice?.message;
     const outputText = typeof message?.content === "string" ? message.content : "";
     const toolCalls = parseToolCalls(message?.tool_calls);
@@ -553,7 +591,7 @@ async function runOpenRouterStreamingAttempt(
   const url = `${baseUrl}/chat/completions`;
   const signal = buildRunTimeoutSignal(input);
 
-  const response = await postChatCompletionsWith429Retry(input, url, true, logger, signal);
+  const response = await postChatCompletionsWithRetry(input, url, true, logger, signal);
   const limitSnapshot = buildOpenRouterLimitSnapshot(
     input,
     response.headers,
@@ -644,11 +682,49 @@ async function runOpenRouterStreamingAttempt(
             sessionId = parsed.id;
           }
 
+          // Check for top-level mid-stream error event
+          if (parsed.error && typeof parsed.error === "object") {
+            const errMsg =
+              typeof parsed.error.message === "string"
+                ? parsed.error.message
+                : "OpenRouter mid-stream error";
+            finishReason = "error";
+            toolCallSlots.clear();
+            logger?.warn?.(
+              { runtimeId: input.runtimeId, midStreamError: parsed.error },
+              "[FIX] OpenRouter mid-stream error detected in SSE event",
+            );
+            continue;
+          }
+
           const delta = parsed.choices?.[0]?.delta;
           const choiceFinishReason = parsed.choices?.[0]?.finish_reason;
           if (typeof choiceFinishReason === "string") {
             finishReason = choiceFinishReason;
           }
+
+          // Check per-choice error in SSE
+          const sseChoiceError = parsed.choices?.[0]?.error;
+          if (sseChoiceError && typeof sseChoiceError === "object") {
+            const errMsg =
+              typeof sseChoiceError.message === "string"
+                ? sseChoiceError.message
+                : "OpenRouter per-choice stream error";
+            finishReason = "error";
+            toolCallSlots.clear();
+            logger?.warn?.(
+              { runtimeId: input.runtimeId, sseChoiceError },
+              "[FIX] OpenRouter per-choice error detected in SSE event",
+            );
+            continue;
+          }
+
+          // Stop accumulating content after an error has been flagged
+          if (finishReason === "error") {
+            toolCallSlots.clear();
+            continue;
+          }
+
           if (delta?.content) {
             outputText += delta.content;
             const event: RuntimeEvent = {
