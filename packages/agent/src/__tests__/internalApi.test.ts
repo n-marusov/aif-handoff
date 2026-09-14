@@ -72,7 +72,12 @@ describe("agent internal API", () => {
   it("surfaces a structured prepare failure as 422", async () => {
     const { GitLabPrepareError } = await import("../gitlabPrepare.js");
     prepareForProjectMock.mockImplementation(() => {
-      throw new GitLabPrepareError("fetch_failed", "git fetch origin failed", "project-1");
+      throw new GitLabPrepareError(
+        "fetch_failed",
+        "git fetch origin failed",
+        "project-1",
+        "gitlab",
+      );
     });
     const res = await app.request("/gitlab/prepare", {
       method: "POST",

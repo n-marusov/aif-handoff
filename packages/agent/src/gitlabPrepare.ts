@@ -1,7 +1,11 @@
 import { findGitLabRepository, findProjectById, markGitLabRepositoryPrepared } from "@aif/data";
 import { logger } from "@aif/shared";
 import type { GitLabRepositoryConnection } from "@aif/shared";
-import { prepareRepository, RepositoryPrepareError } from "./repositoryPrepare.js";
+import {
+  prepareRepository,
+  RepositoryPrepareError,
+  RepositoryPrepareErrorKind,
+} from "./repositoryPrepare.js";
 
 const log = logger("gitlab-prepare");
 
