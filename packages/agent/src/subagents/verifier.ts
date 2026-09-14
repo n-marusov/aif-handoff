@@ -45,20 +45,6 @@ export async function runVerifier(taskId: string, projectRoot: string): Promise<
     throw new Error(`Task ${taskId} not found`);
   }
 
-  // Guard: run exactly once per implementation cycle. If reviewComments
-  // already contains a ## Verification section AND the task has not been
-  // reworked since that verification, skip re-execution.
-  // This prevents looping when a RuntimeValidationError from the tool
-  // loop causes revert (keeping the task in verify) or when the task
-  // is retried from blocked_external via retry_from_blocked.
-  // BUT: if reworkRequested is true (task was sent back to implementing),
-  // the guard does NOT skip — verification must run again on the new
-  // implementation iteration.
-  if (task.reviewComments?.includes("## Verification") && !task.reworkRequested) {
-    log.info({ taskId }, "Verify stage already completed in this cycle, skipping subagent");
-    return;
-  }
-
   if (task.branchName && !task.isFix) {
     restorePersistedBranch({
       projectRoot,

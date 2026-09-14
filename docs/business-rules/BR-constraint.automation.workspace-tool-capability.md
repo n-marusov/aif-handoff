@@ -40,4 +40,4 @@ Workspace tools, доступные субагенту-реализатору (i
 
 - [`BR-constraint.git.operation-lock`](BR-constraint.git.operation-lock.md) — сериализация Git-операций
 - [`BR-constraint.automation.implementation-commit`](BR-constraint.automation.implementation-commit.md) — автоматический коммит изменений реализации (обеспечивается через `shell_exec`)
-- [`BR-constraint.automation.verify-single-run`](BR-constraint.automation.verify-single-run.md) — единичный прогон Verify
+- [`BR-constraint.automation.verify-no-loop`](BR-constraint.automation.verify-no-loop.md) — запрет циклических перезапусков Verify
