@@ -1,7 +1,9 @@
 import { serve, type ServerType } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { getEnv, logger } from "@aif/shared";
-import { GitLabPrepareError, prepareGitLabRepositoryForProject } from "./gitlabPrepare.js";
+import { RepositoryPrepareError, type RepositoryProvider } from "./repositoryPrepare.js";
+import { prepareGitLabRepositoryForProject } from "./gitlabPrepare.js";
+import { prepareGitHubRepositoryForProject } from "./githubPrepare.js";
 import { stashAndRemoveWorktree } from "./worktreeLifecycle.js";
 
 const log = logger("agent-internal-api");
@@ -33,19 +35,98 @@ function isAuthorized(c: { req: { header(name: string): string | undefined } }):
   return bearer === token || headerToken === token;
 }
 
-function gitlabPrepareErrorResponse(c: Context, error: GitLabPrepareError) {
+/**
+ * Structured prepare failure as reported by the agent. Classification relies on
+ * the structured `kind` / `projectId` fields only — never on message text — and
+ * the HTTP code is composed from the provider known by the route.
+ */
+interface StructuredPrepareFailure {
+  kind: string;
+  projectId: string;
+  message: string;
+}
+
+function asPrepareFailure(error: unknown): StructuredPrepareFailure | null {
+  if (error instanceof RepositoryPrepareError) {
+    return { kind: error.kind, projectId: error.projectId, message: error.message };
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as { kind?: unknown }).kind === "string" &&
+    typeof (error as { projectId?: unknown }).projectId === "string"
+  ) {
+    const candidate = error as { kind: string; projectId: string; message?: unknown };
+    return {
+      kind: candidate.kind,
+      projectId: candidate.projectId,
+      message:
+        typeof candidate.message === "string" ? candidate.message : "Repository prepare failed",
+    };
+  }
+  return null;
+}
+
+function repositoryPrepareErrorResponse(
+  c: Context,
+  failure: StructuredPrepareFailure,
+  provider: RepositoryProvider,
+) {
   log.warn(
-    { projectId: error.projectId, kind: error.kind, err: error.message },
-    "GitLab prepare failed",
+    { projectId: failure.projectId, provider, kind: failure.kind, err: failure.message },
+    "Repository prepare failed",
   );
   return c.json(
     {
-      error: error.message,
-      code: `gitlab_prepare_${error.kind}`,
-      projectId: error.projectId,
+      error: failure.message,
+      code: `${provider}_prepare_${failure.kind}`,
+      projectId: failure.projectId,
     },
     422,
   );
+}
+
+/**
+ * Mount the provider-specific prepare endpoint. GitHub and GitLab share the
+ * request/response contract; only the provider and the prepare implementation
+ * differ, and the structured error code is namespaced by provider.
+ */
+function mountPrepareRoute(
+  app: Hono,
+  provider: RepositoryProvider,
+  run: (projectId: string) => { gitPreparedAt: string },
+): void {
+  app.post(`/${provider}/prepare`, async (c) => {
+    let body: { projectId?: string };
+    try {
+      body = (await c.req.json()) as { projectId?: string };
+    } catch {
+      return c.json({ error: "Invalid JSON body", code: "invalid_body" }, 400);
+    }
+    if (!body.projectId) {
+      return c.json({ error: "projectId is required", code: "invalid_body" }, 400);
+    }
+
+    log.info({ projectId: body.projectId, provider }, "Repository prepare requested");
+    try {
+      const result = run(body.projectId);
+      log.info({ projectId: body.projectId, provider }, "Repository prepare completed");
+      return c.json({ ok: true, gitPreparedAt: result.gitPreparedAt });
+    } catch (error) {
+      const failure = asPrepareFailure(error);
+      if (failure) {
+        return repositoryPrepareErrorResponse(c, failure, provider);
+      }
+      log.error(
+        { projectId: body.projectId, provider, err: error },
+        "Unexpected repository prepare failure",
+      );
+      return c.json(
+        { error: "Repository prepare failed", code: `${provider}_prepare_internal` },
+        500,
+      );
+    }
+  });
 }
 
 export function createInternalApiApp(): Hono {
@@ -63,30 +144,8 @@ export function createInternalApiApp(): Hono {
 
   mountWorktreeCleanupRoute(app);
 
-  app.post("/gitlab/prepare", async (c) => {
-    let body: { projectId?: string };
-    try {
-      body = (await c.req.json()) as { projectId?: string };
-    } catch {
-      return c.json({ error: "Invalid JSON body", code: "invalid_body" }, 400);
-    }
-    if (!body.projectId) {
-      return c.json({ error: "projectId is required", code: "invalid_body" }, 400);
-    }
-
-    log.info({ projectId: body.projectId }, "GitLab prepare requested");
-    try {
-      const result = prepareGitLabRepositoryForProject(body.projectId);
-      log.info({ projectId: body.projectId }, "GitLab prepare completed");
-      return c.json({ ok: true, gitPreparedAt: result.gitPreparedAt });
-    } catch (error) {
-      if (error instanceof GitLabPrepareError) {
-        return gitlabPrepareErrorResponse(c, error);
-      }
-      log.error({ projectId: body.projectId, err: error }, "Unexpected GitLab prepare failure");
-      return c.json({ error: "GitLab prepare failed", code: "gitlab_prepare_internal" }, 500);
-    }
-  });
+  mountPrepareRoute(app, "gitlab", prepareGitLabRepositoryForProject);
+  mountPrepareRoute(app, "github", prepareGitHubRepositoryForProject);
 
   return app;
 }
