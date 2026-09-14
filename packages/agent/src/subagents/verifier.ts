@@ -45,6 +45,16 @@ export async function runVerifier(taskId: string, projectRoot: string): Promise<
     throw new Error(`Task ${taskId} not found`);
   }
 
+  // Guard: run exactly once. If reviewComments already contains a
+  // ## Verification section from a previous run, skip re-execution.
+  // This prevents looping when a RuntimeValidationError from the tool
+  // loop causes revert (keeping the task in verify) or when the task
+  // is retried from blocked_external via retry_from_blocked.
+  if (task.reviewComments?.includes("## Verification")) {
+    log.info({ taskId }, "Verify stage already completed in a previous run, skipping subagent");
+    return;
+  }
+
   if (task.branchName && !task.isFix) {
     restorePersistedBranch({
       projectRoot,

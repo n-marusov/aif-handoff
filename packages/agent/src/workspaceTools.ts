@@ -288,13 +288,42 @@ export class WorkspaceToolExecutor {
               "Command contains a denied pattern. Destructive operations (git push, git rebase, git reset --hard, sudo, rm -rf on non-standard paths, etc.) are not allowed.",
             );
           }
-          const callResult = execFileSync("sh", ["-c", command], {
-            cwd: this.root,
-            encoding: "utf8",
-            stdio: "pipe",
-            maxBuffer: MAX_SHELL_OUTPUT_BYTES,
-          });
-          result = callResult.toString().trim();
+          try {
+            const callResult = execFileSync("sh", ["-c", command], {
+              cwd: this.root,
+              encoding: "utf8",
+              stdio: "pipe",
+              maxBuffer: MAX_SHELL_OUTPUT_BYTES,
+            });
+            result = callResult.toString().trim();
+          } catch (execErr) {
+            const err = execErr as {
+              status?: number;
+              stdout?: Buffer | string;
+              stderr?: Buffer | string;
+              message?: string;
+            };
+            const exitCode = typeof err.status === "number" ? err.status : 1;
+            const stdout = err.stdout ? err.stdout.toString().trim() : "";
+            const stderr = err.stderr ? err.stderr.toString().trim() : (err.message ?? "");
+            // Return structured error as a normal tool result so the model
+            // can inspect exit code, stdout and stderr to decide whether
+            // this is a real failure (e.g. test assertion failed, exit 1)
+            // or an environmental issue (e.g. toolchain not found, exit 127).
+            result = [
+              `Exit code: ${exitCode}`,
+              stdout
+                ? `Stdout:
+${stdout}`
+                : "",
+              stderr
+                ? `Stderr:
+${stderr}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n");
+          }
           break;
         }
         default:
