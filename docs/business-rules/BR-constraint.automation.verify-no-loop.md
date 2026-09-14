@@ -21,6 +21,7 @@ Verify-стадия может запускаться многократно д�
 ## Детализация
 
 - **Нормальный множественный запуск:** задача проходит `implementing → verify → implementing → verify → ...` — это разрешено и соответствует ADR-IMP.PROCESS.task-state-machine (переход `verify → implementing : verification failed`).
+- **Самовозврат implementing (fast gate):** задача может оставаться в `implementing` при no-op-результате реализатора (`implementing → implementing`). Это не цикл Verify, а внутренний ретарри стадии реализации, также разрешённый ADR.
 - **Запрещённый цикл:** ошибка или исключение в `runVerifier` не должны возвращать задачу в `verify` автоматически. Все нераспознанные ошибки классифицируются через `classifyStageError`: `RuntimeValidationError` (включая превышение лимита tool-call loop) → `blocked_external`; `StageManualBlockError` → `blocked_external`. Ни один из этих путей не приводит к `revert` (который оставил бы задачу в `verify`).
 - **Принцип:** машина состояний (stateMachine.ts) и классификатор ошибок (stageErrorHandler.ts) — единственные источники истины для переходов. Никакие side-channel проверки (содержимое `reviewComments`, флаги в task fields) не должны блокировать или разрешать запуск Verify.
 
