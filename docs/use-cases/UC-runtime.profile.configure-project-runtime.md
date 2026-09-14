@@ -53,4 +53,4 @@ sequenceDiagram
 
 **Постусловия:** Runtime-профиль сконфигурирован и доступен для выбора задачам проекта. Cascade resolution: задача → проект → система → окружение.
 
-**Источник требований:** HF3.1 Настройка runtime-профиля для проекта, BR-project.runtime-profiles
+**Источник требований:** HF3.1 Настройка runtime-профиля для проекта, BR-fact.project.runtime-profiles

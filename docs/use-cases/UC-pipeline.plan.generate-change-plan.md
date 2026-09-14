@@ -55,4 +55,4 @@ sequenceDiagram
 
 **Постусловия:** Задача в статусе `plan_review` с планом, доступным для просмотра в UI. План сохранён в БД и файловой системе (worktree). Событие `TaskStageChanged` (planning → plan_review) записано в аудит.
 
-**Источник требований:** HF1.2 Планирование изменения AI, BR-automation.pipeline, BR-git.worktree-isolation
+**Источник требований:** HF1.2 Планирование изменения AI, BR-trigger.automation.pipeline, BR-constraint.git.worktree-isolation

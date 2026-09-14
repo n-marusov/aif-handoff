@@ -47,4 +47,4 @@ sequenceDiagram
 
 **Постусловия:** Лимиты проекта сохранены. Runtime-гейт использует их для блокировки при превышении.
 
-**Источник требований:** HF6.2 Лимиты на уровне проекта, BR-automation.runtime-limit-gate
+**Источник требований:** HF6.2 Лимиты на уровне проекта, BR-trigger.automation.runtime-limit-gate

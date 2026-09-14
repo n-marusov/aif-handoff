@@ -54,4 +54,4 @@ sequenceDiagram
 
 **Постусловия:** Задача либо прошла ревью (статус `done`), либо эскалирована человеку с диагностикой (`blocked_external`, `manualReviewRequired=true`).
 
-**Источник требований:** HF5.3 Автоматическое ревью с итерациями, BR-automation.auto-review, BR-task-lifecycle.skip-review
+**Источник требований:** HF5.3 Автоматическое ревью с итерациями, BR-trigger.automation.auto-review, BR-trigger.task-lifecycle.skip-review

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.6 Завершение конвейера
 
-**Источник:** [UC-pipeline.completion.auto-complete-pipeline](../use-cases/UC-pipeline.completion.auto-complete-pipeline.md), BR-automation.pipeline, BR-automation.completion-commit, BR-automation.auto-review
+**Источник:** [UC-pipeline.completion.auto-complete-pipeline](../use-cases/UC-pipeline.completion.auto-complete-pipeline.md), BR-trigger.automation.pipeline, BR-trigger.automation.completion-commit, BR-trigger.automation.auto-review
 
 **Статус:** proposed
 

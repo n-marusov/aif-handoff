@@ -52,4 +52,4 @@ sequenceDiagram
 
 **Постусловия:** PR опубликован. Ссылки сохранены.
 
-**Источник требований:** HF11.2 Публикация PR/MR, BR-git.vcs-workflow
+**Источник требований:** HF11.2 Публикация PR/MR, BR-fact.git.vcs-workflow

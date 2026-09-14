@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF9.2 Разграничение ролей
 
-**Источник:** [UC-auth.roles.assign-participant-role](../use-cases/UC-auth.roles.assign-participant-role.md), BR-auth.roles, BR-auth.admin-privileges, BR-auth.member-scope, BR-auth.task-isolation
+**Источник:** [UC-auth.roles.assign-participant-role](../use-cases/UC-auth.roles.assign-participant-role.md), BR-fact.auth.roles, BR-fact.auth.admin-privileges, BR-constraint.auth.member-scope, BR-constraint.auth.task-isolation
 
 **Статус:** proposed
 

@@ -48,4 +48,4 @@ sequenceDiagram
 
 **Постусловия:** MR/PR опубликован на VCS-платформе. Ссылки сохранены.
 
-**Источник требований:** HF4.3 Единый atomic MR, BR-git.vcs-workflow
+**Источник требований:** HF4.3 Единый atomic MR, BR-fact.git.vcs-workflow

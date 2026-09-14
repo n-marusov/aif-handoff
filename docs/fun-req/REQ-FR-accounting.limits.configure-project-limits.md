@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF6.2 Лимиты на уровне проекта
 
-**Источник:** [UC-accounting.limits.configure-project-limits](../use-cases/UC-accounting.limits.configure-project-limits.md), BR-automation.runtime-limit-gate
+**Источник:** [UC-accounting.limits.configure-project-limits](../use-cases/UC-accounting.limits.configure-project-limits.md), BR-trigger.automation.runtime-limit-gate
 
 **Статус:** proposed
 

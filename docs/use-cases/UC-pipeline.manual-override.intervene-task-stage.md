@@ -57,4 +57,4 @@ sequenceDiagram
 
 **Постусловия:** Задача переведена на указанную стадию или пользователь получил мотивированный отказ. Событие аудита записано.
 
-**Источник требований:** HF1.7 Ручное управление движением, BR-auth.roles, BR-auth.member-scope, BR-task-lifecycle.transitions
+**Источник требований:** HF1.7 Ручное управление движением, BR-fact.auth.roles, BR-constraint.auth.member-scope, BR-constraint.task-lifecycle.transitions

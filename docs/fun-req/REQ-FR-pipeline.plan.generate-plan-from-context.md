@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.2 Планирование изменения AI
 
-**Источник:** [UC-pipeline.plan.generate-change-plan](../use-cases/UC-pipeline.plan.generate-change-plan.md), BR-automation.pipeline, BR-git.worktree-isolation
+**Источник:** [UC-pipeline.plan.generate-change-plan](../use-cases/UC-pipeline.plan.generate-change-plan.md), BR-trigger.automation.pipeline, BR-constraint.git.worktree-isolation
 
 **Статус:** proposed
 

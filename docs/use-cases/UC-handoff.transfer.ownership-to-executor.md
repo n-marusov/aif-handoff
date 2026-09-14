@@ -55,4 +55,4 @@ sequenceDiagram
 
 **Постусловия:** Владение задачей передано. `ownershipRevision` инкрементирован. Запись в `taskExecutorHistory` создана. WS-уведомление отправлено.
 
-**Источник требований:** HF7.1 Передача владения изменением, BR-ownership.assignment, BR-ownership.handoff, BR-ownership.executor-history
+**Источник требований:** HF7.1 Передача владения изменением, BR-fact.ownership.assignment, BR-constraint.ownership.handoff, BR-constraint.ownership.executor-history

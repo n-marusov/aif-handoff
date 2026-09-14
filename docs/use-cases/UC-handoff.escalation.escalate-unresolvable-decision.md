@@ -54,4 +54,4 @@ sequenceDiagram
 
 **Постусловия:** Задача эскалирована человеку с полной диагностикой. Статус: `blocked_external`, `manualReviewRequired=true`.
 
-**Источник требований:** HF7.2 Эскалация решений вне правил, BR-ownership.automation-eligibility, BR-task-lifecycle.blocked
+**Источник требований:** HF7.2 Эскалация решений вне правил, BR-inference.ownership.automation-eligibility, BR-trigger.task-lifecycle.blocked

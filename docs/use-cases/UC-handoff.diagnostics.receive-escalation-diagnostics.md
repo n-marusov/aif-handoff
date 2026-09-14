@@ -45,4 +45,4 @@ sequenceDiagram
 
 **Постусловия:** Пользователь получил диагностику и может принять обоснованное решение.
 
-**Источник требований:** HF7.4 Диагностика эскалации, BR-ownership.automation-eligibility
+**Источник требований:** HF7.4 Диагностика эскалации, BR-inference.ownership.automation-eligibility

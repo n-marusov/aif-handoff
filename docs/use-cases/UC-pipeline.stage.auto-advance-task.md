@@ -64,4 +64,4 @@ sequenceDiagram
 
 **Постусловия:** Задача переведена на следующую стадию конвейера; изменения доступны в UI через WebSocket-трансляцию; событие аудита `TaskStageChanged` записано.
 
-**Источник требований:** HF1.1 Автоматическое прохождение стадий (`vision.md` §2.2), BR-automation.pipeline, BR-task-lifecycle.stages, BR-task-lifecycle.transitions
+**Источник требований:** HF1.1 Автоматическое прохождение стадий (`vision.md` §2.2), BR-trigger.automation.pipeline, BR-fact.task-lifecycle.stages, BR-constraint.task-lifecycle.transitions

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF5.1 Формальные гейты переходов
 
-**Источник:** [UC-pipeline.gate.enforce-stage-transition-gate](../use-cases/UC-pipeline.gate.enforce-stage-transition-gate.md), BR-task-lifecycle.transitions, BR-automation.runtime-limit-gate
+**Источник:** [UC-pipeline.gate.enforce-stage-transition-gate](../use-cases/UC-pipeline.gate.enforce-stage-transition-gate.md), BR-constraint.task-lifecycle.transitions, BR-trigger.automation.runtime-limit-gate
 
 **Статус:** proposed
 

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF3.3 Подключение внешних адаптеров
 
-**Источник:** [UC-runtime.external-adapter.register-external-module](../use-cases/UC-runtime.external-adapter.register-external-module.md), BR-project.runtime-profiles
+**Источник:** [UC-runtime.external-adapter.register-external-module](../use-cases/UC-runtime.external-adapter.register-external-module.md), BR-fact.project.runtime-profiles
 
 **Статус:** proposed
 

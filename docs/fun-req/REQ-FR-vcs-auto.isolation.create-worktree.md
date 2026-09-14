@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF4.1 Изолированное выполнение
 
-**Источник:** [UC-vcs-auto.isolation.execute-task-in-worktree](../use-cases/UC-vcs-auto.isolation.execute-task-in-worktree.md), BR-git.worktree-isolation, BR-git.branch-naming
+**Источник:** [UC-vcs-auto.isolation.execute-task-in-worktree](../use-cases/UC-vcs-auto.isolation.execute-task-in-worktree.md), BR-constraint.git.worktree-isolation, BR-constraint.git.branch-naming
 
 **Статус:** proposed
 

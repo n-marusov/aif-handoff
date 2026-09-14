@@ -40,4 +40,4 @@ sequenceDiagram
 
 **Постусловия:** Пользователь видит полную историю смены исполнителей.
 
-**Источник требований:** HF7.3 История исполнителей, BR-ownership.executor-history, BR-automation.plan-review-gate
+**Источник требований:** HF7.3 История исполнителей, BR-constraint.ownership.executor-history, BR-trigger.automation.plan-review-gate

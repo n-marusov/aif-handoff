@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF10.3 Категоризация ошибок
 
-**Источник:** [UC-audit.errors.classify-runtime-error](../use-cases/UC-audit.errors.classify-runtime-error.md), BR-audit.observability
+**Источник:** [UC-audit.errors.classify-runtime-error](../use-cases/UC-audit.errors.classify-runtime-error.md), BR-fact.audit.observability
 
 **Статус:** proposed
 

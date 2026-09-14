@@ -58,4 +58,4 @@ sequenceDiagram
 
 **Постусловия:** Участник аутентифицирован. Сессия активна. UI отображает проекты и задачи.
 
-**Источник требований:** HF9.1 Регистрация и вход, BR-auth.credentials, BR-auth.sessions, BR-auth.roles
+**Источник требований:** HF9.1 Регистрация и вход, BR-constraint.auth.credentials, BR-constraint.auth.sessions, BR-fact.auth.roles

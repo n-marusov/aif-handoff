@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.1 Автоматическое прохождение стадий, HF5.1 Формальные гейты переходов
 
-**Источник:** [UC-pipeline.stage.auto-advance-task](../use-cases/UC-pipeline.stage.auto-advance-task.md), BR-automation.pipeline, BR-task-lifecycle.stages, BR-task-lifecycle.transitions
+**Источник:** [UC-pipeline.stage.auto-advance-task](../use-cases/UC-pipeline.stage.auto-advance-task.md), BR-trigger.automation.pipeline, BR-fact.task-lifecycle.stages, BR-constraint.task-lifecycle.transitions
 
 **Статус:** proposed
 

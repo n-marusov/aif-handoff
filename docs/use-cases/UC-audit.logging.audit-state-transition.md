@@ -47,4 +47,4 @@ sequenceDiagram
 
 **Постусловия:** Аудит-запись создана. История изменений доступна для прослеживаемости.
 
-**Источник требований:** HF10.1 Аудит действий, BR-audit.immutable-trail, BR-audit.actor-identity, BR-audit.state-snapshot
+**Источник требований:** HF10.1 Аудит действий, BR-constraint.audit.immutable-trail, BR-fact.audit.actor-identity, BR-constraint.audit.state-snapshot

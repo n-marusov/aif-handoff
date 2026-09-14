@@ -55,4 +55,4 @@ sequenceDiagram
 
 **Постусловия:** План задачи либо уточнён (улучшенная версия), либо подтверждён как корректный. Задача в статусе `plan_review`. Событие аудита записано.
 
-**Источник требований:** HF1.3 Уточнение плана, BR-automation.pipeline, BR-task-lifecycle.transitions
+**Источник требований:** HF1.3 Уточнение плана, BR-trigger.automation.pipeline, BR-constraint.task-lifecycle.transitions

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF11.3 Проверка CI-статусов
 
-**Источник:** [UC-integration.ci-status.check-pipeline-status](../use-cases/UC-integration.ci-status.check-pipeline-status.md), BR-git.vcs-workflow
+**Источник:** [UC-integration.ci-status.check-pipeline-status](../use-cases/UC-integration.ci-status.check-pipeline-status.md), BR-fact.git.vcs-workflow
 
 **Статус:** proposed
 

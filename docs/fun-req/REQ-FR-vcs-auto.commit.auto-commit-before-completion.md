@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF4.2 Автоматические коммиты
 
-**Источник:** [UC-vcs-auto.commit.auto-commit-before-completion](../use-cases/UC-vcs-auto.commit.auto-commit-before-completion.md), BR-git.commit-conventions, BR-automation.completion-commit, BR-git.convention-resolution
+**Источник:** [UC-vcs-auto.commit.auto-commit-before-completion](../use-cases/UC-vcs-auto.commit.auto-commit-before-completion.md), BR-constraint.git.commit-conventions, BR-trigger.automation.completion-commit, BR-inference.git.convention-resolution
 
 **Статус:** proposed
 

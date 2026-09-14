@@ -48,4 +48,4 @@ sequenceDiagram
 
 **Постусловия:** Задача заблокирована (`blocked_external`) с полной диагностикой. Ожидает ручного вмешательства.
 
-**Источник требований:** HF5.5 Эскалация при исчерпании попыток, BR-task-lifecycle.blocked, BR-ownership.automation-eligibility
+**Источник требований:** HF5.5 Эскалация при исчерпании попыток, BR-trigger.task-lifecycle.blocked, BR-inference.ownership.automation-eligibility

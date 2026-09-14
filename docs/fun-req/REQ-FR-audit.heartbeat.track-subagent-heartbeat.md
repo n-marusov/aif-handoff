@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF10.2 Хартбиты выполнения
 
-**Источник:** [UC-audit.heartbeat.receive-agent-heartbeat](../use-cases/UC-audit.heartbeat.receive-agent-heartbeat.md), BR-audit.observability
+**Источник:** [UC-audit.heartbeat.receive-agent-heartbeat](../use-cases/UC-audit.heartbeat.receive-agent-heartbeat.md), BR-fact.audit.observability
 
 **Статус:** proposed
 

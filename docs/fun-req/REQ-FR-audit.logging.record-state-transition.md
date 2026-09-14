@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF10.1 Аудит действий
 
-**Источник:** [UC-audit.logging.audit-state-transition](../use-cases/UC-audit.logging.audit-state-transition.md), BR-audit.immutable-trail, BR-audit.actor-identity, BR-audit.state-snapshot
+**Источник:** [UC-audit.logging.audit-state-transition](../use-cases/UC-audit.logging.audit-state-transition.md), BR-constraint.audit.immutable-trail, BR-fact.audit.actor-identity, BR-constraint.audit.state-snapshot
 
 **Статус:** proposed
 

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.7 Ручное управление движением
 
-**Источник:** [UC-pipeline.manual-override.intervene-task-stage](../use-cases/UC-pipeline.manual-override.intervene-task-stage.md), BR-auth.roles, BR-auth.member-scope, BR-task-lifecycle.transitions
+**Источник:** [UC-pipeline.manual-override.intervene-task-stage](../use-cases/UC-pipeline.manual-override.intervene-task-stage.md), BR-fact.auth.roles, BR-constraint.auth.member-scope, BR-constraint.task-lifecycle.transitions
 
 **Статус:** proposed
 

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF3.2 Переопределение профиля для конкретного изменения
 
-**Источник:** [UC-runtime.override.override-profile-for-task](../use-cases/UC-runtime.override.override-profile-for-task.md), BR-project.runtime-profiles
+**Источник:** [UC-runtime.override.override-profile-for-task](../use-cases/UC-runtime.override.override-profile-for-task.md), BR-fact.project.runtime-profiles
 
 **Статус:** proposed
 

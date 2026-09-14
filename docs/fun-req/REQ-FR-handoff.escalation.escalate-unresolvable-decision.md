@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF7.2 Эскалация решений вне правил
 
-**Источник:** [UC-handoff.escalation.escalate-unresolvable-decision](../use-cases/UC-handoff.escalation.escalate-unresolvable-decision.md), BR-ownership.automation-eligibility, BR-task-lifecycle.blocked
+**Источник:** [UC-handoff.escalation.escalate-unresolvable-decision](../use-cases/UC-handoff.escalation.escalate-unresolvable-decision.md), BR-inference.ownership.automation-eligibility, BR-trigger.task-lifecycle.blocked
 
 **Статус:** proposed
 

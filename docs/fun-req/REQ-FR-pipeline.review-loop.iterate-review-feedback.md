@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF5.3 Автоматическое ревью с итерациями
 
-**Источник:** [UC-pipeline.review-loop.iterate-review-feedback](../use-cases/UC-pipeline.review-loop.iterate-review-feedback.md), BR-automation.auto-review, BR-task-lifecycle.skip-review
+**Источник:** [UC-pipeline.review-loop.iterate-review-feedback](../use-cases/UC-pipeline.review-loop.iterate-review-feedback.md), BR-trigger.automation.auto-review, BR-trigger.task-lifecycle.skip-review
 
 **Статус:** proposed
 

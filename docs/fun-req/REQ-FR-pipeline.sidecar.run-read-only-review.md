@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF5.2 Sidecar-агенты (read-only)
 
-**Источник:** [UC-pipeline.sidecar.review-with-sidecar-agent](../use-cases/UC-pipeline.sidecar.review-with-sidecar-agent.md), BR-automation.auto-review
+**Источник:** [UC-pipeline.sidecar.review-with-sidecar-agent](../use-cases/UC-pipeline.sidecar.review-with-sidecar-agent.md), BR-trigger.automation.auto-review
 
 **Статус:** proposed
 

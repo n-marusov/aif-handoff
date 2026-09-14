@@ -47,4 +47,4 @@ sequenceDiagram
 
 **Постусловия:** Вызов runtime учтён. Счётчики задачи и проекта обновлены.
 
-**Источник требований:** HF6.1 Учёт каждого вызова runtime, BR-automation.runtime-limit-gate
+**Источник требований:** HF6.1 Учёт каждого вызова runtime, BR-trigger.automation.runtime-limit-gate

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF5.4 Независимая верификация
 
-**Источник:** [UC-pipeline.independent-verification.verify-independently](../use-cases/UC-pipeline.independent-verification.verify-independently.md), BR-automation.qa
+**Источник:** [UC-pipeline.independent-verification.verify-independently](../use-cases/UC-pipeline.independent-verification.verify-independently.md), BR-trigger.automation.qa
 
 **Статус:** proposed
 

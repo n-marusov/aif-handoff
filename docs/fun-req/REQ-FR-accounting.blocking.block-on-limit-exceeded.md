@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF6.3 Блокировка при превышении
 
-**Источник:** [UC-accounting.blocking.block-on-limit-exceeded](../use-cases/UC-accounting.blocking.block-on-limit-exceeded.md), BR-automation.runtime-limit-gate
+**Источник:** [UC-accounting.blocking.block-on-limit-exceeded](../use-cases/UC-accounting.blocking.block-on-limit-exceeded.md), BR-trigger.automation.runtime-limit-gate
 
 **Статус:** proposed
 

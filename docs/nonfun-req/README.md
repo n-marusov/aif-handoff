@@ -24,7 +24,7 @@ vision.md — бизнес-требования (Business): SMART-цели G1–
 - **NFR задают измеримые границы качества** для FR и архитектурных решений: NFR выводятся из бизнес-целей (G1–G7), проблем (P1–P8), ограничений (§2.6) и допущений (§2.7) `vision.md`, а также из политик `BR-*`, а не из UC.
 - **NFR не дублируют функциональность**: поведение описывают FR и UC; NFR ограничивают его качество. Если ограничение относится к конкретной функции/FR, NFR ссылается на неё (перекрёстная трассировка FR ↔ NFR).
 - **NFR не порождают пользовательских историй**: US — язык бизнеса (первичный пользовательский артефакт); UC (анализ) выводятся из US, границы качества историями не описываются.
-- **Бизнес-правила (`BR-*`) — отдельный актив** (W&B: enterprise-level asset): политики и ограничения хранятся в [business-rules/](../business-rules/README.md); NFR ссылаются на них по ID, но не включают их текст (например, `BR-automation.pipeline`, `BR-auth.roles`).
+- **Бизнес-правила (`BR-*`) — отдельный актив** (W&B: enterprise-level asset): политики и ограничения хранятся в [business-rules/](../business-rules/README.md); NFR ссылаются на них по ID, но не включают их текст (например, `BR-trigger.automation.pipeline`, `BR-fact.auth.roles`).
 - **Ограничения-констрейнты ≠ бизнес-правила**: ограничения на архитектурные решения (выбор СУБД, протоколов, инфраструктуры развёртывания) фиксируются в NFR, а не в `BR-*`.
 
 ## NFR в жизненном цикле требований
@@ -87,8 +87,8 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 Первоочередными кандидатами для NFR (по приоритетам MVP, `vision.md` §2.4) являются:
 
 - **api.availability**: авто-восстановление WebSocket, resilience coordinator polling
-- **security.compliance**: аутентификация и session management (`BR-auth.sessions`)
-- **ops.observability**: иммутабельный аудит (`BR-audit.immutable-trail`), логирование ошибок runtime
+- **security.compliance**: аутентификация и session management (`BR-constraint.auth.sessions`)
+- **ops.observability**: иммутабельный аудит (`BR-constraint.audit.immutable-trail`), логирование ошибок runtime
 - **data.compliance**: целостность и согласованность SQLite (`BR-ownership.*`, `BR-task-lifecycle.*`)
 
 ## Правила оформления
@@ -173,7 +173,7 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 - [Видение продукта](../vision.md) — SMART-цели G1–G7, проблемы P1–P8, функции HF1–HF12 (§2.2), ограничения (§2.6), допущения (§2.7), roadmap (§2.5), метрики-пробелы `[TBD-VM*]`/`[TBD-VT*]` (§1.3–1.4)
 - [Функциональные требования](../fun-req/README.md) — FR (детализация UC; NFR задают границы качества для FR)
 - [Прецеденты использования](../use-cases/README.md) — UC (домены pipeline, dashboard, runtime, ...); NFR ссылаются на UC как на контекст ограничения
-- [Бизнес-правила](../business-rules/README.md) — `BR-*`: политики и ограничения, на которые ссылаются NFR (`BR-auth.sessions`, `BR-audit.immutable-trail`, `BR-automation.pipeline`, `BR-ownership.*`)
+- [Бизнес-правила](../business-rules/README.md) — `BR-*`: политики и ограничения, на которые ссылаются NFR (`BR-constraint.auth.sessions`, `BR-constraint.audit.immutable-trail`, `BR-trigger.automation.pipeline`, `BR-ownership.*`)
 - [Глоссарий](../glossary.md) — термины: задача, проект, статус задачи, runtime-адаптер, coordinator, субагент, worktree, handoff, гейт, sidecar, аудит
 - [DDD-модель](../domain/context-map.md) — ограниченные контексты и инварианты (`task-pipeline`, `runtime-provisioning`, `git-isolation`, `audit-log`, `auth-session`)
 - [Архитектура](../architecture.md) — модульный монолит, структура пакетов, правила зависимостей

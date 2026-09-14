@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF4.4 Plan Review Gate
 
-**Источник:** [UC-vcs-auto.plan-review.publish-plan-for-approval](../use-cases/UC-vcs-auto.plan-review.publish-plan-for-approval.md), BR-automation.plan-review-gate, BR-git.vcs-workflow
+**Источник:** [UC-vcs-auto.plan-review.publish-plan-for-approval](../use-cases/UC-vcs-auto.plan-review.publish-plan-for-approval.md), BR-trigger.automation.plan-review-gate, BR-fact.git.vcs-workflow
 
 **Статус:** proposed
 

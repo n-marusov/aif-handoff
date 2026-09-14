@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF7.4 Диагностика эскалации
 
-**Источник:** [UC-handoff.diagnostics.receive-escalation-diagnostics](../use-cases/UC-handoff.diagnostics.receive-escalation-diagnostics.md), BR-ownership.automation-eligibility
+**Источник:** [UC-handoff.diagnostics.receive-escalation-diagnostics](../use-cases/UC-handoff.diagnostics.receive-escalation-diagnostics.md), BR-inference.ownership.automation-eligibility
 
 **Статус:** proposed
 

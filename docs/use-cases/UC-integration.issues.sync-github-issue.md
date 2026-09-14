@@ -54,4 +54,4 @@ sequenceDiagram
 
 **Постусловия:** GitHub Issues синхронизированы с задачами AIF Handoff.
 
-**Источник требований:** HF11.1 Синхронизация с Issues, BR-git.vcs-workflow
+**Источник требований:** HF11.1 Синхронизация с Issues, BR-fact.git.vcs-workflow

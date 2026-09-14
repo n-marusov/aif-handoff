@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF7.1 Передача владения изменением
 
-**Источник:** [UC-handoff.transfer.ownership-to-executor](../use-cases/UC-handoff.transfer.ownership-to-executor.md), BR-ownership.assignment, BR-ownership.handoff, BR-ownership.executor-history
+**Источник:** [UC-handoff.transfer.ownership-to-executor](../use-cases/UC-handoff.transfer.ownership-to-executor.md), BR-fact.ownership.assignment, BR-constraint.ownership.handoff, BR-constraint.ownership.executor-history
 
 **Статус:** proposed
 

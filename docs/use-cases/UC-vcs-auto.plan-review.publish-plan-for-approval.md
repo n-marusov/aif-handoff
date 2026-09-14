@@ -55,4 +55,4 @@ sequenceDiagram
 
 **Постусловия:** Plan опубликован. Задача ждёт утверждения перед реализацией. После утверждения продолжает конвейер.
 
-**Источник требований:** HF4.4 Plan Review Gate, BR-automation.plan-review-gate, BR-git.vcs-workflow
+**Источник требований:** HF4.4 Plan Review Gate, BR-trigger.automation.plan-review-gate, BR-fact.git.vcs-workflow

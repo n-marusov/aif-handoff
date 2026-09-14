@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF9.1 Регистрация и вход
 
-**Источник:** [UC-auth.registration.sign-up-participant](../use-cases/UC-auth.registration.sign-up-participant.md), BR-auth.credentials, BR-auth.sessions, BR-auth.roles
+**Источник:** [UC-auth.registration.sign-up-participant](../use-cases/UC-auth.registration.sign-up-participant.md), BR-constraint.auth.credentials, BR-constraint.auth.sessions, BR-fact.auth.roles
 
 **Статус:** proposed
 

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF4.3 Единый atomic MR
 
-**Источник:** [UC-vcs-auto.mr.publish-atomic-merge-request](../use-cases/UC-vcs-auto.mr.publish-atomic-merge-request.md), BR-git.vcs-workflow
+**Источник:** [UC-vcs-auto.mr.publish-atomic-merge-request](../use-cases/UC-vcs-auto.mr.publish-atomic-merge-request.md), BR-fact.git.vcs-workflow
 
 **Статус:** proposed
 

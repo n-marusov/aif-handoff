@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF7.3 История исполнителей
 
-**Источник:** [UC-handoff.history.view-executor-timeline](../use-cases/UC-handoff.history.view-executor-timeline.md), BR-ownership.executor-history
+**Источник:** [UC-handoff.history.view-executor-timeline](../use-cases/UC-handoff.history.view-executor-timeline.md), BR-constraint.ownership.executor-history
 
 **Статус:** proposed
 

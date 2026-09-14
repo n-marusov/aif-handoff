@@ -57,4 +57,4 @@ sequenceDiagram
 
 **Постусловия:** Задача либо прошла гейт и запущена на выполнение, либо заблокирована с указанием причины.
 
-**Источник требований:** HF5.1 Формальные гейты переходов, BR-task-lifecycle.transitions, BR-automation.runtime-limit-gate
+**Источник требований:** HF5.1 Формальные гейты переходов, BR-constraint.task-lifecycle.transitions, BR-trigger.automation.runtime-limit-gate

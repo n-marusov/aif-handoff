@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.4 Реализация изменения AI, HF4.1 Изолированное выполнение
 
-**Источник:** [UC-pipeline.implementation.execute-change-in-isolation](../use-cases/UC-pipeline.implementation.execute-change-in-isolation.md), BR-git.worktree-isolation, BR-automation.completion-commit
+**Источник:** [UC-pipeline.implementation.execute-change-in-isolation](../use-cases/UC-pipeline.implementation.execute-change-in-isolation.md), BR-constraint.git.worktree-isolation, BR-trigger.automation.completion-commit
 
 **Статус:** proposed
 

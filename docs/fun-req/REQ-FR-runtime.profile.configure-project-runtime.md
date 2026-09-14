@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF3.1 Настройка runtime-профиля для проекта
 
-**Источник:** [UC-runtime.profile.configure-project-runtime](../use-cases/UC-runtime.profile.configure-project-runtime.md), BR-project.runtime-profiles
+**Источник:** [UC-runtime.profile.configure-project-runtime](../use-cases/UC-runtime.profile.configure-project-runtime.md), BR-fact.project.runtime-profiles
 
 **Статус:** proposed
 

@@ -64,4 +64,4 @@ sequenceDiagram
 
 **Постусловия:** Изменение закоммичено в целевую ветку. Задача в статусе `done` (или `accepted` при auto-queue). Результаты ревью сохранены.
 
-**Источник требований:** HF1.6 Завершение конвейера, BR-automation.pipeline, BR-automation.completion-commit, BR-automation.auto-review
+**Источник требований:** HF1.6 Завершение конвейера, BR-trigger.automation.pipeline, BR-trigger.automation.completion-commit, BR-trigger.automation.auto-review

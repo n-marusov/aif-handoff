@@ -54,4 +54,4 @@ sequenceDiagram
 
 **Постусловия:** Sidecar-агент завершил read-only проверку. Результат сохранён в БД. Задача либо переходит на следующую стадию, либо возвращается на доработку.
 
-**Источник требований:** HF5.2 Sidecar-агенты (read-only), BR-automation.auto-review
+**Источник требований:** HF5.2 Sidecar-агенты (read-only), BR-trigger.automation.auto-review

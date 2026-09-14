@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF11.2 Публикация PR/MR
 
-**Источник:** [UC-integration.pr-mr.publish-github-pr](../use-cases/UC-integration.pr-mr.publish-github-pr.md), BR-git.vcs-workflow
+**Источник:** [UC-integration.pr-mr.publish-github-pr](../use-cases/UC-integration.pr-mr.publish-github-pr.md), BR-fact.git.vcs-workflow
 
 **Статус:** proposed
 

@@ -62,7 +62,7 @@ HTTP REST API сервера (порт 3009) для управления зад�
   - `POST /api/auth/login`, `POST /api/auth/logout` — аутентификация
   - `POST /api/auth/signup` — регистрация участника
   - `GET/PUT/PATCH /api/settings` — настройки
-- **Аутентификация:** session-based (csrf-токен), `BR-auth.sessions`.
+- **Аутентификация:** session-based (csrf-токен), `BR-constraint.auth.sessions`.
 - **Реализация (as is):** `packages/api/src/routes/*.ts`.
 - **Трассируемость:** HF2, `UC-dashboard.*`, `UC-auth.*`, `UC-chat.*`.
 
@@ -235,8 +235,8 @@ docs/contracts/                 # каталог контрактов систе
   модели и реализации
 - [domain/context-map.md](../domain/context-map.md) — карта ограниченных контекстов: `task-pipeline`,
   `runtime-provisioning`, `git-isolation`, `audit-log`, `auth-session`
-- [business-rules/README.md](../business-rules/README.md) и файлы `BR-*`: `BR-auth.sessions`,
-  `BR-audit.immutable-trail`, `BR-automation.pipeline`, `BR-git.worktree-isolation`
+- [business-rules/README.md](../business-rules/README.md) и файлы `BR-*`: `BR-constraint.auth.sessions`,
+  `BR-constraint.audit.immutable-trail`, `BR-trigger.automation.pipeline`, `BR-constraint.git.worktree-isolation`
 - [vision.md](../vision.md) §2.2 — функции HF1–HF12
 - [use-cases/README.md](../use-cases/README.md) — `UC-*` по всем доменам
 - [glossary.md](../glossary.md) — термины (задача, проект, runtime-адаптер, coordinator, субагент, worktree)

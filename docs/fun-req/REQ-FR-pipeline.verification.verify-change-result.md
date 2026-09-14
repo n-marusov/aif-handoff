@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.5 Верификация результата, HF5.4 Независимая верификация
 
-**Источник:** [UC-pipeline.verification.verify-change-result](../use-cases/UC-pipeline.verification.verify-change-result.md), BR-automation.pipeline
+**Источник:** [UC-pipeline.verification.verify-change-result](../use-cases/UC-pipeline.verification.verify-change-result.md), BR-trigger.automation.pipeline
 
 **Статус:** proposed
 

@@ -48,9 +48,9 @@ sequenceDiagram
 **Альтернативные потоки:**
 
 - **A1. Self-service password change:** пользователь может изменить свой пароль через Header (onChangePassword).
-- **A2. Task isolation:** `BR-auth.task-isolation` — member может видеть только задачи, на которые назначен.
+- **A2. Task isolation:** `BR-constraint.auth.task-isolation` — member может видеть только задачи, на которые назначен.
 - **A3. Member без проекта:** member видит только проекты, в которые добавлен.
 
 **Постусловия:** Роль участника изменена. Права доступа обновлены для всех последующих запросов.
 
-**Источник требований:** HF9.2 Разграничение ролей, BR-auth.roles, BR-auth.admin-privileges, BR-auth.member-scope, BR-auth.task-isolation
+**Источник требований:** HF9.2 Разграничение ролей, BR-fact.auth.roles, BR-fact.auth.admin-privileges, BR-constraint.auth.member-scope, BR-constraint.auth.task-isolation

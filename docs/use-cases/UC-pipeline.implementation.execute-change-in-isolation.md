@@ -61,4 +61,4 @@ sequenceDiagram
 
 **Постусловия:** Код изменения реализован и закоммичен в изолированной ветке. Задача в статусе `verify`. Лог выполнения сохранён.
 
-**Источник требований:** HF1.4 Реализация изменения AI, HF4.1 Изолированное выполнение, BR-git.worktree-isolation, BR-automation.completion-commit
+**Источник требований:** HF1.4 Реализация изменения AI, HF4.1 Изолированное выполнение, BR-constraint.git.worktree-isolation, BR-trigger.automation.completion-commit

@@ -64,4 +64,4 @@ sequenceDiagram
 
 **Постусловия:** Worktree создан и изолирован. Путь и ветка сохранены. Worktree будет очищен при завершении задачи.
 
-**Источник требований:** HF4.1 Изолированное выполнение, BR-git.worktree-isolation, BR-git.branch-naming
+**Источник требований:** HF4.1 Изолированное выполнение, BR-constraint.git.worktree-isolation, BR-constraint.git.branch-naming

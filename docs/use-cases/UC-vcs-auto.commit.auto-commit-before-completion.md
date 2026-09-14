@@ -49,4 +49,4 @@ sequenceDiagram
 
 **Постусловия:** Все изменения закоммичены в ветку задачи. `commitSha` сохранён.
 
-**Источник требований:** HF4.2 Автоматические коммиты, BR-git.commit-conventions, BR-automation.completion-commit, BR-git.convention-resolution
+**Источник требований:** HF4.2 Автоматические коммиты, BR-constraint.git.commit-conventions, BR-trigger.automation.completion-commit, BR-inference.git.convention-resolution

@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF6.1 Учёт каждого вызова runtime
 
-**Источник:** [UC-accounting.tracking.record-runtime-call](../use-cases/UC-accounting.tracking.record-runtime-call.md), BR-automation.runtime-limit-gate
+**Источник:** [UC-accounting.tracking.record-runtime-call](../use-cases/UC-accounting.tracking.record-runtime-call.md), BR-trigger.automation.runtime-limit-gate
 
 **Статус:** proposed
 

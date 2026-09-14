@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF2.2 Статус формальных гейтов
 
-**Источник:** [UC-dashboard.gate-status.view-gate-results](../use-cases/UC-dashboard.gate-status.view-gate-results.md), BR-audit.observability
+**Источник:** [UC-dashboard.gate-status.view-gate-results](../use-cases/UC-dashboard.gate-status.view-gate-results.md), BR-fact.audit.observability
 
 **Статус:** proposed
 

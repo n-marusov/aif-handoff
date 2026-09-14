@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF5.5 Эскалация при исчерпании попыток
 
-**Источник:** [UC-pipeline.escalation.escalate-after-exhausted-retries](../use-cases/UC-pipeline.escalation.escalate-after-exhausted-retries.md), BR-task-lifecycle.blocked, BR-ownership.automation-eligibility
+**Источник:** [UC-pipeline.escalation.escalate-after-exhausted-retries](../use-cases/UC-pipeline.escalation.escalate-after-exhausted-retries.md), BR-trigger.task-lifecycle.blocked, BR-inference.ownership.automation-eligibility
 
 **Статус:** proposed
 

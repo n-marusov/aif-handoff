@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF11.1 Синхронизация с Issues
 
-**Источник:** [UC-integration.issues.sync-github-issue](../use-cases/UC-integration.issues.sync-github-issue.md), BR-git.vcs-workflow
+**Источник:** [UC-integration.issues.sync-github-issue](../use-cases/UC-integration.issues.sync-github-issue.md), BR-fact.git.vcs-workflow
 
 **Статус:** proposed
 

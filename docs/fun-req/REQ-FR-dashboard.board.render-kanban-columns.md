@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF2.1 Просмотр изменений по стадиям
 
-**Источник:** [UC-dashboard.board.view-kanban-columns](../use-cases/UC-dashboard.board.view-kanban-columns.md), BR-audit.observability
+**Источник:** [UC-dashboard.board.view-kanban-columns](../use-cases/UC-dashboard.board.view-kanban-columns.md), BR-fact.audit.observability
 
 **Статус:** proposed
 

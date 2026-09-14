@@ -6,7 +6,7 @@
 
 **Ключевая функция:** HF1.3 Уточнение плана (Improve)
 
-**Источник:** [UC-pipeline.plan.refine-plan-second-pass](../use-cases/UC-pipeline.plan.refine-plan-second-pass.md), BR-automation.pipeline, BR-task-lifecycle.transitions
+**Источник:** [UC-pipeline.plan.refine-plan-second-pass](../use-cases/UC-pipeline.plan.refine-plan-second-pass.md), BR-trigger.automation.pipeline, BR-constraint.task-lifecycle.transitions
 
 **Статус:** proposed
 
