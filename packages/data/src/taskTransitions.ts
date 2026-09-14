@@ -21,6 +21,26 @@ import { createAuditEventValues } from "./audit.js";
 
 const log = logger("data:task-transitions");
 
+/**
+ * When re-entering plan_review from improve (after replanning), reset the plan
+ * review metadata so the publisher starts from a clean slate.
+ */
+function planReviewResetForReplan(
+  fromStatus: TaskStatus,
+  toStatus: TaskStatus,
+): Partial<typeof tasks.$inferInsert> {
+  if (fromStatus === "improve" && toStatus === "plan_review") {
+    return {
+      planReviewState: null,
+      planReviewCommitSha: null,
+      planReviewPublishedAt: null,
+      planReviewApprovedAt: null,
+      planReviewFeedback: null,
+    };
+  }
+  return {};
+}
+
 export type TaskTransitionExtra = Partial<
   Omit<
     TaskRow,
@@ -225,18 +245,7 @@ export function transitionTaskStatus(
 
       const assignees = listAssigneesInTransaction(tx, task.id);
 
-      // When re-entering plan_review from improve (after replanning), reset the plan
-      // review metadata so the publisher starts from a clean slate.
-      const planReviewReset =
-        task.status === "improve" && input.status === "plan_review"
-          ? {
-              planReviewState: null,
-              planReviewCommitSha: null,
-              planReviewPublishedAt: null,
-              planReviewApprovedAt: null,
-              planReviewFeedback: null,
-            }
-          : {};
+      const planReviewReset = planReviewResetForReplan(task.status, input.status);
 
       const updated = tx
         .update(tasks)

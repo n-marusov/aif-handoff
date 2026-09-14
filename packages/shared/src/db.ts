@@ -1167,22 +1167,21 @@ const MIGRATIONS: Migration[] = [
       UPDATE tasks SET status = 'plan_review' WHERE status = 'plan_ready';
     `,
     backfill: (sqlite) => {
-      // Only backfill blocked_from_status if the column exists (pre-v27 schemas
-      // without the participant migration may lack it).
-      const hasBlockedFromStatus = sqlite
-        .prepare(
-          "SELECT COUNT(*) AS cnt FROM pragma_table_info('tasks') WHERE name = 'blocked_from_status'",
-        )
-        .get() as { cnt: number };
-      const blockedCount =
-        hasBlockedFromStatus.cnt > 0
-          ? sqlite
-              .prepare(
-                "UPDATE tasks SET blocked_from_status = 'plan_review' WHERE blocked_from_status = 'plan_ready'",
-              )
-              .run().changes
-          : 0;
-      return { blockedFromStatusUpdated: blockedCount };
+      const statusCount = sqlite
+        .prepare("UPDATE tasks SET status = 'plan_review' WHERE status = 'plan_ready'")
+        .run().changes;
+      // blocked_from_status may not exist in pre-v27 schemas; safely skip if missing.
+      let blockedCount = 0;
+      try {
+        blockedCount = sqlite
+          .prepare(
+            "UPDATE tasks SET blocked_from_status = 'plan_review' WHERE blocked_from_status = 'plan_ready'",
+          )
+          .run().changes;
+      } catch {
+        blockedCount = 0;
+      }
+      return { statusUpdated: statusCount, blockedFromStatusUpdated: blockedCount };
     },
   },
 ];
