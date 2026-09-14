@@ -468,9 +468,12 @@ describe("API slash-command prompt policy", () => {
     });
 
     expect(resolved.usedApiSkillExpansion).toBe(true);
-    expect(resolved.prompt).toContain("API transport workflow contract:");
-    expect(resolved.prompt).toContain("Planning is read-only");
-    expect(resolved.prompt).toContain("Requested workflow command: /aif-plan fast");
+    // Prompt stays clean — skill content moved to systemPromptAppend
+    expect(resolved.prompt).not.toContain("API transport workflow");
+    expect(resolved.prompt).not.toContain("Planning is read-only");
+    expect(resolved.prompt).not.toContain("Requested workflow command");
+    expect(resolved.systemPromptAppend).toContain("Planning is read-only");
+    expect(resolved.systemPromptAppend).toContain("Requested workflow command: /aif-plan fast");
     expect(resolved.prompt).not.toContain("*** Begin Patch");
   });
 
@@ -493,9 +496,11 @@ describe("API slash-command prompt policy", () => {
     });
 
     expect(resolved.usedApiSkillExpansion).toBe(true);
-    expect(resolved.prompt).toContain("do not create, modify, or delete project files");
+    // Original prompt is preserved — skill content is in systemPromptAppend
+    expect(resolved.prompt).toBe("Plan this task");
+    expect(resolved.systemPromptAppend).toContain("do not create, modify, or delete project files");
     expect(messages).toContain(
-      "[FIX] API slash command skill file unavailable; using safe inline fallback",
+      "[FIX] Skill file unavailable; inline fallback placed into system prompt",
     );
   });
 });

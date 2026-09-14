@@ -107,38 +107,6 @@ function readApiSkillInstructions(
   }
 }
 
-function expandApiSkillCommand(
-  prompt: string,
-  fallbackSlashCommand: string,
-  projectRoot: string | null | undefined,
-  logger?: RuntimePromptPolicyLogger,
-): string {
-  const commandMatch = fallbackSlashCommand.trim().match(API_SKILL_COMMAND_PATTERN);
-  if (!commandMatch) return prompt;
-
-  const skillName = commandMatch[1].toLowerCase();
-  const skill = readApiSkillInstructions(projectRoot, skillName);
-  const command = fallbackSlashCommand.trim();
-  logger?.debug?.(
-    { skillName, source: skill.source, projectRoot: projectRoot ?? null },
-    skill.source === "project"
-      ? "[FIX] Expanded API slash command into skill instructions"
-      : "[FIX] API slash command skill file unavailable; using safe inline fallback",
-  );
-
-  return [
-    "API transport workflow contract:",
-    "The following slash command is a workflow label, not an executable command. Do not claim that the slash command ran and do not invent tool output.",
-    `Requested workflow command: ${command}`,
-    "",
-    "Skill instructions:",
-    skill.content,
-    "",
-    "Apply the workflow instructions to the task context below. The API model has no local workspace tools unless the prompt explicitly provides their results.",
-    prompt,
-  ].join("\n");
-}
-
 function prependNativeSubagentPrompt(
   workflow: RuntimeWorkflowSpec,
   prompt: string,
@@ -325,6 +293,33 @@ export function resolveRuntimePromptPolicy(
 
   const useApiSkillExpansion = input.transport === RuntimeTransport.API && useSlashFallback;
 
+  // Compute skill instructions for system prompt when using API skill expansion.
+  // Skill content goes into systemPromptAppend (system message) as behavioral
+  // context, not into the user prompt.
+  let apiSkillInstructions = "";
+  if (useApiSkillExpansion) {
+    const commandMatch = (input.workflow.promptInput.fallbackSlashCommand ?? "")
+      .trim()
+      .match(API_SKILL_COMMAND_PATTERN);
+    if (commandMatch) {
+      const skillName = commandMatch[1].toLowerCase();
+      const skill = readApiSkillInstructions(input.projectRoot, skillName);
+      const command = (input.workflow.promptInput.fallbackSlashCommand ?? "").trim();
+      input.logger?.debug?.(
+        { skillName, source: skill.source, projectRoot: input.projectRoot ?? null },
+        skill.source === "project"
+          ? "[FIX] Skill instructions resolved from project and placed into system prompt"
+          : "[FIX] Skill file unavailable; inline fallback placed into system prompt",
+      );
+      apiSkillInstructions = [
+        "API transport workflow — skill instructions:",
+        `Requested workflow command: ${command}`,
+        "",
+        skill.content,
+      ].join("\n");
+    }
+  }
+
   const prompt = useNativeSubagentWorkflow
     ? prependNativeSubagentPrompt(
         input.workflow,
@@ -332,12 +327,7 @@ export function resolveRuntimePromptPolicy(
         input.workflow.agentDefinitionName ?? "",
       )
     : useApiSkillExpansion
-      ? expandApiSkillCommand(
-          input.workflow.promptInput.prompt,
-          input.workflow.promptInput.fallbackSlashCommand ?? "",
-          input.projectRoot,
-          input.logger,
-        )
+      ? input.workflow.promptInput.prompt // clean prompt; skill content is in systemPromptAppend
       : useIsolatedSkillCommand
         ? prependSlashFallbackPrompt(
             input.workflow.promptInput.prompt,
@@ -349,7 +339,12 @@ export function resolveRuntimePromptPolicy(
               input.workflow.promptInput.fallbackSlashCommand ?? "",
             )
           : input.workflow.promptInput.prompt;
-  const systemPromptAppend = input.workflow.promptInput.systemPromptAppend ?? "";
+  const systemPromptAppend = [
+    input.workflow.promptInput.systemPromptAppend ?? "",
+    ...(apiSkillInstructions ? [apiSkillInstructions] : []),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const agentDefinitionName = canUseAgentDefinition
     ? input.workflow.agentDefinitionName
     : undefined;
