@@ -12,7 +12,7 @@ Available knowledge references for AI agents.
 | [mermaid-c4](mermaid-c4.md) | Mermaid diagrams — broad overview: C4 syntax, other diagram types, theming, project notes | mermaid.js.org, c4model.com, C4-PlantUML | 2026-08-13 |
 | [mermaid-c4-diagrams](mermaid-c4-diagrams.md) | Mermaid C4 syntax deep-dive — 5 diagram types, element tables, C4DiagramConfig | mermaid.js.org | 2026-08-22 |
 | [mermaid-sequence-diagrams](mermaid-sequence-diagrams.md) | Mermaid sequence diagrams — participants, messages, fragments, config | mermaid.js.org | 2026-08-26 |
-| [owl-rdf-ontology](owl-rdf-ontology.md) | OWL 2 / RDF / Turtle ontology authoring — triples, axioms, profiles, datatypes | w3.org (OWL 2 Overview/Primer, Turtle) | 2026-08-24 |
+| [openrouter-api](openrouter-api.md) | OpenRouter API — authentication, Chat Completions/Responses, embeddings, streaming, tools, routing, errors, limits, versioning | openrouter.ai/docs, github.com/OpenRouterTeam/docs | 2026-09-14 |
 | [rdflib-python](rdflib-python.md) | RDFLib (Python) — Graph API, namespaces, SPARQL, OWL authoring, plugins | rdflib.dev, rdflib.readthedocs.io | 2026-08-24 |
 | [routerai-api](routerai-api.md) | RouterAI unified AI gateway API — OpenAI/Anthropic-compatible endpoints, routing, models, keys, team management | routerai.ru/docs/reference, routerai.ru/api/openapi.json | 2026-08-15 |
 | [software-requirements-wiegers-beatty](software-requirements-wiegers-beatty.md) | Requirements engineering — elicitation, analysis, specification, validation, management | Wiegers & Beatty, "Software Requirements" (3rd ed.) | 2026-08-24 |
