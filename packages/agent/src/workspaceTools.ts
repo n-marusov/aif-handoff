@@ -19,16 +19,20 @@ const patchArgs = z.object({
   oldText: z.string().min(1),
   newText: z.string(),
 });
+const writeArgs = z.object({
+  path: z.string().min(1, "path is required and must be a non-empty string"),
+  content: z.string(),
+});
 
 export const WORKSPACE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     type: "function",
     function: {
       name: "read_file",
-      description: "Read a UTF-8 text file from the workspace.",
+      description: "Read a UTF-8 text file from the workspace. The file must already exist.",
       parameters: {
         type: "object",
-        properties: { path: { type: "string" } },
+        properties: { path: { type: "string", description: "Relative path to the file" } },
         required: ["path"],
         additionalProperties: false,
       },
@@ -41,7 +45,7 @@ export const WORKSPACE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       description: "List a workspace directory without recursion.",
       parameters: {
         type: "object",
-        properties: { path: { type: "string" } },
+        properties: { path: { type: "string", description: "Relative path to the directory" } },
         required: ["path"],
         additionalProperties: false,
       },
@@ -50,14 +54,49 @@ export const WORKSPACE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "apply_patch",
-      description: "Replace one unique exact text fragment in a workspace file.",
+      name: "write_file",
+      description:
+        "Create a new file or overwrite an existing file with the given content. " +
+        "Use this to create files that do not yet exist. " +
+        "Parent directories are created automatically if missing. " +
+        "For existing files, prefer apply_patch to preserve other content.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string" },
-          oldText: { type: "string" },
-          newText: { type: "string" },
+          path: {
+            type: "string",
+            description: "Relative path to the file to create or overwrite",
+          },
+          content: {
+            type: "string",
+            description: "Full content to write to the file",
+          },
+        },
+        required: ["path", "content"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "apply_patch",
+      description:
+        "Replace one exact unique text fragment in an existing workspace file. " +
+        "Use this to modify files that already exist. " +
+        "For new files, use write_file instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative path to the file to patch" },
+          oldText: {
+            type: "string",
+            description: "Exact unique text fragment to replace",
+          },
+          newText: {
+            type: "string",
+            description: "Replacement text",
+          },
         },
         required: ["path", "oldText", "newText"],
         additionalProperties: false,
@@ -65,6 +104,50 @@ export const WORKSPACE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
   },
 ];
+
+/**
+ * Convert a caught error into a clear, model-friendly message string.
+ * ZodError produces dense JSON that language models struggle to parse;
+ * this converts validation failures into plain instructions.
+ */
+function formatToolError(error: unknown): string {
+  if (error instanceof z.ZodError) {
+    const lines = error.issues.map((issue) => {
+      const asKeyPath = issue.path.map((p) => String(p));
+      const fieldPath = asKeyPath.length > 0 ? asKeyPath.join(".") : "arguments";
+      const reason = issue.message;
+      // Provide actionable hints for the most common schema violations
+      const hint = schemaErrorHint(asKeyPath, issue.code, issue);
+      return `  - ${fieldPath}: ${reason}.${hint ? ` ${hint}` : ""}`;
+    });
+    return `Validation error — the tool arguments did not match the expected format:\n${lines.join("\n")}`;
+  }
+  if (error instanceof RuntimeValidationError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    const lower = error.message.toLowerCase();
+    if (lower.includes("enoent") || lower.includes("no such file") || lower.includes("not found")) {
+      return `${error.message}. This usually means the file does not exist yet — use write_file to create new files.`;
+    }
+    return error.message;
+  }
+  return String(error);
+}
+
+function schemaErrorHint(path: (string | number)[], code: string, issue: z.ZodIssue): string {
+  if (code === "too_small" && "minimum" in issue && issue.minimum === 1) {
+    return `This field cannot be empty. Provide a value with at least 1 character.`;
+  }
+  if (code === "invalid_type") {
+    const invalidIssue = issue as z.ZodIssue & { expected: string; received: string };
+    return `Expected a ${invalidIssue.expected} value, but received ${invalidIssue.received}.`;
+  }
+  if (code === "unrecognized_keys" && "keys" in issue) {
+    return `Remove the unknown keys: ${(issue as z.ZodIssue & { keys: string[] }).keys.join(", ")}.`;
+  }
+  return "";
+}
 
 export class WorkspaceToolExecutor {
   private readonly root: string;
@@ -113,6 +196,15 @@ export class WorkspaceToolExecutor {
             .join("\n");
           break;
         }
+        case "write_file": {
+          const { path: rawPath, content } = writeArgs.parse(args);
+          const absolute = this.safe(rawPath);
+          const parentDir = path.dirname(absolute);
+          await fs.mkdir(parentDir, { recursive: true });
+          await fs.writeFile(absolute, content, "utf8");
+          result = `Written ${content.length} characters to ${rawPath}`;
+          break;
+        }
         case "apply_patch": {
           const { path: rawPath, oldText, newText } = patchArgs.parse(args);
           const absolute = this.safe(rawPath);
@@ -150,7 +242,12 @@ export class WorkspaceToolExecutor {
         },
         "[FIX] Local workspace tool failed",
       );
-      throw error;
+      // Convert to a model-friendly error string instead of rethrowing the
+      // raw exception. The caller (subagentQuery.ts tool loop) catches this
+      // with `.catch((error) => "ERROR: ...")` and feeds it back to the
+      // model.  Raw ZodError JSON confuses models; formatToolError produces
+      // clear instructions the model can act on.
+      throw new RuntimeValidationError(formatToolError(error));
     }
   }
 }
