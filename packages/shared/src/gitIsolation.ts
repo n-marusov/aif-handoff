@@ -384,7 +384,14 @@ export function branchExists(projectRoot: string, branchName: string): boolean {
     ["show-ref", "--verify", "--quiet", `refs/heads/${branchName}`],
     { ignoreExit: true },
   );
-  return status === 0;
+  if (status === 0) return true;
+
+  // Empty-repo fallback: when a repo has zero commits ("No commits yet"),
+  // git show-ref returns non-zero for every branch because refs/heads/<name>
+  // doesn't exist as a file yet, even though HEAD points to the default
+  // branch name. Check the current HEAD reference as a second signal.
+  const currentBranch = getCurrentBranch(projectRoot);
+  return currentBranch === branchName;
 }
 
 function remoteBranchExists(projectRoot: string, branchName: string): boolean {
@@ -568,6 +575,15 @@ function resolveGitDefaultBaseBranch(
     );
     return { branchName: "master", createFromRemote: false };
   }
+  // Final fallback: read HEAD directly for empty repos (zero commits).
+  const currentBranch = getCurrentBranch(projectRoot);
+  if (currentBranch) {
+    log.warn(
+      { projectRoot, configuredBase: fallbackBase, resolvedBase: currentBranch, source: "HEAD" },
+      "No project git base branch is configured; using current HEAD branch",
+    );
+    return { branchName: currentBranch, createFromRemote: false };
+  }
   return { branchName: fallbackBase, createFromRemote: false };
 }
 
@@ -605,6 +621,16 @@ function resolveBaseBranch(
       "Configured base branch is missing; falling back to legacy master branch",
     );
     return { branchName: "master", createFromRemote: false };
+  }
+  // Final fallback: when the repo has zero commits ("No commits yet") neither
+  // show-ref nor origin/HEAD can name the current branch. Read HEAD directly.
+  const currentBranch = getCurrentBranch(projectRoot);
+  if (currentBranch) {
+    log.warn(
+      { projectRoot, configuredBase, resolvedBase: currentBranch, source: "HEAD" },
+      "Configured base branch is missing; falling back to current HEAD branch",
+    );
+    return { branchName: currentBranch, createFromRemote: false };
   }
   return { branchName: configuredBase, createFromRemote: false };
 }
