@@ -144,7 +144,7 @@ data/                    # SQLite database files (gitignored)
 | GitLab Demo         | docs/gitlab-demo.md           | End-to-end GitLab.com + router.ai demo runbook                  |
 | Dev GUI Demo        | docs/dev-gui-demo.md          | Local dev + Web UI GitLab/router.ai runbook                     |
 | Use Cases           | docs/use-cases/README.md      | Use case index with 42 UC files mapped to HF1–HF12              |
-| Functional Reqs     | docs/fun-req/README.md        | FR specification: ID format, priorities, quality criteria       |
+| Functional Reqs     | docs/fun-req/README.md        | 42 FR files generated from 42 UC, mapped to HF1–HF12            |
 | Non-Functional Reqs | docs/nonfun-req/README.md     | NFR specification: areas, quality criteria, project constraints |
 | Contracts           | docs/contracts/README.md      | Inter-package contracts, API, WebSocket, and adapter interfaces |
 | Business Rules      | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies          |

@@ -74,20 +74,18 @@ REQ-FR-<L1>.<L2>.<action>
 
 ## Текущее состояние
 
-На 2026-09-14 в каталоге **0 FR**: детализация UC в функциональные требования не производилась. FR заводятся после определения соответствующего UC и его анализа.
+На 2026-09-14 в каталоге **42 FR**: FR детализируют все 42 UC системы. Генерация выполнена на основе анализа UC (`use-cases/`), исходного кода (packages/agent, packages/data, packages/runtime, packages/api, packages/shared) и тестов.
 
-| Показатель                   | Значение                                             |
-| ---------------------------- | ---------------------------------------------------- |
-| FR всего (файлов)            | 0                                                    |
-| По приоритетам               | P0 — 0 · P1 — 0 · P2 — 0                             |
-| По классу                    | `as is` — 0 · `to be` — 0                            |
-| Покрытие доменов (L1)        | —                                                    |
-| Покрытие поддоменов (L2)     | —                                                    |
-| UC-источников (`use-cases/`) | 42 UC (`as is`): все домены L1 покрыты; 0 `to be`-UC |
+| Показатель                   | Значение                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| FR всего (файлов)            | 42                                                                                                                  |
+| По приоритетам               | P0 — 16 · P1 — 16 · P2 — 10                                                                                         |
+| По классу                    | `as is` — 42 · `to be` — 0                                                                                          |
+| Покрытие доменов (L1)        | все 11 доменов: pipeline, dashboard, runtime, vcs-auto, accounting, handoff, chat, auth, audit, integration, warmup |
+| Покрытие поддоменов (L2)     | все 35 поддоменов (полное покрытие)                                                                                 |
+| UC-источников (`use-cases/`) | 42 UC (`as is`): все домены L1 покрыты; 0 `to be`-UC                                                                |
 
-Сверка «домены UC → покрытие FR» — проверка полноты набора (W&B: collection completeness): на дату актуализации ни один из 11 доменов UC (`pipeline`, `dashboard`, `runtime`, `vcs-auto`, `accounting`, `handoff`, `chat`, `auth`, `audit`, `integration`, `warmup`) не покрыт FR. Детализация UC в FR — этап Specification (см. «FR в жизненном цикле требований»), выполняемый по мере готовности UC и приоритетов roadmap (`vision.md` §2.5).
-
-Первоочередными кандидатами для FR (по приоритетам MVP, `vision.md` §2.4) являются UC домена `pipeline` — как составляющие hand-off-конвейера (HF1, HF5), за которым следуют `auth` (HF9), `dashboard` (HF2) и `handoff` (HF7).
+Все FR верифицированы на соответствие исходному коду: state machine (`packages/shared/src/stateMachine.ts`), data layer (`packages/data/src/taskTransitions.ts`, `taskOwnership.ts`, `audit.ts`, `participants.ts`, `authSessions.ts`), coordinator (`packages/agent/src/coordinator.ts`), runtime (`packages/runtime/src/errors.ts`, `usageSink.ts`, `registry.ts`, `resolution.ts`, `bootstrap.ts`), API routes (`packages/api/src/routes/`) и subagents (`packages/agent/src/subagents/`).
 
 ## Правила оформления
 
