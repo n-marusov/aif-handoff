@@ -72,24 +72,45 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 
 ## Текущее состояние
 
-На 2026-09-14 в каталоге **0 NFR**: формализация нефункциональных требований не производилась. NFR заводятся после определения соответствующих FR и анализа атрибутов качества.
+На 2026-09-14 в каталоге **23 NFR**: формализация выполнена реверс-инжинирингом из кода и документации. Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
 
-| Показатель              | Значение                  |
-| ----------------------- | ------------------------- |
-| NFR всего (файлов)      | 0                         |
-| По приоритетам          | P0 — 0 · P1 — 0 · P2 — 0  |
-| По классу               | `as is` — 0 · `to be` — 0 |
-| Покрытие областей       | —                         |
-| Покрытие квалификаторов | —                         |
+| Показатель              | Значение                                                |
+| ----------------------- | ------------------------------------------------------- |
+| NFR всего (файлов)      | 23                                                      |
+| По приоритетам          | P0 — 4 · P1 — 12 · P2 — 7                               |
+| По классу               | `as is` — 16 · `to be` — 7                              |
+| Покрытие областей       | api · security · data · infra · ops · integration       |
+| Покрытие квалификаторов | performance · availability · observability · compliance |
 
-Сверка «атрибуты качества → покрытие NFR» — проверка полноты набора (W&B: collection completeness). На дату актуализации ни одна область (`api`, `security`, `data`, `infra`, `ui`, `ops`, `integration`, `process`, `doc`) не покрыта NFR. Формализация NFR — этап Specification (см. «NFR в жизненном цикле требований»), выполняемый после определения FR и выявления атрибутов качества.
+Сверка «атрибуты качества → покрытие NFR» — проверка полноты набора (W&B: collection completeness). На дату актуализации покрыты области: `api`, `security`, `data`, `infra`, `ops`, `integration`. Не покрыты: `ui`, `process`, `doc`.
 
-Первоочередными кандидатами для NFR (по приоритетам MVP, `vision.md` §2.4) являются:
+### Полный перечень NFR
 
-- **api.availability**: авто-восстановление WebSocket, resilience coordinator polling
-- **security.compliance**: аутентификация и session management (`BR-constraint.auth.sessions`)
-- **ops.observability**: иммутабельный аудит (`BR-constraint.audit.immutable-trail`), логирование ошибок runtime
-- **data.compliance**: целостность и согласованность SQLite (`BR-ownership.*`, `BR-task-lifecycle.*`)
+| ID                                                           | Приоритет | Класс | Описание                                                       |
+| ------------------------------------------------------------ | --------- | ----- | -------------------------------------------------------------- |
+| `REQ-NFR-data.compliance.task-state-persistence`             | P0        | as is | Состояние задачи не теряется при перезапуске                   |
+| `REQ-NFR-ops.observability.audit-trail-completeness`         | P0        | as is | 100% переходов фиксируются в иммутабельном аудите              |
+| `REQ-NFR-data.compliance.task-transactional-consistency`     | P0        | as is | Атомарные транзакционные переходы с защитой конфликтов         |
+| `REQ-NFR-api.availability.coordinator-resilience`            | P0        | as is | Coordinator восстанавливается после сбоев без потери контекста |
+| `REQ-NFR-api.performance.coordinator-polling-latency`        | P1        | as is | Задержка обнаружения задачи не более 30 с                      |
+| `REQ-NFR-api.availability.websocket-reconnect`               | P1        | as is | Авто-восстановление WebSocket после разрыва                    |
+| `REQ-NFR-api.availability.runtime-adapter-timeouts`          | P1        | as is | Таймауты адаптеров runtime с категоризацией                    |
+| `REQ-NFR-ops.observability.heartbeat-detection`              | P1        | as is | Stale-детекция и эскалация зависших задач                      |
+| `REQ-NFR-ops.observability.error-categorization`             | P1        | as is | Структурированная категоризация ошибок runtime                 |
+| `REQ-NFR-ops.observability.log-level-config`                 | P1        | as is | Конфигурируемый уровень логирования                            |
+| `REQ-NFR-api.compliance.request-validation`                  | P1        | as is | Zod-валидация всех мутирующих эндпоинтов                       |
+| `REQ-NFR-security.compliance.session-auth`                   | P1        | to be | 100% API-запросов требуют аутентификации (Фаза 2)              |
+| `REQ-NFR-security.compliance.csrf-protection`                | P1        | to be | CSRF-защита мутирующих запросов (Фаза 2)                       |
+| `REQ-NFR-security.compliance.password-storage`               | P1        | to be | Scrypt-хеширование паролей (Фаза 2)                            |
+| `REQ-NFR-security.compliance.origin-validation`              | P1        | to be | Валидация origin запросов (Фаза 2)                             |
+| `REQ-NFR-security.compliance.login-rate-limit`               | P1        | to be | Rate-limit на попытки входа (Фаза 2)                           |
+| `REQ-NFR-integration.availability.vcs-rate-limit-resilience` | P2        | as is | Resilience при rate-limit VCS (Фаза 2)                         |
+| `REQ-NFR-integration.availability.runtime-provider-fallback` | P2        | as is | Переключение адаптера при недоступности провайдера             |
+| `REQ-NFR-infra.performance.concurrency-limits`               | P2        | as is | Ограничение параллельного выполнения задач                     |
+| `REQ-NFR-data.compliance.database-migration-integrity`       | P2        | as is | Append-only миграции без повреждения данных                    |
+| `REQ-NFR-api.compliance.rate-limit-requests`                 | P2        | to be | Rate-limit HTTP API (Фаза 3)                                   |
+| `REQ-NFR-ops.observability.activity-log-batching`            | P2        | as is | Пакетная запись activity log                                   |
+| `REQ-NFR-infra.compliance.worktree-isolation`                | P2        | as is | Git-worktree изоляция параллельных задач                       |
 
 ## Правила оформления
 
