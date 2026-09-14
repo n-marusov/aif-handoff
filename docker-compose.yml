@@ -102,6 +102,7 @@ services:
       - DATABASE_URL=/data/aif.sqlite
       - MCP_TRANSPORT=http
       - MCP_PORT=3100
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-charlie-mcp-dev-token}
       - PROJECTS_DIR=${PROJECTS_DIR:-${PWD}/projects}
       - PROJECTS_HOST_ROOT=${PWD}
       - PROJECTS_MOUNT=${PROJECTS_MOUNT:-/home/www}
