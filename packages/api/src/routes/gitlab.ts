@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { getEnv, logger } from "@aif/shared";
+import { getEnv, logger, pullDefaultBranch } from "@aif/shared";
 import {
   deleteGitLabRepository,
   findGitLabIssueByTaskId,
@@ -198,6 +198,13 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         502,
       );
     }
+  }
+
+  // Best-effort git pull before issue sync so the local repo reflects the
+  // remote default branch. Failure is non-blocking (logs at debug level).
+  const project = findProjectById(projectId);
+  if (project?.rootPath) {
+    pullDefaultBranch(project.rootPath);
   }
 
   try {

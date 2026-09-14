@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { getEnv, logger } from "@aif/shared";
+import { getEnv, logger, pullDefaultBranch } from "@aif/shared";
 import {
   deleteGitHubRepository,
   findGitHubIssueByTaskId,
@@ -161,6 +161,13 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
   if (!connection) return c.json({ error: "GitHub connection not found" }, 404);
   if (!connection.enabled)
     return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitHubIssues(projectId) });
+
+  // Best-effort git pull before issue sync so the local repo reflects the
+  // remote default branch. Failure is non-blocking (logs at debug level).
+  const project = findProjectById(projectId);
+  if (project?.rootPath) {
+    pullDefaultBranch(project.rootPath);
+  }
 
   try {
     const client = new GitHubClient(tokenFor(connection.tokenEnvVar));

@@ -423,6 +423,36 @@ export function workingTreeClean(projectRoot: string): boolean {
   return status === 0 && stdout.length === 0;
 }
 
+/**
+ * Best-effort `git pull --ff-only origin <current-branch>`.
+ *
+ * Safe to call on any repo — returns immediately with a warning log when:
+ * - The repo is on a detached HEAD
+ * - No remote "origin" is configured
+ * - There are no commits yet (empty repo)
+ * - The fast-forward pull fails for any other reason (network, merge conflict)
+ *
+ * Designed for use in project-sync workflows where the git state should be
+ * refreshed before issue/PR synchronization. Never throws.
+ */
+export function pullDefaultBranch(projectRoot: string): void {
+  const currentBranch = getCurrentBranch(projectRoot);
+  if (!currentBranch) {
+    log.warn({ projectRoot }, "pullDefaultBranch: cannot pull from detached HEAD");
+    return;
+  }
+
+  const { status, stderr } = runGit(projectRoot, ["pull", "--ff-only", "origin", currentBranch], {
+    ignoreExit: true,
+  });
+  if (status !== 0) {
+    log.debug(
+      { projectRoot, currentBranch, stderr },
+      "pullDefaultBranch: best-effort git pull skipped (no remote, empty repo, or pull conflict)",
+    );
+  }
+}
+
 export function describeDirtyWorkingTree(projectRoot: string): string | null {
   const { stdout, status } = runGit(projectRoot, ["status", "--porcelain"], { ignoreExit: true });
   if (status !== 0 || stdout.length === 0) return null;

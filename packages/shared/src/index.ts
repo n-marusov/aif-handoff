@@ -260,6 +260,7 @@ export {
   slugifyTitle,
   validateBranchName,
   workingTreeClean,
+  pullDefaultBranch,
   type BuildTaskWorktreePathInput,
   type EnsureFeatureBranchInput,
   type EnsureFeatureBranchResult,
