@@ -12,7 +12,7 @@
 > router.ai (OpenAI-compatible) through the local Codex CLI; repository — GitHub.com.
 >
 > This runbook mirrors the [GitLab Demo](gitlab-demo.md) but adds the plan-review gate and
-> the GitHub specifics (token scopes, no auto git-prepare).
+> the GitHub specifics (token scopes, auto git-prepare on Connect/Sync now).
 
 ```
 ┌────────────┐   Issue    ┌───────────┐   sync 60s   ┌────────────────┐
@@ -41,12 +41,12 @@
 
 ## 0. Prerequisites
 
-| Item           | How to get / format                                                                                                                                                                                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub repo    | A repository with a default branch and at least one commit. Format `owner/repository`.                                                                                                                                                                                                |
-| GitHub token   | Fine-grained PAT scoped to the repository: Metadata read, Issues read+write, Pull requests read+write, Contents read+write, Commit statuses read, Checks read. Git push uses normal Git credentials, not this token.                                                                  |
-| router.ai      | OpenAI-compatible base URL, model id with tool use, API key. Codex CLI needs the Responses API (`wire_api = "responses"`), auto-configured by the adapter from the profile `baseUrl`.                                                                                                 |
-| Local checkout | Unlike GitLab mode, GitHub mode has **no auto git-prepare**: point the project at a normal clone of the repository with `origin` configured, working credentials for push, and the default branch fetched. The connect step validates repository access via the GitHub REST API only. |
+| Item           | How to get / format                                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub repo    | A repository with a default branch and at least one commit. Format `owner/repository`.                                                                                                                               |
+| GitHub token   | Fine-grained PAT scoped to the repository: Metadata read, Issues read+write, Pull requests read+write, Contents read+write, Commit statuses read, Checks read. Git push uses normal Git credentials, not this token. |
+| router.ai      | OpenAI-compatible base URL, model id with tool use, API key. Codex CLI needs the Responses API (`wire_api = "responses"`), auto-configured by the adapter from the profile `baseUrl`.                                |
+| Local checkout | Auto git-prepare is available: the agent fetches and checks out the default branch when connecting or on the first Sync now.                                                                                         |
 
 ---
 
@@ -121,12 +121,13 @@ and the Responses API.
 
 ---
 
-## 4. Project + Git remote (manual for GitHub)
+## 4. Project + Git remote (auto now, was manual)
 
-Create a project whose `rootPath` is the local checkout of the GitHub repository.
-Because GitHub Connect does not auto-prepare the repository, ensure the checkout already
-has a working `origin`, credentials for push, and the default branch checked out/fetched
-(this is the documented parity gap with GitLab auto git-prepare).
+Create a project whose `rootPath` points to the agent workspace (the auto-prepare flow
+handles cloning). On Connect or the first Sync now, the agent automatically prepares the
+local git repo — adds `origin`, configures the credential helper, sets `safe.directory`,
+fetches and checks out the default branch, and initialises AI Factory scaffold files if
+missing — making a manual clone unnecessary.
 
 ## 5. Connect the repository
 

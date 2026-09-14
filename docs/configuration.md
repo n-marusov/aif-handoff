@@ -142,13 +142,17 @@ assignee and milestone must match. With no filters, all open issues are eligible
 idempotent by project plus issue number and updates the existing task instead of importing
 duplicates.
 
-**GitHub git-prepare parity gap (not implemented):** unlike GitLab Connect / Sync now,
-the GitHub mode does **not** auto-prepare the local repository. There is no automatic
-`origin` add, credential-helper configuration, default-branch fetch, or AI Factory
-scaffold on GitHub Connect — GitHub Connect validates repository access via the REST API
-only. For GitHub mode, point the project at a normal clone of the GitHub repository with
-working Git credentials and a fetched default branch before enabling auto-queue. Parity
-with the GitLab auto git-prepare flow is a known gap.
+**GitHub auto git-prepare (Connect / Sync now):** when a GitHub repository is
+connected (or the first `Sync now` runs), the agent automatically prepares the
+local git repo exactly as GitLab does: adds the `origin` remote, configures the
+credential helper (`x-access-token`), sets `safe.directory`, fetches and checks
+out the **default branch** (whatever it is named — from GitHub's `defaultBranch`),
+and initializes AI Factory files (`.ai-factory/` etc.) via `initProject()` if
+missing, committing them as `chore: ai-factory scaffold`. This replaces the manual
+`git clone` / credential-helper setup steps. On `Sync now`, a prepare failure
+aborts the import immediately and leaves the task `blocked`. The agent exposes
+this via its always-on internal API (`POST /github/prepare` on
+`AGENT_INTERNAL_URL`).
 
 ## GitLab Issue-to-MR Mode
 
@@ -165,14 +169,15 @@ through the existing `.env` file. Custom names must use the uppercase `GITLAB_*`
 this integration cannot forward unrelated application secrets to GitLab.
 
 **Auto git-prepare (Connect / Sync now):** when a repository is connected (or the first
-`Sync now` runs), the agent automatically prepares the local git repo: adds the `origin`
-remote, configures the credential helper, sets `safe.directory`, fetches and checks out the
-**default branch** (whatever it is named — from GitLab's `defaultBranch`), and initializes
-AI Factory files (`.ai-factory/` etc.) via `initProject()` if missing, committing them as
-`chore: ai-factory scaffold`. This replaces the manual `git remote add` / credential-helper /
-mirroring steps. On `Sync now`, a prepare failure aborts the import immediately and leaves
-the task `blocked`. The agent exposes this via its always-on internal API
-(`POST /gitlab/prepare` on `AGENT_INTERNAL_URL`).
+`Sync now` runs), for both GitLab and GitHub, the agent automatically prepares the local
+git repo: adds the `origin` remote, configures the credential helper, sets `safe.directory`,
+fetches and checks out the **default branch** (whatever it is named — from the provider's
+`defaultBranch`), and initializes AI Factory files (`.ai-factory/` etc.) via `initProject()`
+if missing, committing them as `chore: ai-factory scaffold`. This replaces the manual
+`git remote add` / credential-helper / mirroring steps. On `Sync now`, a prepare failure
+aborts the import immediately and leaves the task `blocked`. The agent exposes this via
+its always-on internal API (`POST /gitlab/prepare` and `POST /github/prepare` on
+`AGENT_INTERNAL_URL`).
 
 **Codex provider auto-config (OpenAI-compatible gateways):** for Codex `cli` transport
 against a custom base URL (e.g. router.ai), the adapter writes `~/.codex/config.toml`
