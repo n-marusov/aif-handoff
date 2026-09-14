@@ -30,7 +30,7 @@ import {
   gitlabPublishSchema,
   gitlabSyncSchema,
 } from "../schemas.js";
-import { callAgentGitPrepare } from "../services/gitlabPrepareBridge.js";
+import { callAgentGitPrepare } from "../services/gitPrepareBridge.js";
 import {
   GitLabApiError,
   GitLabClient,
@@ -154,7 +154,7 @@ gitlabRouter.put("/:id/gitlab", jsonValidator(gitlabConnectSchema), async (c) =>
     // Best-effort git-prepare on connect: the agent extracts the default branch
     // and initializes AI Factory files. Failures are logged (not fatal) — the
     // next Sync now re-runs prepare strictly.
-    const prepare = await callAgentGitPrepare(projectId, { strict: false });
+    const prepare = await callAgentGitPrepare(projectId, { provider: "gitlab", strict: false });
     if (!prepare.ok) {
       log.warn(
         { projectId, errorCode: prepare.errorCode, error: prepare.error },
@@ -184,7 +184,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
   // branch + init AI Factory files. On failure, surface the error immediately
   // (task stays blocked) instead of importing issues into a broken repo.
   if (!connection.gitPreparedAt) {
-    const prepare = await callAgentGitPrepare(projectId, { strict: true });
+    const prepare = await callAgentGitPrepare(projectId, { provider: "gitlab", strict: true });
     if (!prepare.ok) {
       log.warn(
         { projectId, errorCode: prepare.errorCode, error: prepare.error },

@@ -1,8 +1,10 @@
 import { getEnv, logger } from "@aif/shared";
 
-const log = logger("gitlab-prepare-bridge");
+const log = logger("git-prepare-bridge");
 
-export interface GitLabPrepareBridgeResult {
+export type GitPrepareProvider = "github" | "gitlab";
+
+export interface GitPrepareBridgeResult {
   ok: boolean;
   gitPreparedAt?: string;
   /** Present when the agent reported a structured prepare failure. */
@@ -21,8 +23,11 @@ function internalApiHeaders(): Record<string, string> {
 }
 
 /**
- * Ask the agent to auto-prepare the local git repo for a GitLab connection
+ * Ask the agent to auto-prepare the local git repo for a VCS connection
  * (origin, credentials, default branch, AI Factory scaffold). Synchronous.
+ *
+ * GitHub and GitLab share one endpoint contract (`POST /<provider>/prepare`);
+ * only the provider namespace differs.
  *
  * - `strict = true` (Sync now / first sync): failures are surfaced to the caller
  *   so the task can be blocked immediately.
@@ -31,17 +36,17 @@ function internalApiHeaders(): Record<string, string> {
  */
 export async function callAgentGitPrepare(
   projectId: string,
-  options: { strict?: boolean; timeoutMs?: number } = {},
-): Promise<GitLabPrepareBridgeResult> {
+  options: { provider: GitPrepareProvider; strict?: boolean; timeoutMs?: number },
+): Promise<GitPrepareBridgeResult> {
   const env = getEnv();
   const baseUrl = env.AGENT_INTERNAL_URL.replace(/\/$/, "");
-  const url = `${baseUrl}/gitlab/prepare`;
-  // Prepare runs real git (fetch/checkout/commit of the AI Factory scaffold) and
-  // can take well over 30s on first connect — allow up to 2 minutes.
+  const url = `${baseUrl}/${options.provider}/prepare`;
+  // Prepare runs real git (clone/fetch/checkout/commit of the AI Factory
+  // scaffold) and can take well over 30s on first connect — allow up to 2 minutes.
   const timeoutMs = options.timeoutMs ?? 120_000;
 
   log.info(
-    { projectId, agentUrl: baseUrl, strict: options.strict ?? false },
+    { projectId, provider: options.provider, agentUrl: baseUrl, strict: options.strict ?? false },
     "Requesting agent git-prepare",
   );
   let response: Response;
@@ -54,12 +59,15 @@ export async function callAgentGitPrepare(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const result: GitLabPrepareBridgeResult = {
+    const result: GitPrepareBridgeResult = {
       ok: false,
-      errorCode: "gitlab_prepare_unavailable",
+      errorCode: `${options.provider}_prepare_unavailable`,
       error: `Agent internal API unavailable: ${message}`,
     };
-    log.warn({ projectId, err: error }, "GitLab git-prepare agent call failed (unreachable)");
+    log.warn(
+      { projectId, provider: options.provider, err: error },
+      "git-prepare agent call failed (unreachable)",
+    );
     return result;
   }
 
@@ -69,14 +77,14 @@ export async function callAgentGitPrepare(
       code?: string;
       projectId?: string;
     } | null;
-    const result: GitLabPrepareBridgeResult = {
+    const result: GitPrepareBridgeResult = {
       ok: false,
-      errorCode: payload?.code ?? "gitlab_prepare_failed",
+      errorCode: payload?.code ?? `${options.provider}_prepare_failed`,
       error: payload?.error ?? `Agent git-prepare failed with status ${response.status}`,
     };
     log.warn(
-      { projectId, status: response.status, code: result.errorCode },
-      "GitLab git-prepare failed",
+      { projectId, provider: options.provider, status: response.status, code: result.errorCode },
+      "git-prepare failed",
     );
     return result;
   }
@@ -85,10 +93,13 @@ export async function callAgentGitPrepare(
     ok?: boolean;
     gitPreparedAt?: string;
   } | null;
-  const result: GitLabPrepareBridgeResult = {
+  const result: GitPrepareBridgeResult = {
     ok: payload?.ok !== false,
     gitPreparedAt: payload?.gitPreparedAt,
   };
-  log.info({ projectId, gitPreparedAt: result.gitPreparedAt }, "GitLab git-prepare completed");
+  log.info(
+    { projectId, provider: options.provider, gitPreparedAt: result.gitPreparedAt },
+    "git-prepare completed",
+  );
   return result;
 }

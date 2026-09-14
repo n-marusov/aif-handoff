@@ -21,6 +21,7 @@ import {
   upsertGitHubRepository,
 } from "@aif/data";
 import { jsonValidator } from "../middleware/zodValidator.js";
+import { callAgentGitPrepare } from "../services/gitPrepareBridge.js";
 import {
   requestWorktreeCleanupAfterMerge,
   snapshotTaskWorktree,
@@ -143,6 +144,16 @@ githubRouter.put("/:id/github", jsonValidator(githubConnectSchema), async (c) =>
       eligibility: body.eligibility,
       enabled: body.enabled,
     });
+    // Best-effort git-prepare on connect: the agent clones/adopts the remote
+    // default branch and initializes AI Factory files. Failures are logged (not
+    // fatal) — the next Sync now re-runs prepare strictly.
+    const prepare = await callAgentGitPrepare(projectId, { provider: "github", strict: false });
+    if (!prepare.ok) {
+      log.warn(
+        { projectId, errorCode: prepare.errorCode, error: prepare.error },
+        "GitHub git-prepare deferred on connect; Sync now will re-run it strictly",
+      );
+    }
     return c.json(connection);
   } catch (error) {
     return githubErrorResponse(c, error);
@@ -161,6 +172,27 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
   if (!connection) return c.json({ error: "GitHub connection not found" }, 404);
   if (!connection.enabled)
     return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitHubIssues(projectId) });
+
+  // First sync (or reconnect) also runs strict git-prepare: add origin, fetch and
+  // check out the default branch, and init AI Factory files. On failure, surface
+  // the error immediately (the task stays blocked) instead of importing issues
+  // into a repository that was never cloned.
+  if (!connection.gitPreparedAt) {
+    const prepare = await callAgentGitPrepare(projectId, { provider: "github", strict: true });
+    if (!prepare.ok) {
+      log.warn(
+        { projectId, errorCode: prepare.errorCode, error: prepare.error },
+        "GitHub git-prepare failed on sync; aborting import",
+      );
+      return c.json(
+        {
+          error: prepare.error ?? "GitHub git-prepare failed",
+          code: prepare.errorCode ?? "github_prepare_failed",
+        },
+        502,
+      );
+    }
+  }
 
   // Best-effort git pull before issue sync so the local repo reflects the
   // remote default branch. Failure is non-blocking (logs at debug level).

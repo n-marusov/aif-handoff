@@ -9,6 +9,12 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   return { ...actual, getDb: () => testDb.current };
 });
 
+vi.mock("../services/gitPrepareBridge.js", () => ({
+  callAgentGitPrepare: vi
+    .fn()
+    .mockResolvedValue({ ok: true, gitPreparedAt: "2026-09-14T21:00:00.000Z" }),
+}));
+
 const { githubRouter } = await import("../routes/github.js");
 const { GitHubClient, issueIsEligible } = await import("../services/github.js");
 const {
