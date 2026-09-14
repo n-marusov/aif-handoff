@@ -162,6 +162,77 @@ data/                    # SQLite database files (gitignored)
 | .ai-factory/RULES.md        | Project rules and conventions         |
 | .ai-factory/references/     | AI provider SDK reference docs        |
 
+## MCP Connection
+
+The `handoff` MCP server (`@aif/mcp`) exposes nine `handoff_*` task tools over the Model Context Protocol. Full reference: `docs/mcp-sync.md`.
+
+| Transport         | When                                     | Endpoint                            |
+| ----------------- | ---------------------------------------- | ----------------------------------- |
+| `stdio` (default) | Local client on the same machine         | `npx tsx packages/mcp/src/index.ts` |
+| `http`            | Docker stack (`make docker-dev`), remote | `http://localhost:3100/mcp`         |
+
+### HTTP — Docker and remote clients
+
+`docker compose up` starts the `mcp` service with `MCP_TRANSPORT=http` and publishes host port `3100` (`MCP_PORT`). Every `/mcp` request must send `Authorization: Bearer <MCP_AUTH_TOKEN>`; `/health` is unauthenticated and returns `{"status":"ok"}`. Missing or wrong credentials return `401` with `code: "mcp_authentication_required"`.
+
+Set `MCP_AUTH_TOKEN` in `.env`. When unset, compose falls back to the dev-only `charlie-mcp-dev-token` — replace it with a long random value outside local development.
+
+Claude Code (`.mcp.json` at the project root or the client's own config):
+
+```json
+{
+  "mcpServers": {
+    "handoff": {
+      "type": "http",
+      "url": "http://localhost:3100/mcp",
+      "headers": { "Authorization": "Bearer charlie-mcp-dev-token" }
+    }
+  }
+}
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.handoff]
+url = "http://localhost:3100/mcp"
+bearer_token_env_var = "MCP_AUTH_TOKEN"
+```
+
+The HTTP transport is single-session by default: only the first client can `initialize`, and a second concurrent client gets `-32600 "Server already initialized"`. Set `AIF_MCP_HTTP_MULTI_SESSION_ENABLED=true` to let several clients (multiple editor windows) connect concurrently.
+
+### stdio — local clients
+
+The repository does not ship `.mcp.json`; create it at the project root (or let the Web UI installer write the client config). Absolute paths are required — the MCP process cwd is not guaranteed to be the project root.
+
+```json
+{
+  "mcpServers": {
+    "handoff": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "packages/mcp/src/index.ts"],
+      "cwd": "/absolute/path/to/aif-handoff",
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "DATABASE_URL": "/absolute/path/to/aif-handoff/data/aif.sqlite",
+        "PROJECTS_DIR": "/absolute/path/to/aif-handoff/.projects",
+        "LOG_LEVEL": "info",
+        "LOG_DESTINATION": "stderr"
+      }
+    }
+  }
+}
+```
+
+`LOG_DESTINATION=stderr` is mandatory for stdio: `stdout` carries the JSON-RPC stream, and application logs on it break the handshake. stdio is trusted and requires no token.
+
+### Install and verify
+
+- Web UI → Global Settings → MCP → Install calls `POST /settings/mcp/install`, which writes the entry into each registered runtime's client config (Claude `~/.claude.json`, Codex `~/.codex/config.toml`). `GET /settings/mcp` reports status; `DELETE /settings/mcp` removes it.
+- The installer picks the HTTP URL form when `MCP_PORT` is a valid integer port, otherwise it falls back to the `npx tsx …` stdio entry. The auto-written HTTP entry carries the URL only — add the `Authorization: Bearer` header yourself when the server runs with `MCP_TRANSPORT=http`.
+- Rate limits: reads `120`/min (burst `10`), writes `30`/min (burst `5`) — tunable via `MCP_RATE_LIMIT_*`.
+
 ## Agent Rules
 
 - Never combine shell commands with `&&`, `||`, or `;` — execute each command as a separate Bash tool call. This applies even when a skill, plan, or instruction provides a combined command — always decompose it into individual calls.
