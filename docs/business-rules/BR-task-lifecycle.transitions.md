@@ -24,7 +24,7 @@
 
 ## Детализация
 
-- Действия выражаются событиями задачи, а не произвольной сменой стадии: `start_ai`, `start_human_work`, `mark_plan_review`, `start_implementation`, `publish_plan`, `approve_plan`, `request_plan_changes`, `submit_implementation`, `complete_review`, `request_review_changes`, `pass_verification`, `fail_verification`, `request_replanning`, `fast_fix`, `approve_done`, `request_changes`, `retry_from_blocked`.
+- Действия выражаются событиями задачи, а не произвольной сменой стадии: `start_ai`, `start_human_work`, `mark_plan_review`, `start_implementation`, `approve_plan`, `request_plan_changes`, `submit_implementation`, `complete_review`, `request_review_changes`, `pass_verification`, `fail_verification`, `request_replanning`, `fast_fix`, `approve_done`, `request_changes`, `retry_from_blocked`.
 - **AI-владелец**: задача продвигается автоматическим агентом.
 - **Человек-владелец**: доступен собственный набор действий; действия, требующие AI, отклоняются с признаком «требуется передача задачи AI».
 - **Участник** не изменяет стадию напрямую — только через явное действие задачи.
