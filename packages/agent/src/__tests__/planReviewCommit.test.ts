@@ -31,7 +31,7 @@ function seedTask(rootPath: string, taskId = "task"): void {
   testDb.current.insert(projects).values({ id: "project", name: "Project", rootPath }).run();
   testDb.current
     .insert(tasks)
-    .values({ id: taskId, projectId: "project", title: TASK_TITLE, status: "plan_ready" })
+    .values({ id: taskId, projectId: "project", title: TASK_TITLE, status: "plan_review" })
     .run();
 }
 

@@ -80,16 +80,15 @@ function resolveLegacyAction(
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
         : denied("action_not_allowed", "start_ai is only allowed from backlog");
     case "start_implementation":
-      if (task.status !== "plan_ready") {
-        return denied("action_not_allowed", "start_implementation is only allowed from plan_ready");
+      if (task.status !== "plan_ready" && task.status !== "plan_review") {
+        return denied(
+          "action_not_allowed",
+          "start_implementation is only allowed from plan_ready or plan_review",
+        );
       }
       return task.autoMode
         ? denied("action_not_allowed", "start_implementation is not needed when autoMode=true")
         : { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } };
-    case "publish_plan":
-      return task.status === "plan_ready"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_review" } }
-        : denied("action_not_allowed", "publish_plan is only allowed from plan_ready");
     case "approve_plan":
       return task.status === "plan_review"
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } }
@@ -99,13 +98,21 @@ function resolveLegacyAction(
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } }
         : denied("action_not_allowed", "request_plan_changes is only allowed from plan_review");
     case "request_replanning":
-      return task.status === "plan_ready"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } }
-        : denied("action_not_allowed", "request_replanning is only allowed from plan_ready");
+      if (task.status !== "plan_ready" && task.status !== "plan_review") {
+        return denied(
+          "action_not_allowed",
+          "request_replanning is only allowed from plan_ready or plan_review",
+        );
+      }
+      return { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } };
     case "fast_fix":
-      return task.status === "plan_ready"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_ready" } }
-        : denied("action_not_allowed", "fast_fix is only allowed from plan_ready");
+      if (task.status !== "plan_ready" && task.status !== "plan_review") {
+        return denied(
+          "action_not_allowed",
+          "fast_fix is only allowed from plan_ready or plan_review",
+        );
+      }
+      return { ok: true, patch: { ...CLEAN_STATE_RESET, status: task.status } }; // self-loop: stay in current status
     case "approve_done":
       return task.status === "done"
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "accepted" } }
@@ -176,12 +183,16 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
         : denied("action_not_allowed", "start_human_work is only allowed from backlog");
     case "mark_plan_ready":
       return task.status === "planning" || task.status === "improve"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_ready" } }
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_review" } }
         : denied("action_not_allowed", "mark_plan_ready is only allowed from planning or improve");
     case "start_implementation":
-      return task.status === "plan_ready"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } }
-        : denied("action_not_allowed", "start_implementation is only allowed from plan_ready");
+      if (task.status !== "plan_ready" && task.status !== "plan_review") {
+        return denied(
+          "action_not_allowed",
+          "start_implementation is only allowed from plan_ready or plan_review",
+        );
+      }
+      return { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } };
     case "submit_implementation": {
       if (task.status !== "implementing") {
         return denied(
@@ -243,7 +254,6 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
     case "start_ai":
     case "request_replanning":
     case "fast_fix":
-    case "publish_plan":
     case "approve_plan":
     case "request_plan_changes":
       return denied("ai_handoff_required", `${event} requires the task to be handed to AI`);
@@ -354,7 +364,6 @@ const TASK_ACTION_LOOKUP: Record<TaskEvent, true> = {
   start_human_work: true,
   mark_plan_ready: true,
   start_implementation: true,
-  publish_plan: true,
   approve_plan: true,
   request_plan_changes: true,
   submit_implementation: true,
@@ -375,8 +384,8 @@ export const HUMAN_ACTIONS_BY_STATUS: Record<TaskStatus, TaskEvent[]> = {
   planning: [],
   improve: [],
   plan_ready: ["start_implementation", "request_replanning", "fast_fix"],
-  // Waiting on human approval of the published plan PR/MR; approval is VCS-driven.
-  plan_review: [],
+  // plan_review is now the single gate: start_implementation, request_replanning, and fast_fix are available here.
+  plan_review: ["start_implementation", "request_replanning", "fast_fix"],
   implementing: [],
   review: [],
   verify: [],

@@ -103,33 +103,33 @@ const PIPELINE: StatusTransition[] = [
   {
     from: ["planning"],
     inProgress: "planning",
-    onSuccess: "plan_ready",
+    onSuccess: "plan_review",
     runner: runPlanner,
     label: "planner",
   },
   {
     from: ["improve"],
     inProgress: "improve",
-    onSuccess: "plan_ready",
+    onSuccess: "plan_review",
     runner: runImprover,
     label: "improver",
   },
   {
-    from: ["plan_ready"],
-    inProgress: "plan_ready",
-    onSuccess: "plan_ready",
+    from: ["plan_review"],
+    inProgress: "plan_review",
+    onSuccess: "plan_review",
     runner: runPlanChecker,
     label: "plan-checker",
   },
   {
-    from: ["plan_ready"],
-    inProgress: "plan_ready",
+    from: ["plan_review"],
+    inProgress: "plan_review",
     onSuccess: "plan_review",
     runner: runPlanReviewPublisher,
     label: "plan-publisher",
   },
   {
-    from: ["plan_ready", "implementing"],
+    from: ["plan_review", "implementing"],
     inProgress: "implementing",
     onSuccess: "verify",
     runner: runImplementer,
@@ -380,16 +380,9 @@ function shouldRunSkillsModeImprove(task: TaskRow): boolean {
   return task.runPlanImprove && !task.useSubagents;
 }
 
-function shouldRunSkillsModeVerify(task: TaskRow): boolean {
-  return task.runPostVerify && !task.useSubagents;
-}
-
 function getStageSuccessStatus(task: TaskRow, stage: StatusTransition): TaskStatus {
   if (stage.label === "planner" && shouldRunSkillsModeImprove(task)) {
     return "improve";
-  }
-  if (stage.label === "verifier" && task.skipReview) {
-    return "done";
   }
   return stage.onSuccess;
 }
@@ -462,7 +455,7 @@ function proactivelyBlockTaskForRuntimeGate(
     taskId: task.id,
     expectedProjectId: task.projectId,
     expectedStatus: task.status,
-    expectedAutoMode: task.status === "plan_ready" ? task.autoMode === true : undefined,
+    expectedAutoMode: task.status === "plan_review" ? task.autoMode === true : undefined,
     blockedFromStatus: task.status,
     blockedReason,
     retryAfter,
@@ -523,7 +516,7 @@ function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow):
     return !taskRequiresPlanReview(task.id);
   }
   if (stageLabel === "implementer") {
-    if (task.status === "plan_ready" || task.status === "implementing") {
+    if (task.status === "plan_review" || task.status === "implementing") {
       return taskRequiresPlanReview(task.id) && task.planReviewState !== "approved";
     }
   }
@@ -637,11 +630,12 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     flushActivityQueue(task.id);
 
     if (stage.label === "plan-publisher") {
-      // The publisher runner transitions plan_ready -> plan_review itself via
-      // markTaskPlanPublished once the plan PR/MR is actually published. When
-      // publishing is deferred (missing branch or plan file) it must stay at
-      // plan_ready so the next poll retries — never move it to plan_review
-      // without a successful publish.
+      // The publisher self-loops on plan_review. The runner stamps
+      // planReviewState=published via markTaskPlanPublished (self-loop,
+      // stays at plan_review). When publishing is deferred (missing
+      // branch or plan file) the task stays at plan_review so the next
+      // poll retries — the status is never changed without a successful
+      // publish.
       const current = findTaskById(task.id);
       const published =
         current?.planReviewState === "published" && current.status === "plan_review";
@@ -664,7 +658,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
             status: current?.status ?? task.status,
             planReviewState: current?.planReviewState ?? null,
           },
-          "Plan review publish deferred; task remains plan ready",
+          "Plan review publish deferred; task remains at plan_review",
         );
       }
       return true;
@@ -1351,7 +1345,7 @@ async function runPollCycle(): Promise<void> {
               taskId: task.id,
               expectedProjectId: task.projectId,
               expectedStatus: task.status,
-              expectedAutoMode: task.status === "plan_ready" ? task.autoMode : undefined,
+              expectedAutoMode: task.status === "plan_review" ? task.autoMode : undefined,
               coordinatorId: COORDINATOR_ID,
               lockDurationMs: CLAIM_LOCK_DURATION_MS,
             });

@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 33;
+const CURRENT_SCHEMA_VERSION = 34;
 
 function removeSqliteArtifacts(dbPath: string): void {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -1079,6 +1079,52 @@ describe("db", () => {
       expect(names.has("current_tool_json")).toBe(true);
       expect(sqlite.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
       sqlite.close();
+    } finally {
+      closeDb();
+      removeSqliteArtifacts(dbPath);
+    }
+  });
+
+  it("backfills plan_ready status values to plan_review when migrating to v34", () => {
+    closeDb();
+    const dbPath = join(tmpdir(), `aif-shared-v33-to-v34-${Date.now()}-${Math.random()}.sqlite`);
+    const sqlite = new Database(dbPath);
+
+    // Create minimal pre-v34 schema and insert a task with plan_ready status
+    // and a blocked_from_status referencing plan_ready.
+    sqlite.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'backlog',
+        blocked_from_status TEXT
+      );
+      INSERT INTO tasks (id, project_id, title, status, blocked_from_status)
+      VALUES ('t-1', 'p-1', 'Plan ready task', 'plan_ready', 'plan_ready');
+    `);
+    sqlite.pragma("user_version = 33");
+    sqlite.close();
+
+    try {
+      getDb(dbPath);
+      closeDb();
+
+      const migratedSqlite = new Database(dbPath, { readonly: true });
+      const rows = migratedSqlite
+        .prepare("SELECT id, status, blocked_from_status FROM tasks")
+        .all() as Array<{
+        id: string;
+        status: string;
+        blocked_from_status: string | null;
+      }>;
+      const userVersion = migratedSqlite.pragma("user_version", { simple: true }) as number;
+      migratedSqlite.close();
+
+      expect(userVersion).toBe(CURRENT_SCHEMA_VERSION);
+      expect(rows.length).toBe(1);
+      expect(rows[0].status).toBe("plan_review");
+      expect(rows[0].blocked_from_status).toBe("plan_review");
     } finally {
       closeDb();
       removeSqliteArtifacts(dbPath);

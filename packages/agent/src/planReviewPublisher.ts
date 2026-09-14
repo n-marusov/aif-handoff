@@ -31,16 +31,16 @@ export function taskRequiresPlanReview(taskId: string): boolean {
  * `plan_review` until a human approves it in the VCS.
  *
  * Responsibilities (in order):
- *  1. Reject tasks that are not plan-review eligible (they stay `plan_ready`
- *     and keep the legacy flow).
+ *  1. Reject tasks that are not plan-review eligible (they stay at `plan_review`
+ *     in the self-loop and never publish).
  *  2. Deterministically commit only the plan file(s) with a non-LLM subject
  *     (ensurePlanReviewCommit) — never product files.
  *  3. Delegate the branch push + provider plan PR/MR publication to the
  *     provider workflow (GitHub/GitLab), which must not add `Closes #...`.
- *  4. Record `planReviewState=published` and transition `plan_ready ->
- *     plan_review` atomically via markTaskPlanPublished (audited).
+ *  4. Record `planReviewState=published` and keep the task at `plan_review`
+ *     (self-loop) atomically via markTaskPlanPublished (audited).
  *
- * Missing branch/plan is a WARN-only deferral — the task stays `plan_ready`
+ * Missing branch/plan is a WARN-only deferral — the task stays at `plan_review`
  * for a later retry. Push or API failures throw StageManualBlockError so the
  * coordinator moves the task to blocked_external for operator attention.
  */
@@ -99,6 +99,16 @@ export async function runPlanReviewPublisher(taskId: string, projectRoot: string
   }
   const commitSha = report.commitSha ?? getHeadCommitSha(executionRoot);
 
+  // Idempotency: skip re-publish when plan is already published and unchanged.
+  // The self-looping stage otherwise re-publishes the PR/MR on every poll cycle.
+  if (task.planReviewState === "published" && commitSha === task.planReviewCommitSha) {
+    log.debug(
+      { taskId, planReviewCommitSha: task.planReviewCommitSha },
+      "Plan review publish skipped: already published",
+    );
+    return;
+  }
+
   const githubIssue = findGitHubIssueByTaskId(taskId);
   const gitlabIssue = findGitLabIssueByTaskId(taskId);
 
@@ -115,7 +125,7 @@ export async function runPlanReviewPublisher(taskId: string, projectRoot: string
   if (!published) {
     log.warn(
       { taskId, branch, provider: githubIssue ? "github" : "gitlab" },
-      "Plan review publish did not complete; task stays at plan_ready",
+      "Plan review publish did not complete; task stays at plan_review",
     );
     return;
   }

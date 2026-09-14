@@ -430,14 +430,14 @@ describe("coordinator", () => {
     expect(task!.status).toBe("accepted");
   });
 
-  it("should pick up plan_ready tasks and dispatch implementer + reviewer", async () => {
+  it("should pick up plan_review tasks and dispatch implementer + reviewer", async () => {
     const db = testDb.current;
     db.insert(tasks)
       .values({
         id: "task-2",
         projectId: "test-project",
         title: "Implement me",
-        status: "plan_ready",
+        status: "plan_review",
         autoMode: true,
       })
       .run();
@@ -452,14 +452,14 @@ describe("coordinator", () => {
     expect(task!.status).toBe("done");
   });
 
-  it("keeps VCS-linked plan_ready tasks on the legacy implementer path when plan review is disabled", async () => {
+  it("keeps VCS-linked plan_review tasks on the legacy implementer path when plan review is disabled", async () => {
     const db = testDb.current;
     db.insert(tasks)
       .values({
         id: "task-vcs",
         projectId: "test-project",
         title: "VCS task",
-        status: "plan_ready",
+        status: "plan_review",
         autoMode: true,
         planPath: ".ai-factory/plans/vcs.md",
       })
@@ -481,7 +481,7 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     // The plan-review flag is off by default, so the plan-publisher stage must
-    // not claim this task — the legacy plan_ready -> implementer path applies.
+    // not claim this task — the legacy plan_review -> implementer path applies.
     expect(runImplementer).toHaveBeenCalledWith("task-vcs", "/tmp/test");
     const task = db.select().from(tasks).where(eq(tasks.id, "task-vcs")).get();
     expect(task!.status).toBe("done");
@@ -498,7 +498,7 @@ describe("coordinator", () => {
           id: "task-vcs-plan-review",
           projectId: "test-project",
           title: "VCS task",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: true,
           planPath: ".ai-factory/plans/vcs.md",
         })
@@ -523,7 +523,7 @@ describe("coordinator", () => {
       // implementer must not claim the task while it waits for VCS approval.
       expect(runImplementer).not.toHaveBeenCalledWith("task-vcs-plan-review", "/tmp/test");
       const task = db.select().from(tasks).where(eq(tasks.id, "task-vcs-plan-review")).get();
-      expect(task!.status).toBe("plan_ready");
+      expect(task!.status).toBe("plan_review");
     } finally {
       coordinatorEnv.AIF_PLAN_REVIEW_PR_ENABLED = previousPlanReviewFlag;
     }
@@ -536,7 +536,7 @@ describe("coordinator", () => {
         id: "task-verify",
         projectId: "test-project",
         title: "Verify me",
-        status: "plan_ready",
+        status: "plan_review",
         autoMode: true,
         useSubagents: false,
         runPostVerify: true,
@@ -768,14 +768,14 @@ describe("coordinator", () => {
     },
   );
 
-  it("should not auto-implement plan_ready tasks when autoMode=false", async () => {
+  it("should not auto-implement plan_review tasks when autoMode=false", async () => {
     const db = testDb.current;
     db.insert(tasks)
       .values({
         id: "task-2-manual",
         projectId: "test-project",
         title: "Manual confirmation",
-        status: "plan_ready",
+        status: "plan_review",
         autoMode: false,
       })
       .run();
@@ -786,7 +786,7 @@ describe("coordinator", () => {
     expect(runImplementer).not.toHaveBeenCalled();
     expect(runReviewer).not.toHaveBeenCalled();
     const task = db.select().from(tasks).where(eq(tasks.id, "task-2-manual")).get();
-    expect(task!.status).toBe("plan_ready");
+    expect(task!.status).toBe("plan_review");
   });
 
   it("should pick up implementing tasks and continue to review", async () => {
@@ -1380,7 +1380,12 @@ describe("coordinator", () => {
   it("should revert status on implementer failure", async () => {
     const db = testDb.current;
     db.insert(tasks)
-      .values({ id: "task-5", projectId: "test-project", title: "Fail impl", status: "plan_ready" })
+      .values({
+        id: "task-5",
+        projectId: "test-project",
+        title: "Fail impl",
+        status: "plan_review",
+      })
       .run();
 
     vi.mocked(runImplementer).mockRejectedValueOnce(new Error("Implementer crashed"));
@@ -1398,7 +1403,7 @@ describe("coordinator", () => {
         id: "task-impl-perm",
         projectId: "test-project",
         title: "Impl blocked",
-        status: "plan_ready",
+        status: "plan_review",
       })
       .run();
 
@@ -1421,7 +1426,7 @@ describe("coordinator", () => {
         id: "task-impl-stream",
         projectId: "test-project",
         title: "Impl stream issue",
-        status: "plan_ready",
+        status: "plan_review",
       })
       .run();
 
@@ -1446,7 +1451,7 @@ describe("coordinator", () => {
         id: "task-impl-checklist",
         projectId: "test-project",
         title: "Checklist guard",
-        status: "plan_ready",
+        status: "plan_review",
       })
       .run();
 
@@ -1469,7 +1474,7 @@ describe("coordinator", () => {
         id: "task-checker-fail",
         projectId: "test-project",
         title: "Fail checker",
-        status: "plan_ready",
+        status: "plan_review",
         autoMode: true,
       })
       .run();
@@ -1479,7 +1484,7 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-checker-fail")).get();
-    expect(task!.status).toBe("plan_ready");
+    expect(task!.status).toBe("plan_review");
     expect(runImplementer).not.toHaveBeenCalled();
   });
 

@@ -1160,6 +1160,31 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE gitlab_issues ADD COLUMN mr_mode TEXT DEFAULT 'implementation';
     `,
   },
+  {
+    version: 34,
+    description: "Backfill plan_ready status values to plan_review",
+    sql: `
+      UPDATE tasks SET status = 'plan_review' WHERE status = 'plan_ready';
+    `,
+    backfill: (sqlite) => {
+      // Only backfill blocked_from_status if the column exists (pre-v27 schemas
+      // without the participant migration may lack it).
+      const hasBlockedFromStatus = sqlite
+        .prepare(
+          "SELECT COUNT(*) AS cnt FROM pragma_table_info('tasks') WHERE name = 'blocked_from_status'",
+        )
+        .get() as { cnt: number };
+      const blockedCount =
+        hasBlockedFromStatus.cnt > 0
+          ? sqlite
+              .prepare(
+                "UPDATE tasks SET blocked_from_status = 'plan_review' WHERE blocked_from_status = 'plan_ready'",
+              )
+              .run().changes
+          : 0;
+      return { blockedFromStatusUpdated: blockedCount };
+    },
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

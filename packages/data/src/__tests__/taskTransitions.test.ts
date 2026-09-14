@@ -210,12 +210,12 @@ describe("plan review gate transitions", () => {
     if (!task) throw new Error("expected task");
     const ready = transitionTaskStatus({
       taskId: task.id,
-      status: "plan_ready",
+      status: "plan_review",
       expectedStatus: "backlog",
       actor: agentActor,
       action: "task.status_changed",
     });
-    if (!ready.ok) throw new Error("expected plan_ready transition");
+    if (!ready.ok) throw new Error("expected plan_review transition");
     return task.id;
   }
 
@@ -228,7 +228,7 @@ describe("plan review gate transitions", () => {
       now: new Date("2030-01-01T10:00:00.000Z"),
     });
 
-    expect(result).toMatchObject({ ok: true, fromStatus: "plan_ready", toStatus: "plan_review" });
+    expect(result).toMatchObject({ ok: true, fromStatus: "plan_review", toStatus: "plan_review" });
     const row = findTaskById(taskId);
     expect(row).toMatchObject({
       status: "plan_review",
@@ -244,7 +244,7 @@ describe("plan review gate transitions", () => {
     });
   });
 
-  it("denies publishing when the task is not plan_ready", () => {
+  it("denies publishing when the task is not plan_review", () => {
     const task = createTask({
       projectId: "project-1",
       title: "Not ready",
@@ -280,12 +280,13 @@ describe("plan review gate transitions", () => {
     });
   });
 
-  it("denies approval before the plan has been published", () => {
-    const taskId = createReadyAiTask("Approve too early");
+  it("approves a plan from plan_review", () => {
+    const taskId = createReadyAiTask("Approve from review");
+    // markTaskPlanApproved expects plan_review status, which createReadyAiTask now sets.
     expect(markTaskPlanApproved({ taskId, actor: agentActor })).toMatchObject({
-      ok: false,
-      code: "status_conflict",
-      currentStatus: "plan_ready",
+      ok: true,
+      fromStatus: "plan_review",
+      toStatus: "implementing",
     });
   });
 

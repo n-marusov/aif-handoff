@@ -111,7 +111,7 @@ describe("processAutoQueueAdvance", () => {
       expect(findTaskById(c!.id)?.status).toBe("planning");
     });
 
-    it("does NOT advance while a task is still planning/plan_ready/implementing/review", () => {
+    it("does NOT advance while a task is still planning/plan_review/implementing/review", () => {
       seedTask("t1", "seq", 100, { status: "planning" });
       seedTask("t2", "seq", 200);
 
@@ -119,7 +119,7 @@ describe("processAutoQueueAdvance", () => {
       expect(findTaskById("t2")?.status).toBe("backlog");
 
       // Advancing through stages — auto-queue stays blocked until terminal
-      for (const stage of ["plan_ready", "implementing", "review"] as const) {
+      for (const stage of ["plan_review", "implementing", "review"] as const) {
         updateTaskStatus("t1", stage);
         expect(processAutoQueueAdvance()).toBe(0);
         expect(findTaskById("t2")?.status).toBe("backlog");

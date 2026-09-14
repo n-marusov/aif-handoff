@@ -2088,12 +2088,12 @@ function coordinatorStageFilter(stage: CoordinatorStage) {
   return stage === "implementer"
     ? or(
         eq(tasks.status, "implementing"),
-        and(eq(tasks.status, "plan_ready"), eq(tasks.autoMode, true)),
+        and(eq(tasks.status, "plan_review"), eq(tasks.autoMode, true)),
       )
     : stage === "improver"
       ? inArray(tasks.status, ["improve"])
       : stage === "plan-checker" || stage === "plan-publisher"
-        ? and(eq(tasks.status, "plan_ready"), eq(tasks.autoMode, true))
+        ? inArray(tasks.status, ["plan_review"])
         : stage === "planner"
           ? inArray(tasks.status, ["planning"])
           : stage === "verifier"
@@ -2104,7 +2104,7 @@ function coordinatorStageFilter(stage: CoordinatorStage) {
 function coordinatorAnyStageFilter() {
   return or(
     inArray(tasks.status, ["planning", "improve", "implementing", "verify", "review"]),
-    and(eq(tasks.status, "plan_ready"), eq(tasks.autoMode, true)),
+    and(eq(tasks.status, "plan_review"), eq(tasks.autoMode, true)),
   );
 }
 
@@ -2435,7 +2435,6 @@ export function countActivePipelineTasksForProject(projectId: string): number {
         inArray(tasks.status, [
           "planning",
           "improve",
-          "plan_ready",
           "plan_review",
           "implementing",
           "review",
@@ -2471,7 +2470,6 @@ export function hasActiveBranchBoundTasksForProject(projectId: string): boolean 
           "backlog",
           "planning",
           "improve",
-          "plan_ready",
           "plan_review",
           "implementing",
           "review",
@@ -2507,7 +2505,6 @@ const NON_TERMINAL_WORKTREE_STATUSES: TaskStatus[] = [
   "backlog",
   "planning",
   "improve",
-  "plan_ready",
   "plan_review",
   "implementing",
   "review",

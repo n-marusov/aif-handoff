@@ -648,7 +648,6 @@ export const TASK_EVENTS = [
   "start_human_work",
   "mark_plan_ready",
   "start_implementation",
-  "publish_plan",
   "approve_plan",
   "request_plan_changes",
   "submit_implementation",

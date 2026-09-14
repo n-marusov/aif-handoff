@@ -941,7 +941,7 @@ describe("data layer", () => {
           id: "pc-task",
           projectId: "proj-1",
           title: "Plan check",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: true,
           paused: false,
         })

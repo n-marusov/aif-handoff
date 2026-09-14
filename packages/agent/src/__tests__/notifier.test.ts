@@ -159,7 +159,7 @@ describe("notifyTaskBroadcast", () => {
       await notifyTaskBroadcast("task-tg", "task:moved", {
         title: "My Task",
         fromStatus: "planning",
-        toStatus: "plan_ready",
+        toStatus: "plan_review",
       });
 
       // Wait a tick for the fire-and-forget void call to resolve
@@ -177,7 +177,7 @@ describe("notifyTaskBroadcast", () => {
       expect(body.parse_mode).toBe("MarkdownV2");
       expect(body.text).toContain("My Task");
       expect(body.text).toContain("planning");
-      expect(body.text).toContain("plan\\_ready");
+      expect(body.text).toContain("plan\\_review");
     });
 
     it("resolves and renders the task project name", async () => {

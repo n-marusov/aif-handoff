@@ -134,7 +134,7 @@ describe("runPlanChecker", () => {
         projectId: "project-1",
         title: "Task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "## Plan\n- [ ] Step 1\n- [x] Step 2",
       })
       .run();
@@ -152,7 +152,7 @@ describe("runPlanChecker", () => {
         projectId: "project-1",
         title: "Task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "## Plan\n- [ ] Checkbox item\n- Plain bullet item",
       })
       .run();
@@ -174,7 +174,7 @@ describe("runPlanChecker", () => {
         projectId: "project-1",
         title: "Task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "- Implement feature A\n- Write tests for A",
       })
       .run();
@@ -195,7 +195,7 @@ describe("runPlanChecker", () => {
         projectId: "project-1",
         title: "Task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "## Plan\n- Existing item that needs conversion and is long enough",
       })
       .run();
@@ -224,7 +224,7 @@ describe("runPlanChecker", () => {
         projectId: "project-1",
         title: "Task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "Implement the feature by editing main.ts and adding the handler.\nThen write tests.",
       })
       .run();
@@ -252,7 +252,7 @@ describe("runPlanChecker", () => {
         projectId: "project-1",
         title: "Task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "## Good Plan\nImplement step 1 logic.\nMark the done section as complete.",
       })
       .run();
@@ -289,7 +289,7 @@ describe("runPlanChecker", () => {
         projectId: "project-planpath",
         title: "Task with planPath",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "## Custom\nImplement step 1 logic.\nMark done section complete.",
         planPath: "docs/MY_PLAN.md",
       })
@@ -330,7 +330,7 @@ describe("runPlanChecker", () => {
         projectId: "project-fix",
         title: "Fix task",
         description: "Desc",
-        status: "plan_ready",
+        status: "plan_review",
         plan: "## Fix\nPatch the bug in handler.\nVerify it is done.",
         isFix: true,
       })

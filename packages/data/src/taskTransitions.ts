@@ -224,10 +224,25 @@ export function transitionTaskStatus(
       }
 
       const assignees = listAssigneesInTransaction(tx, task.id);
+
+      // When re-entering plan_review from improve (after replanning), reset the plan
+      // review metadata so the publisher starts from a clean slate.
+      const planReviewReset =
+        task.status === "improve" && input.status === "plan_review"
+          ? {
+              planReviewState: null,
+              planReviewCommitSha: null,
+              planReviewPublishedAt: null,
+              planReviewApprovedAt: null,
+              planReviewFeedback: null,
+            }
+          : {};
+
       const updated = tx
         .update(tasks)
         .set({
           ...normalizeExtra(input.extra ?? {}),
+          ...planReviewReset,
           status: input.status,
           sessionId: null,
           lastHeartbeatAt: nowIso,
@@ -419,9 +434,9 @@ function resolvePlanReviewActor(actor: AuditActor | undefined): AuditActor {
 }
 
 /**
- * Move a VCS-linked task from `plan_ready` into `plan_review` and record that
- * the Change Plan was committed and published. Re-publishing after replanning
- * overwrites the previous plan commit and clears stale approval/feedback.
+ * Stamp a task's plan as published without changing its `plan_review` status.
+ * Re-publishing after replanning overwrites the previous plan commit and
+ * clears stale approval/feedback.
  */
 export function markTaskPlanPublished(input: {
   taskId: string;
@@ -442,7 +457,7 @@ export function markTaskPlanPublished(input: {
   return transitionTaskStatus({
     taskId: input.taskId,
     status: "plan_review",
-    expectedStatus: "plan_ready",
+    expectedStatus: "plan_review",
     actor: resolvePlanReviewActor(input.actor),
     action: "task.plan_review.published",
     reason: "Change plan committed and published for plan review",

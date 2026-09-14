@@ -51,7 +51,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 ### Phase 1: State Machine Behavior (shared)
 
-- [ ] Task 1.1: RED — encode the new gate transitions as failing tests
+- [x] Task 1.1: RED — encode the new gate transitions as failing tests
 
   Files: `packages/shared/src/__tests__/stateMachine.test.ts`
 
@@ -68,7 +68,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-- [ ] Task 1.2: GREEN — implement the gate transitions (depends on 1.1)
+- [x] Task 1.2: GREEN — implement the gate transitions (depends on 1.1)
 
   Files: `packages/shared/src/stateMachine.ts`, `packages/shared/src/types.ts`
 
@@ -83,7 +83,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — the resolver performs no I/O and returns `TransitionResult`.
 
-- [ ] Task 1.3: REFACTOR — align the remaining shared fixtures (depends on 1.2)
+- [x] Task 1.3: REFACTOR — align the remaining shared fixtures (depends on 1.2)
 
   Files: `packages/shared/src/__tests__/stateMachine.test.ts`, `packages/shared/src/__tests__/schema.test.ts`
 
@@ -97,7 +97,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 ### Phase 2: Data Layer Behavior
 
-- [ ] Task 2.1: RED — encode the plan-gate query and publication behavior (depends on 1.2)
+- [x] Task 2.1: RED — encode the plan-gate query and publication behavior (depends on 1.2)
 
   Files: `packages/data/src/__tests__/index.test.ts`, `packages/data/src/__tests__/taskOwnership.test.ts`, `packages/data/src/__tests__/taskTransitions.test.ts`
 
@@ -109,7 +109,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-- [ ] Task 2.2: GREEN — implement the data-layer changes (depends on 2.1)
+- [x] Task 2.2: GREEN — implement the data-layer changes (depends on 2.1)
 
   Files: `packages/data/src/index.ts`, `packages/data/src/taskOwnership.ts`, `packages/data/src/taskTransitions.ts`
 
@@ -123,7 +123,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: INFO `task.plan_review.published` (existing) and new INFO `task.plan_review.reset` with `taskId` and reason `replanned`; DEBUG candidate counts keyed by `stage` and `projectId`.
 
-- [ ] Task 2.3: GREEN — add the backfill migration (depends on 2.2)
+- [x] Task 2.3: GREEN — add the backfill migration (depends on 2.2)
 
   Files: `packages/shared/src/db.ts`
 
@@ -137,7 +137,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: INFO with the applied migration version and the updated row count.
 
-- [ ] Task 2.4: REFACTOR — align the remaining data fixtures (depends on 2.3)
+- [x] Task 2.4: REFACTOR — align the remaining data fixtures (depends on 2.3)
 
   Files: `packages/data/src/__tests__/runtimeProfiles.test.ts`
 
@@ -150,7 +150,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 ### Phase 3: Coordinator Behavior (agent)
 
-- [ ] Task 3.1: RED — encode the coordinator gate behavior (depends on 2.2)
+- [x] Task 3.1: RED — encode the coordinator gate behavior (depends on 2.2)
 
   Files: `packages/agent/src/__tests__/coordinator.test.ts`, `packages/agent/src/__tests__/planReviewPublisher.test.ts`
 
@@ -162,7 +162,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-- [ ] Task 3.2: GREEN — implement the pipeline and guard changes (depends on 3.1)
+- [x] Task 3.2: GREEN — implement the pipeline and guard changes (depends on 3.1)
 
   Files: `packages/agent/src/coordinator.ts`
 
@@ -179,7 +179,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: DEBUG stage selection keyed by `stage`, `projectId`, `taskId`; INFO on plan-review publish deferral; WARN with `taskId`, `status`, `planReviewState` when implementation is blocked for a missing approval.
 
-- [ ] Task 3.3: GREEN — make the publisher idempotent (depends on 3.2)
+- [x] Task 3.3: GREEN — make the publisher idempotent (depends on 3.2)
 
   Files: `packages/agent/src/planReviewPublisher.ts`
 
@@ -190,7 +190,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: DEBUG `publish skipped: already published` with `taskId` and `planReviewCommitSha`; keep the WARN deferral (missing branch/plan) and INFO publish logs.
 
-- [ ] Task 3.4: REFACTOR — align the remaining agent fixtures (depends on 3.3)
+- [x] Task 3.4: REFACTOR — align the remaining agent fixtures (depends on 3.3)
 
   Files: `packages/agent/src/__tests__/autoQueue.test.ts`, `notifier.test.ts`, `planChecker.test.ts`, `planReviewCommit.test.ts`, `stageErrorHandler.test.ts`
 
@@ -199,7 +199,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-- [ ] Task 3.5: GREEN — delete the dead `skipReview`/`verify` branches (depends on 3.2)
+- [x] Task 3.5: GREEN — delete the dead `skipReview`/`verify` branches (depends on 3.2)
 
   Files: `packages/agent/src/coordinator.ts`
 

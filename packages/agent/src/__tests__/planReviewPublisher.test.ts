@@ -56,7 +56,7 @@ function seedTask(
       id: taskId,
       projectId: "project",
       title: "Implement plan review gate",
-      status: "plan_ready",
+      status: "plan_review",
       autoMode: true,
       branchName: opts.branch ?? "feature/x",
       plan: opts.plan ?? "# Plan\n- [ ] do work",
@@ -173,11 +173,11 @@ describe("runPlanReviewPublisher", () => {
     await runPlanReviewPublisher("task", rootPath);
 
     const task = findTask("task");
-    expect(task?.status).toBe("plan_ready");
+    expect(task?.status).toBe("plan_review");
     expect(task?.planReviewState).toBeNull();
   });
 
-  it("defers (stays plan_ready) when there is no persisted branch", async () => {
+  it("defers (stays plan_review) when there is no persisted branch", async () => {
     enableFlag();
     const { rootPath } = createGitTestRoot("plan-review-nobranch-");
     seedTask(rootPath, "task", { withGithub: true, branch: "" });
@@ -186,11 +186,11 @@ describe("runPlanReviewPublisher", () => {
     await runPlanReviewPublisher("task", rootPath);
 
     const task = findTask("task");
-    expect(task?.status).toBe("plan_ready");
+    expect(task?.status).toBe("plan_review");
     expect(publishGitHubPlanTaskMock).not.toHaveBeenCalled();
   });
 
-  it("defers (stays plan_ready) when the plan file does not exist on disk", async () => {
+  it("defers (stays plan_review) when the plan file does not exist on disk", async () => {
     enableFlag();
     const { rootPath } = createGitTestRoot("plan-review-noplan-");
     seedTask(rootPath, "task", { withGithub: true });
@@ -198,7 +198,7 @@ describe("runPlanReviewPublisher", () => {
     await runPlanReviewPublisher("task", rootPath);
 
     const task = findTask("task");
-    expect(task?.status).toBe("plan_ready");
+    expect(task?.status).toBe("plan_review");
     expect(publishGitHubPlanTaskMock).not.toHaveBeenCalled();
   });
 
@@ -213,7 +213,7 @@ describe("runPlanReviewPublisher", () => {
     await expect(runPlanReviewPublisher("task", rootPath)).rejects.toThrow();
 
     const task = findTask("task");
-    expect(task?.status).toBe("plan_ready");
+    expect(task?.status).toBe("plan_review");
     expect(publishGitHubPlanTaskMock).not.toHaveBeenCalled();
   });
 });

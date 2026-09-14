@@ -44,7 +44,7 @@ function makeInput(overrides: Record<string, unknown> = {}) {
   return {
     taskId: "task-1",
     stageLabel: "implementer",
-    sourceStatus: "plan_ready" as const,
+    sourceStatus: "plan_review" as const,
     retryCount: 0,
     err: new Error("boom"),
     ...overrides,

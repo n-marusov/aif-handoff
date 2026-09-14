@@ -98,7 +98,7 @@ describe("tasks schema", () => {
     const statuses: TaskStatus[] = [
       "backlog",
       "planning",
-      "plan_ready",
+      "plan_review",
       "implementing",
       "review",
       "blocked_external",

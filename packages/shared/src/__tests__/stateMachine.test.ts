@@ -157,14 +157,14 @@ describe("task state machine", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("allows request_replanning from plan_ready", () => {
+  it("allows request_replanning from plan_ready into improve", () => {
     const result = applyHumanTaskEvent(
       { ...makeTask("plan_ready"), autoMode: false },
       "request_replanning",
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.patch.status).toBe("planning");
+      expect(result.patch.status).toBe("improve");
     }
   });
 
@@ -209,21 +209,6 @@ describe("task state machine", () => {
     }
   });
 
-  it("allows publish_plan from plan_ready into plan_review", () => {
-    const result = applyHumanTaskEvent(makeTask("plan_ready"), "publish_plan");
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.patch.status).toBe("plan_review");
-    }
-  });
-
-  it("denies publish_plan unless the plan is ready", () => {
-    expect(applyHumanTaskEvent(makeTask("planning"), "publish_plan").ok).toBe(false);
-    expect(applyHumanTaskEvent(makeTask("backlog"), "publish_plan").ok).toBe(false);
-    expect(applyHumanTaskEvent(makeTask("implementing"), "publish_plan").ok).toBe(false);
-    expect(applyHumanTaskEvent(makeTask("done"), "publish_plan").ok).toBe(false);
-  });
-
   it("allows approve_plan from plan_review into implementing", () => {
     const result = applyHumanTaskEvent(makeTask("plan_review"), "approve_plan");
     expect(result.ok).toBe(true);
@@ -238,11 +223,11 @@ describe("task state machine", () => {
     expect(applyHumanTaskEvent(makeTask("done"), "approve_plan").ok).toBe(false);
   });
 
-  it("allows request_plan_changes from plan_review back to planning", () => {
+  it("allows request_plan_changes from plan_review back to improve", () => {
     const result = applyHumanTaskEvent(makeTask("plan_review"), "request_plan_changes");
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.patch.status).toBe("planning");
+      expect(result.patch.status).toBe("improve");
     }
   });
 
@@ -250,6 +235,74 @@ describe("task state machine", () => {
     expect(applyHumanTaskEvent(makeTask("plan_ready"), "request_plan_changes").ok).toBe(false);
     expect(applyHumanTaskEvent(makeTask("implementing"), "request_plan_changes").ok).toBe(false);
     expect(applyHumanTaskEvent(makeTask("done"), "request_plan_changes").ok).toBe(false);
+  });
+
+  // --- RED tests: plan_review becomes the single plan gate ---
+
+  it("allows start_implementation from plan_review when autoMode=false", () => {
+    const result = applyHumanTaskEvent(
+      { ...makeTask("plan_review"), autoMode: false },
+      "start_implementation",
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("implementing");
+    }
+  });
+
+  it("allows approve_plan from plan_review into implementing", () => {
+    const result = applyHumanTaskEvent(makeTask("plan_review"), "approve_plan");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("implementing");
+    }
+  });
+
+  it("allows request_replanning from plan_review into improve", () => {
+    const result = applyHumanTaskEvent(
+      { ...makeTask("plan_review"), autoMode: false },
+      "request_replanning",
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("improve");
+    }
+  });
+
+  it("allows request_plan_changes from plan_review back to improve", () => {
+    const result = applyHumanTaskEvent(makeTask("plan_review"), "request_plan_changes");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("improve");
+    }
+  });
+
+  it("allows fast_fix from plan_review as a self-loop", () => {
+    const result = applyHumanTaskEvent({ ...makeTask("plan_review"), autoMode: false }, "fast_fix");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("plan_review");
+    }
+  });
+
+  it("routes human-owner mark_plan_ready to plan_review", () => {
+    const result = resolveTaskAction(
+      {
+        ...makeTask("planning"),
+        executionOwner: "human" as const,
+        assignees: [],
+      },
+      "mark_plan_ready",
+      {
+        participantsModeEnabled: true,
+        actor: { kind: "participant", id: "admin-1", displayNameSnapshot: "Admin" },
+        participantRole: "admin",
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patch.status).toBe("plan_review");
+    }
   });
 
   it("keeps plan review gate events behind an AI handoff for human-owned tasks", () => {
@@ -263,10 +316,6 @@ describe("task state machine", () => {
       actor: { kind: "participant" as const, id: "admin-1", displayNameSnapshot: "Admin" },
       participantRole: "admin" as const,
     };
-    expect(resolveTaskAction(task, "publish_plan", context)).toMatchObject({
-      ok: false,
-      code: "ai_handoff_required",
-    });
     expect(resolveTaskAction(task, "approve_plan", context)).toMatchObject({
       ok: false,
       code: "ai_handoff_required",
@@ -279,8 +328,8 @@ describe("task state machine", () => {
 
   it.each([
     ["backlog", "start_human_work", "planning"],
-    ["planning", "mark_plan_ready", "plan_ready"],
-    ["improve", "mark_plan_ready", "plan_ready"],
+    ["planning", "mark_plan_ready", "plan_review"],
+    ["improve", "mark_plan_ready", "plan_review"],
     ["plan_ready", "start_implementation", "implementing"],
     ["review", "request_review_changes", "implementing"],
     ["verify", "fail_verification", "implementing"],

@@ -306,7 +306,7 @@ export function handoffTaskExecution(
         (input.executionOwner === "ai" && requestedAssigneeIds.length > 0) ||
         (task.executionOwner === "human" &&
           input.executionOwner === "ai" &&
-          task.status === "plan_ready" &&
+          task.status === "plan_review" &&
           !task.autoMode &&
           input.resumeAction !== "start_implementation") ||
         (task.executionOwner === "human" &&
@@ -404,7 +404,7 @@ export function handoffTaskExecution(
             : {}),
           ...(task.executionOwner === "human" &&
           input.executionOwner === "ai" &&
-          task.status === "plan_ready" &&
+          task.status === "plan_review" &&
           !task.autoMode &&
           input.resumeAction === "start_implementation"
             ? {
