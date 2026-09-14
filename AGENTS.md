@@ -143,6 +143,7 @@ data/                    # SQLite database files (gitignored)
 | GitHub Demo     | docs/github-demo.md           | GitHub.com + router.ai runbook (Plan Review PR Gate)   |
 | GitLab Demo     | docs/gitlab-demo.md           | End-to-end GitLab.com + router.ai demo runbook         |
 | Dev GUI Demo    | docs/dev-gui-demo.md          | Local dev + Web UI GitLab/router.ai runbook            |
+| Use Cases       | docs/use-cases/README.md      | Use case index with 42 UC files mapped to HF1–HF12     |
 | Business Rules  | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies |
 | Vision & Scope  | docs/vision.md                | Product vision, scope, and business context            |
 
