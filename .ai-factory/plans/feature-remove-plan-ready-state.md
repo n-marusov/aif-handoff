@@ -2,6 +2,7 @@
 
 Branch: feature/remove-plan-ready-state
 Created: 2026-09-14
+ADR: docs/adr/ADR-IMPL.PROCESS.task-state-machine.md (source of truth for the status model)
 
 ## Settings
 
@@ -41,7 +42,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 - **Commit 1** (after tasks 1.1-1.3): `refactor(shared): accept plan_review as the plan gate source`
 - **Commit 2** (after tasks 2.1-2.4): `refactor(data): move plan gate queries and publication to plan_review`
-- **Commit 3** (after tasks 3.1-3.4): `refactor(agent): run plan stages on plan_review`
+- **Commit 3** (after tasks 3.1-3.5): `refactor(agent): run plan stages on plan_review`
 - **Commit 4** (after tasks 4.1-4.3): `refactor(api,web): align plan gate with plan_review`
 - **Commit 5** (after tasks 5.1-5.3): `refactor: remove plan_ready from the task status model`
 - **Commit 6** (after tasks 6.1-6.3): `docs: align pipeline documentation with plan_review gate`
@@ -54,8 +55,12 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   Files: `packages/shared/src/__tests__/stateMachine.test.ts`
 
+  ADR reference: `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md` — the `plan_review` exit set.
+
   - Assert `start_implementation` from `plan_review` returns `{ status: "implementing" }`.
+  - Assert `approve_plan` from `plan_review` returns `{ status: "implementing" }`.
   - Assert `request_replanning` from `plan_review` returns `{ status: "improve" }`.
+  - Assert `request_plan_changes` from `plan_review` returns `{ status: "improve" }`.
   - Assert `fast_fix` from `plan_review` returns `{ status: "plan_review" }`.
   - Assert human-owner `mark_plan_ready` returns `{ status: "plan_review" }`.
   - Assert `publish_plan` is rejected with `action_not_allowed`.
@@ -66,6 +71,8 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 - [ ] Task 1.2: GREEN — implement the gate transitions (depends on 1.1)
 
   Files: `packages/shared/src/stateMachine.ts`, `packages/shared/src/types.ts`
+
+  ADR reference: `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md` §Описание состояний (`plan_review` row).
 
   - Accept `plan_review` as the source status for `start_implementation`, `request_replanning`, and `fast_fix`; update their denial messages.
   - `fast_fix` patch target becomes `plan_review`.
@@ -120,10 +127,13 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   Files: `packages/shared/src/db.ts`
 
+  ADR reference: `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md` — `blocked_external` exits include `plan_review`.
+
   - Append a new migration at the next free version (never renumber a merged entry):
     `UPDATE tasks SET status = 'plan_review' WHERE status = 'plan_ready';`
     `UPDATE tasks SET blocked_from_status = 'plan_review' WHERE blocked_from_status = 'plan_ready';`
   - Add a migration test asserting both columns are backfilled and that a second run is a no-op.
+  - Assert `retry_from_blocked` restores a task whose `blocked_from_status` is `plan_review` back to `plan_review`.
 
   LOGGING: INFO with the applied migration version and the updated row count.
 
@@ -156,9 +166,13 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   Files: `packages/agent/src/coordinator.ts`
 
+  ADR reference: `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md` §Описание состояний (`planning`, `plan_review`, `implementing` rows).
+
   - `planner` and `improver`: `onSuccess: "plan_review"`.
+  - Preserve the `planning → improve` override: `getStageSuccessStatus` keeps returning `improve` for the planner when `shouldRunSkillsModeImprove(task)` is true (ADR `runPlanImprove` flag).
   - `plan-checker` and `plan-publisher`: `from: ["plan_review"]`, `inProgress: "plan_review"`, `onSuccess: "plan_review"` (self-loop).
   - `implementer`: `from: ["plan_review", "implementing"]`.
+  - Preserve the `implementing → done` override: the implementer early-return block keeps routing `skipReview` tasks straight to `done` (ADR `skipReview` flag).
   - Replace every `task.status === "plan_ready"` guard and `expectedAutoMode` predicate with `"plan_review"`.
   - Update the plan-publisher early-return block comments to describe the `plan_review` self-loop.
   - Run the RED suite — confirm it passes.
@@ -185,7 +199,19 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-<!-- Commit checkpoint: tasks 3.1-3.4 -->
+- [ ] Task 3.5: GREEN — delete the dead `skipReview`/`verify` branches (depends on 3.2)
+
+  Files: `packages/agent/src/coordinator.ts`
+
+  ADR reference: `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md` — `implementing → done : skipReview flag` bypasses `verify`, so the verifier never receives a `skipReview` task.
+
+  - Delete the unused `shouldRunSkillsModeVerify` helper (zero callers repo-wide after `verify` became mandatory).
+  - Delete the unreachable `stage.label === "verifier" && task.skipReview` branch in `getStageSuccessStatus`.
+  - Run: full `packages/agent` suite — confirm green and that coverage does not regress.
+
+  LOGGING: none — dead-code removal.
+
+<!-- Commit checkpoint: tasks 3.1-3.5 -->
 
 ### Phase 4: API + Web Behavior
 
@@ -275,6 +301,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   - Update pipeline diagrams and `plan_ready` sync examples to `plan_review`.
   - Align the applied-decisions table in `docs/adr/README.md` with the new chain.
+  - Correct the stale entry-point symbol in `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md`: the ADR names `computeTransition(action, task, context)`, which does not exist; the real entry points are `resolveTaskAction(task, event, context)` and `applyHumanTaskEvent` in `packages/shared/src/stateMachine.ts`.
   - Replace the `Plan Ready` stage row in `docs/business-rules/README.md` with the `plan_review` stage.
 
   LOGGING: none — docs.
