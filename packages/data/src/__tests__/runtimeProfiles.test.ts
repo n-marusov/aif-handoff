@@ -701,16 +701,16 @@ describe("runtime profiles data layer", () => {
 
     testDb.current
       .update(tasks)
-      .set({ status: "plan_ready", autoMode: false })
+      .set({ status: "plan_review", autoMode: false })
       .where(eq(tasks.id, task!.id))
       .run();
 
     const applied = blockTaskForRuntimeGateIfEligible({
       taskId: task!.id,
       expectedProjectId: "proj-1",
-      expectedStatus: "plan_ready",
+      expectedStatus: "plan_review",
       expectedAutoMode: true,
-      blockedFromStatus: "plan_ready",
+      blockedFromStatus: "plan_review",
       blockedReason: "Coordinator pre-start runtime gate",
       retryAfter: "2026-04-17T12:00:00.000Z",
       retryCount: 1,
@@ -719,7 +719,7 @@ describe("runtime profiles data layer", () => {
     });
 
     expect(applied).toBe(false);
-    expect(findTaskById(task!.id)?.status).toBe("plan_ready");
+    expect(findTaskById(task!.id)?.status).toBe("plan_review");
   });
 
   it("persists singleton app-wide runtime defaults", () => {

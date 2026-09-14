@@ -80,10 +80,10 @@ function resolveLegacyAction(
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
         : denied("action_not_allowed", "start_ai is only allowed from backlog");
     case "start_implementation":
-      if (task.status !== "plan_ready" && task.status !== "plan_review") {
+      if (task.status !== "plan_review") {
         return denied(
           "action_not_allowed",
-          "start_implementation is only allowed from plan_ready or plan_review",
+          "start_implementation is only allowed from plan_review",
         );
       }
       return task.autoMode
@@ -98,21 +98,15 @@ function resolveLegacyAction(
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } }
         : denied("action_not_allowed", "request_plan_changes is only allowed from plan_review");
     case "request_replanning":
-      if (task.status !== "plan_ready" && task.status !== "plan_review") {
-        return denied(
-          "action_not_allowed",
-          "request_replanning is only allowed from plan_ready or plan_review",
-        );
+      if (task.status !== "plan_review") {
+        return denied("action_not_allowed", "request_replanning is only allowed from plan_review");
       }
       return { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } };
     case "fast_fix":
-      if (task.status !== "plan_ready" && task.status !== "plan_review") {
-        return denied(
-          "action_not_allowed",
-          "fast_fix is only allowed from plan_ready or plan_review",
-        );
+      if (task.status !== "plan_review") {
+        return denied("action_not_allowed", "fast_fix is only allowed from plan_review");
       }
-      return { ok: true, patch: { ...CLEAN_STATE_RESET, status: task.status } }; // self-loop: stay in current status
+      return { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_review" } };
     case "approve_done":
       return task.status === "done"
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "accepted" } }
@@ -186,10 +180,10 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
         ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "plan_review" } }
         : denied("action_not_allowed", "mark_plan_ready is only allowed from planning or improve");
     case "start_implementation":
-      if (task.status !== "plan_ready" && task.status !== "plan_review") {
+      if (task.status !== "plan_review") {
         return denied(
           "action_not_allowed",
-          "start_implementation is only allowed from plan_ready or plan_review",
+          "start_implementation is only allowed from plan_review",
         );
       }
       return { ok: true, patch: { ...CLEAN_STATE_RESET, status: "implementing" } };
@@ -383,8 +377,6 @@ export const HUMAN_ACTIONS_BY_STATUS: Record<TaskStatus, TaskEvent[]> = {
   backlog: ["start_ai"],
   planning: [],
   improve: [],
-  plan_ready: ["start_implementation", "request_replanning", "fast_fix"],
-  // plan_review is now the single gate: start_implementation, request_replanning, and fast_fix are available here.
   plan_review: ["start_implementation", "request_replanning", "fast_fix"],
   implementing: [],
   review: [],

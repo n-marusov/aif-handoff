@@ -138,9 +138,9 @@ describe("task state machine", () => {
     }
   });
 
-  it("allows start_implementation from plan_ready when autoMode=false", () => {
+  it("allows start_implementation from plan_review when autoMode=false", () => {
     const result = applyHumanTaskEvent(
-      { ...makeTask("plan_ready"), autoMode: false },
+      { ...makeTask("plan_review"), autoMode: false },
       "start_implementation",
     );
     expect(result.ok).toBe(true);
@@ -151,15 +151,15 @@ describe("task state machine", () => {
 
   it("rejects start_implementation for autoMode=true", () => {
     const result = applyHumanTaskEvent(
-      { ...makeTask("plan_ready"), autoMode: true },
+      { ...makeTask("plan_review"), autoMode: true },
       "start_implementation",
     );
     expect(result.ok).toBe(false);
   });
 
-  it("allows request_replanning from plan_ready into improve", () => {
+  it("allows request_replanning from plan_review into improve", () => {
     const result = applyHumanTaskEvent(
-      { ...makeTask("plan_ready"), autoMode: false },
+      { ...makeTask("plan_review"), autoMode: false },
       "request_replanning",
     );
     expect(result.ok).toBe(true);
@@ -168,20 +168,20 @@ describe("task state machine", () => {
     }
   });
 
-  it("rejects request_replanning outside plan_ready", () => {
+  it("rejects request_replanning outside plan_review", () => {
     const result = applyHumanTaskEvent(makeTask("done"), "request_replanning");
     expect(result.ok).toBe(false);
   });
 
-  it("allows fast_fix from plan_ready without changing status", () => {
-    const result = applyHumanTaskEvent({ ...makeTask("plan_ready"), autoMode: false }, "fast_fix");
+  it("allows fast_fix from plan_review as a self-loop", () => {
+    const result = applyHumanTaskEvent({ ...makeTask("plan_review"), autoMode: false }, "fast_fix");
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.patch.status).toBe("plan_ready");
+      expect(result.patch.status).toBe("plan_review");
     }
   });
 
-  it("rejects fast_fix outside plan_ready", () => {
+  it("rejects fast_fix outside plan_review", () => {
     const result = applyHumanTaskEvent(makeTask("done"), "fast_fix");
     expect(result.ok).toBe(false);
   });
@@ -192,7 +192,7 @@ describe("task state machine", () => {
   });
 
   it("rejects request_changes outside done", () => {
-    const result = applyHumanTaskEvent(makeTask("plan_ready"), "request_changes");
+    const result = applyHumanTaskEvent(makeTask("plan_review"), "request_changes");
     expect(result.ok).toBe(false);
   });
 
@@ -218,7 +218,6 @@ describe("task state machine", () => {
   });
 
   it("denies approve_plan until the plan is under review", () => {
-    expect(applyHumanTaskEvent(makeTask("plan_ready"), "approve_plan").ok).toBe(false);
     expect(applyHumanTaskEvent(makeTask("planning"), "approve_plan").ok).toBe(false);
     expect(applyHumanTaskEvent(makeTask("done"), "approve_plan").ok).toBe(false);
   });
@@ -232,7 +231,6 @@ describe("task state machine", () => {
   });
 
   it("denies request_plan_changes outside plan_review", () => {
-    expect(applyHumanTaskEvent(makeTask("plan_ready"), "request_plan_changes").ok).toBe(false);
     expect(applyHumanTaskEvent(makeTask("implementing"), "request_plan_changes").ok).toBe(false);
     expect(applyHumanTaskEvent(makeTask("done"), "request_plan_changes").ok).toBe(false);
   });
@@ -330,7 +328,7 @@ describe("task state machine", () => {
     ["backlog", "start_human_work", "planning"],
     ["planning", "mark_plan_ready", "plan_review"],
     ["improve", "mark_plan_ready", "plan_review"],
-    ["plan_ready", "start_implementation", "implementing"],
+    ["plan_review", "start_implementation", "implementing"],
     ["review", "request_review_changes", "implementing"],
     ["verify", "fail_verification", "implementing"],
     ["done", "approve_done", "accepted"],

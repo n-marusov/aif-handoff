@@ -1174,9 +1174,9 @@ describe("data layer", () => {
         },
         {
           id: "auto-mode-changed",
-          values: { projectId: "proj-1", status: "plan_ready" as const, autoMode: false },
+          values: { projectId: "proj-1", status: "plan_review" as const, autoMode: false },
           expectedProjectId: "proj-1",
-          expectedStatus: "plan_ready" as const,
+          expectedStatus: "plan_review" as const,
           expectedAutoMode: true,
         },
         {
