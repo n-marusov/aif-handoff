@@ -146,6 +146,7 @@ data/                    # SQLite database files (gitignored)
 | Use Cases           | docs/use-cases/README.md      | Use case index with 42 UC files mapped to HF1–HF12              |
 | Functional Reqs     | docs/fun-req/README.md        | FR specification: ID format, priorities, quality criteria       |
 | Non-Functional Reqs | docs/nonfun-req/README.md     | NFR specification: areas, quality criteria, project constraints |
+| Contracts           | docs/contracts/README.md      | Inter-package contracts, API, WebSocket, and adapter interfaces |
 | Business Rules      | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies          |
 | Vision & Scope      | docs/vision.md                | Product vision, scope, and business context                     |
 
