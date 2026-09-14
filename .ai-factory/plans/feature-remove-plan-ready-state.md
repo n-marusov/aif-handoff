@@ -300,7 +300,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
   Files: `docs/gitlab-demo.md`, `docs/github-demo.md`, `docs/dev-gui-demo.md`, `docs/mcp-sync.md`, `docs/adr/README.md`, `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md`, `docs/business-rules/BR-task-lifecycle.stages.md`, `docs/business-rules/BR-task-lifecycle.transitions.md`, `docs/business-rules/BR-automation.pipeline.md`, `docs/business-rules/BR-automation.plan-review-gate.md`, `docs/business-rules/BR-ownership.handoff.md`
 
   - Update pipeline diagrams and `plan_ready` sync examples to `plan_review`.
-  - Align the applied-decisions table in `docs/adr/README.md` with the new chain.
+  - Update both intro pipeline chains in `docs/adr/README.md` — the intro paragraph (line 3: `Backlog → Planning → Plan Ready → Implementing → Review → Done`) and the applied-decisions table (line 18: `backlog → planning → plan_ready → implementing → review → done`) — to `backlog → planning → improve → plan_review → implementing → verify → review → done → accepted`.
   - Correct the stale entry-point symbol in `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md`: the ADR names `computeTransition(action, task, context)`, which does not exist; the real entry points are `resolveTaskAction(task, event, context)` and `applyHumanTaskEvent` in `packages/shared/src/stateMachine.ts`.
   - `BR-task-lifecycle.stages.md`: drop the `Plan Ready` row and make `Plan Review` the universal gate (remove the VCS-only caveat).
   - `BR-task-lifecycle.transitions.md`: remove `publish_plan` from the event list.
