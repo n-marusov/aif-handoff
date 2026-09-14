@@ -167,7 +167,6 @@ docker-build: ## Собрать все образы Docker (docker compose build
 .PHONY: docker-dev
 docker-dev: ## Запустить все сервисы в dev-режиме (docker compose up)
 	@$(DC_DEV) up -d
-	@$(DC_DEV) logs --tail=10
 	@echo docker-dev: OK, all services started
 
 .PHONY: docker-dev-stop
