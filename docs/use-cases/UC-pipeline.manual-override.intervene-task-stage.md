@@ -51,7 +51,7 @@ sequenceDiagram
 **Альтернативные потоки:**
 
 - **A1. Действие не разрешено:** state machine возвращает `{ok: false, code, error}` — UI отображает причину отказа.
-- **A2. Human-owner задачи:** для `executionOwner=human` доступны actions: `start_human_work`, `mark_plan_ready`, `submit_implementation`, `complete_review`, `pass_verification`, `fail_verification`.
+- **A2. Human-owner задачи:** для `executionOwner=human` доступны actions: `start_human_work`, `mark_plan_review`, `submit_implementation`, `complete_review`, `pass_verification`, `fail_verification`.
 - **A3. Admin bypass:** администратор может выполнить action, даже если не назначен исполнителем задачи.
 - **A4. Action из blocked_external:** `retry_from_blocked` — восстановление задачи из блокировки (возврат к `blockedFromStatus`).
 

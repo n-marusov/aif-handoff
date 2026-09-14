@@ -118,11 +118,13 @@ docs/contracts/                 # каталог контрактов систе
 │   ├── README.md              # указатели на общие схемы каталога
 │   └── common.json            # переиспользуемые JSON Schema 2020-12 (типы/форматы/статусы/SemVer)
 ├── rest/
-│   └── aif-api.openapi.yaml   # OpenAPI 3.1 спецификация REST API (планируется)
+│   └── aif-api.md             # спецификация REST API (Hono) — эндпоинты, форматы, аутентификация
 ├── websocket/
-│   └── events.yaml            # спецификация WebSocket событий и форматов (планируется)
-└── adapter/
-    └── runtime-adapter.yaml   # профиль RuntimeAdapter интерфейса (планируется)
+│   └── events.md              # спецификация WebSocket событий и форматов
+├── adapter/
+│   └── runtime-adapter.md     # спецификация RuntimeAdapter интерфейса (@aif/runtime)
+└── data/
+    └── data-layer.md          # спецификация Data Access Layer (@aif/data)
 ```
 
 Файлы спецификаций создаются по мере описания контрактов (принцип `as is`); источник правды TypeScript-контрактов —
@@ -215,6 +217,17 @@ docs/contracts/                 # каталог контрактов систе
 - **Граница каталога**: каталог описывает только контракты системы AIF Handoff. Внешние API (GitHub REST,
   GitLab REST, Anthropic API, OpenRouter API) ведутся как контракты-ссылки с пометкой «внешняя система»;
   их полные спецификации не дублируются.
+
+## Связанные спецификации
+
+Подробные описания контрактов — в отдельных спецификациях:
+
+| Контракт          | Спецификация                                             | Формат   |
+| ----------------- | -------------------------------------------------------- | -------- |
+| RuntimeAdapter    | [adapter/runtime-adapter.md](adapter/runtime-adapter.md) | Markdown |
+| REST API          | [rest/aif-api.md](rest/aif-api.md)                       | Markdown |
+| WebSocket Events  | [websocket/events.md](websocket/events.md)               | Markdown |
+| Data Access Layer | [data/data-layer.md](data/data-layer.md)                 | Markdown |
 
 ## Связанные артефакты
 

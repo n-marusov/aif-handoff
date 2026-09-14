@@ -206,14 +206,14 @@ an MR.
 
 ## Plan Review PR/MR Gate
 
-The plan-review gate adds a mandatory human approval step between `plan_ready` and
+The plan-review gate adds a mandatory human approval step between `plan_review` and
 `implementing` for GitHub/GitLab issue-linked tasks. Enable it in `.env`:
 
 ```dotenv
 AIF_PLAN_REVIEW_PR_ENABLED=true
 ```
 
-With the flag off (default), VCS tasks keep the legacy automatic `plan_ready →
+With the flag off (default), VCS tasks keep the legacy automatic `plan_review →
 implementing` behavior. When enabled, the coordinator inserts a `plan-publisher` stage
 after the plan checker for VCS-linked tasks (`taskRequiresPlanReview` requires a live
 GitHub/GitLab issue link). The publisher:
@@ -226,7 +226,7 @@ GitHub/GitLab issue link). The publisher:
    (GitLab: `.../gitlab/tasks/:taskId/publish-plan`) — the PR/MR body carries a
    `<!-- aif:pr-mode=plan_review -->` / `<!-- aif:mr-mode=plan_review -->` marker and
    deliberately **omits `Closes #...`**;
-3. records `planReviewState=published` and transitions the task `plan_ready → plan_review`
+3. records `planReviewState=published` and transitions the task `plan_review → plan_review`
    (`markTaskPlanPublished`), where it waits for the human.
 
 The task leaves `plan_review` only through VCS sync:
@@ -627,7 +627,7 @@ The coordinator includes a stale-stage watchdog:
 - Effective stale baseline uses the freshest of `lastHeartbeatAt` and `updatedAt`.
 - If a task is stale in `planning`, `implementing`, or `review` for longer than `AGENT_STAGE_STALE_TIMEOUT_MS`, it is auto-moved to `blocked_external` with backoff.
 - If stale recovery count reaches `AGENT_STAGE_STALE_MAX_RETRY`, the task stays in `blocked_external` without `retryAfter` (manual intervention required).
-- For stale `implementing` tasks, recovery resumes from `plan_ready` to avoid half-broken implementation continuation.
+- For stale `implementing` tasks, recovery resumes from `plan_review` to avoid half-broken implementation continuation.
 - Any valid human/stage transition resets stale-retry debt (`retryCount=0`) and refreshes heartbeat baseline.
 
 ## Auto-Review Convergence

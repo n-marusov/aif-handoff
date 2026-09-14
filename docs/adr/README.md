@@ -1,6 +1,6 @@
 # Архитектурные решения (ADR) — AIF Handoff: система автономного управления задачами
 
-В этой директории хранятся записи архитектурных решений (Architecture Decision Records) проекта **AIF Handoff** — системы автономного управления задачами с Kanban-доской и AI-субагентами. Задачи проходят стадии автоматически: **Backlog → Planning → Plan Ready → Implementing → Review → Done**, каждая обрабатывается субагентами через плагируемый слой рантаймов (`@aif/runtime`).
+В этой директории хранятся записи архитектурных решений (Architecture Decision Records) проекта **AIF Handoff** — системы автономного управления задачами с Kanban-доской и AI-субагентами. Задачи проходят стадии автоматически: **Backlog → Planning → Plan Review → Implementing → Review → Done**, каждая обрабатывается субагентами через плагируемый слой рантаймов (`@aif/runtime`).
 
 Проект реализован как Turborepo-монорепозиторий с семью пакетами (`shared`, `runtime`, `data`, `api`, `web`, `agent`, `mcp`). Каждый пакет — независимый модуль со своей сборкой, тестами и зависимостями, но все развёртываются и работают как единая система (Modular Monolith). Выполнение субагентов идёт через адаптеры рантаймов (Claude Agent SDK, Codex CLI/API, OpenRouter API), подключаемые через общий реестр и контракты в `packages/runtime`.
 
@@ -15,7 +15,7 @@
 | Modular Monolith (Turborepo)                | Семь пакетов с независимой сборкой, но единым развёртыванием. Пакетная структура отражает доменные границы.                                          |
 | Единый слой доступа к данным (`@aif/data`)  | Все операции с SQLite — только через `@aif/data`. Прямые импорты DB-хелперов из `@aif/shared` и SQL-конструкции заблокированы ESLint.                |
 | Плагируемый слой рантаймов (`@aif/runtime`) | Единый реестр адаптеров, профили (задача/проект/система), resolution + capability checks. Встроенные адаптеры: Claude, Codex, OpenRouter, OpenCode.  |
-| State Machine для задач                     | Стадии `backlog → planning → plan_ready → implementing → review → done`. Управляется через `packages/shared/src/stateMachine.ts`.                    |
+| State Machine для задач                     | Стадии `backlog → planning → plan_review → implementing → review → done`. Управляется через `packages/shared/src/stateMachine.ts`.                   |
 | Поддержка нескольких runtime-адаптеров      | Каждый адаптер реализует `RuntimeAdapter` с транспортами (sdk/cli/api). Реестр поддерживает регистрацию внешних модулей через `AIF_RUNTIME_MODULES`. |
 | Hono API + WebSocket                        | REST-эндпоинты и WebSocket для real-time обновлений Kanban. Порт 3009.                                                                               |
 | React + Vite + TailwindCSS 4                | Web UI с Kanban-доской, управлением задачами, чатом. Порт 5180.                                                                                      |

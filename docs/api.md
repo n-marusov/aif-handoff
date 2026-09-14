@@ -252,7 +252,7 @@ This endpoint does not return full task rows.
     "statusCounts": {
       "backlog": 4,
       "planning": 1,
-      "plan_ready": 2,
+      "plan_review": 2,
       "implementing": 1,
       "review": 1,
       "blocked_external": 1,
@@ -262,7 +262,7 @@ This endpoint does not return full task rows.
     "statusPreviews": {
       "backlog": [{ "id": "task-1", "title": "Queued work" }],
       "planning": [],
-      "plan_ready": [],
+      "plan_review": [],
       "implementing": [],
       "review": [],
       "blocked_external": [],
@@ -1023,7 +1023,7 @@ POST /tasks
 | `skipReview` | boolean | no | `false` | Skip the review stage — task moves directly from implementing to done |
 | `paused` | boolean | no | `false` | Pause agent processing — coordinator skips this task until resumed |
 | `useSubagents` | boolean | no | `false` | Run via custom subagents (`plan-coordinator`, `implement-coordinator`, sidecars). `false` uses `aif-*` skills directly |
-| `runPlanImprove` | boolean | no | `false` | Skills-mode only (`useSubagents=false`): run optional `/aif-improve` after planning and before `plan_ready`. Ignored and stored as `false` for subagent tasks |
+| `runPlanImprove` | boolean | no | `false` | Skills-mode only (`useSubagents=false`): run optional `/aif-improve` after planning and before `plan_review`. Ignored and stored as `false` for subagent tasks |
 | `runPostVerify` | boolean | no | `false` | Skills-mode only (`useSubagents=false`): run optional `/aif-verify` after implementation and before review. With `skipReview=true`, verification moves directly to `done`. Ignored and stored as `false` for subagent tasks |
 | `autoQa` | boolean | no | `false` | Automatically run the QA pipeline (`/aif-qa --all`) when the task is approved (`approve_done`: `done → verified`) |
 | `runtimeProfileId` | string \| null | no | `null` | Task-specific runtime override. When absent, resolution falls back to project default, then app default, then environment fallback |
@@ -1098,7 +1098,7 @@ POST /tasks/:id/handoff
 The response contains `{ task, ownership, history }`. AI ownership requires an empty
 `assigneeIds` array. Human ownership may be unassigned or have multiple active assignees.
 Administrators may assign/handoff; a member may self-assign an unassigned Human task or
-hand an assigned Human task back to AI. For Human → AI at manual `plan_ready`, include
+hand an assigned Human task back to AI. For Human → AI at manual `plan_review`, include
 `resumeAction: "start_implementation"`; for `blocked_external`, include
 `resumeAction: "retry_from_blocked"` and the task must have `blockedFromStatus`.
 `accepted` is terminal and cannot be handed off.
@@ -1162,7 +1162,7 @@ PUT /tasks/:id
 | `priority` | integer | Priority (0-5) |
 | `autoMode` | boolean | Auto-advance mode (includes automatic post-review rework loop when enabled) |
 | `useSubagents` | boolean | Run via custom subagents. When set to `true`, `runPlanImprove` and `runPostVerify` are reset to `false` |
-| `runPlanImprove` | boolean | Skills-mode only: run optional `/aif-improve` after planning and before `plan_ready` |
+| `runPlanImprove` | boolean | Skills-mode only: run optional `/aif-improve` after planning and before `plan_review` |
 | `runPostVerify` | boolean | Skills-mode only: run optional `/aif-verify` after implementation and before review. With `skipReview=true`, verification moves directly to `done` |
 | `autoQa` | boolean | Auto-run the QA pipeline when the task is approved (`done → accepted`) |
 | `paused` | boolean | Pause/resume agent processing for this task |
@@ -1232,7 +1232,7 @@ Transitions a task through the state machine.
 | Current Status     | Valid Events                                             |
 | ------------------ | -------------------------------------------------------- |
 | `backlog`          | `start_ai`                                               |
-| `plan_ready`       | `start_implementation`, `request_replanning`, `fast_fix` |
+| `plan_review`      | `start_implementation`, `request_replanning`, `fast_fix` |
 | `blocked_external` | `retry_from_blocked`                                     |
 | `done`             | `approve_done`, `request_changes`                        |
 
@@ -1242,8 +1242,8 @@ With Participants Mode enabled, the server returns the authoritative action subs
 | Current status        | Human-owned events                          |
 | --------------------- | ------------------------------------------- |
 | `backlog`             | `start_human_work`                          |
-| `planning`, `improve` | `mark_plan_ready`                           |
-| `plan_ready`          | `start_implementation`                      |
+| `planning`, `improve` | `mark_plan_review`                          |
+| `plan_review`         | `start_implementation`                      |
 | `implementing`        | `submit_implementation`                     |
 | `review`              | `complete_review`, `request_review_changes` |
 | `verify`              | `pass_verification`, `fail_verification`    |

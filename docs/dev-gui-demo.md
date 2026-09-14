@@ -417,7 +417,7 @@ git -C <LOCAL_ROOT> status
 стандартный маршрут:
 
 ```
-backlog ──▶ planning ──▶ plan_ready ──▶ implementing ──▶ review ──▶ done
+backlog ──▶ planning ──▶ plan_review ──▶ implementing ──▶ review ──▶ done
 ```
 
 (Стадии `improve`/`verify` подключаются только если у задачи выставлены флаги

@@ -309,7 +309,7 @@ Handoff Coordinator (TypeScript)
   │       ├─ Inserts <!-- handoff:task:<id> --> in plan
   │       ├─ Skips AskUserQuestion (uses defaults)
   │       └─ Does NOT call MCP (coordinator handles status)
-  ├─ updateTaskStatus(id, "plan_ready")   ← direct DB write
+  ├─ updateTaskStatus(id, "plan_review")   ← direct DB write
   ├─ runImplementer(id)
   │   └─ /aif-implement sees HANDOFF_MODE=1
   │       ├─ Skips interactive prompts
@@ -332,7 +332,7 @@ Developer in Claude Code
   │       ├─ Inserts <!-- handoff:task:<id> --> in plan
   │       ├─ AskUserQuestion works normally (interactive)
   │       ├─ Calls handoff_push_plan(planContent: ...)
-  │       └─ Calls handoff_sync_status(newStatus: "plan_ready")
+  │       └─ Calls handoff_sync_status(newStatus: "plan_review")
   │
   ├─ /aif-implement
   │   └─ Skill sees HANDOFF_TASK_ID but no HANDOFF_MODE
@@ -347,10 +347,10 @@ Developer in Claude Code
 ### Task Lifecycle
 
 ```
-backlog ──start_ai──► planning ──────────► plan_ready ──────────► implementing ──┬──► review ──► done
+backlog ──start_ai──► planning ──────────► plan_review ──────────► implementing ──┬──► review ──► done
                       ▲                    │                                      │              │
                       │                    ├─ request_replanning ─►  planning     │              ├─ approve_done ─► verified
-                      │                    └─ fast_fix ─► plan_ready              │              └─ request_changes ─► implementing
+                      │                    └─ fast_fix ─► plan_review              │              └─ request_changes ─► implementing
                       │                                                           │
                       │                                                           └─ (skipReview) ─► done
 ```
@@ -359,7 +359,7 @@ Status transitions driven by AIF:
 
 | Stage        | Start status   | End status         | Who updates                          |
 | ------------ | -------------- | ------------------ | ------------------------------------ |
-| Planning     | `planning`     | `plan_ready`       | Coordinator (mode 1) or MCP (mode 2) |
+| Planning     | `planning`     | `plan_review`      | Coordinator (mode 1) or MCP (mode 2) |
 | Implementing | `implementing` | `review` or `done` | Coordinator (mode 1) or MCP (mode 2) |
 | Review       | `review`       | `done`             | Coordinator only (mode 1)            |
 

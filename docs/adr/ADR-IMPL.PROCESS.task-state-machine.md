@@ -14,7 +14,7 @@ stateDiagram-v2
 
     backlog --> planning : start_ai / start_human_work / scheduledAt
 
-    planning --> plan_review : plan completed / mark_plan_ready
+    planning --> plan_review : plan completed / mark_plan_review
     planning --> improve : runPlanImprove flag
 
     improve --> plan_review : improve completed

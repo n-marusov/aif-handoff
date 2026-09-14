@@ -429,7 +429,7 @@ docker compose -f docker-compose.production.yml logs -f agent
 стандартный маршрут:
 
 ```
-backlog ──▶ planning ──▶ plan_ready ──▶ implementing ──▶ review ──▶ done
+backlog ──▶ planning ──▶ plan_review ──▶ implementing ──▶ review ──▶ done
 ```
 
 (Стадии `improve`/`verify` подключаются только если у задачи выставлены флаги
@@ -553,7 +553,7 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
    «упадёт» при старте, но связь не заработает. Обе переменные должны быть в `.env`.
 5. **Пайплайн в skills-режиме.** Стадии `improve` и `verify` — опциональные и включаются
    только флагами задачи (`runPlanImprove`, `runPostVerify`); в демо стандартный маршрут
-   `planning → plan_ready → implementing → review → done`.
+   `planning → plan_review → implementing → review → done`.
 
 ---
 
@@ -595,7 +595,7 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 
 ## Приложение Г — План-ревью гейт (опционально)
 
-Основное демо выше описывает «быстрый» маршрут: после `plan_ready` агент сразу
+Основное демо выше описывает «быстрый» маршрут: после `plan_review` агент сразу
 реализует и публикует финальный MR с `Closes #<iid>`. Если добавить в `.env` строку
 `AIF_PLAN_REVIEW_PR_ENABLED=true`, GitLab-задачи останавливаются на обязательном
 человеческом одобрении плана до начала реализации:

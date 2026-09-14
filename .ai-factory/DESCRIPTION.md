@@ -2,7 +2,7 @@
 
 ## Overview
 
-Autonomous task management system with Kanban board and AI subagents. Tasks flow through stages automatically: **Backlog → Planning → Plan Ready → Implementing → Review → Done** — each stage handled by specialized subagents routed through a pluggable runtime layer, powered by ai-factory infrastructure.
+Autonomous task management system with Kanban board and AI subagents. Tasks flow through stages automatically: **Backlog → Planning → Improve → Plan Review → Implementing → Verify → Review → Done → Accepted** — each stage handled by specialized subagents routed through a pluggable runtime layer, powered by ai-factory infrastructure.
 
 ## Core Features
 
@@ -41,9 +41,9 @@ Lint guard enforces DB boundaries: `api`, `agent`, and `runtime` can access DB o
 ## Agent Pipeline
 
 The coordinator polls every 30s and delegates to `.claude/agents/` definitions:
-- **Backlog → Planning → Plan Ready:** `plan-coordinator` (iterative plan refinement)
-- **Plan Ready → Implementing → Review:** `implement-coordinator` (parallel task execution with worktrees)
-- **Review → Done:** `review-sidecar` + `security-sidecar` (code review and security audit)
+- **Backlog → Planning → Improve → Plan Review:** `plan-coordinator` (iterative plan refinement, optional skills-mode improve)
+- **Plan Review → Implementing → Verify:** `implement-coordinator` (parallel task execution with worktrees)
+- **Verify → Review → Done:** verification + `review-sidecar` + `security-sidecar` (code review and security audit)
 
 ## Non-Functional Requirements
 

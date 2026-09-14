@@ -111,7 +111,7 @@ The coordinator supports **parallel task execution** (experimental, per-project)
 It delegates workflow stages to `.claude/agents/` definitions, but actual execution transport/model/session behavior is adapter-owned through `@aif/runtime`:
 
 ```
-Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implementing ──► Verify ──► Review ──► Done ──► Verified
+Backlog ──[start_ai]──► Planning ──► Plan Review ──► Implementing ──► Verify ──► Review ──► Done ──► Verified
                             │              │              │         │            │           │
                             │              │              │         │            │           └─[request_changes]──► Implementing (rework)
                             │              │              │         │            └─[auto-mode review gate]──► request_changes ─► Implementing (rework)
@@ -127,11 +127,11 @@ Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implem
 
 Skills-mode tasks (`useSubagents=false`) can opt into one extra stage:
 
-Planning ──[runPlanImprove]──► Improve ──► Plan Ready
+Planning ──[runPlanImprove]──► Improve ──► Plan Review
 ```
 
 When `AIF_PLAN_REVIEW_PR_ENABLED=true`, VCS-issue-linked tasks (GitHub or GitLab
-mode) additionally stop at a mandatory `plan_review` gate between `plan_ready` and
+mode) additionally stop at a mandatory `plan_review` gate between `plan_review` and
 `implementing`. The coordinator inserts a `plan-publisher` stage after the plan
 checker; the publisher commits only the plan file(s), pushes the branch, publishes a
 plan-only PR/MR, and leaves the task in `plan_review` until a human approves it in the
@@ -139,10 +139,10 @@ VCS (see [Plan Review PR/MR Gate](#plan-review-prmr-gate)).
 
 | Stage Transition                                                                                 | Agent                                                                     | Description                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backlog → Planning → Plan Ready                                                                  | `plan-coordinator`                                                        | Iterative plan refinement via `plan-polisher`                                                                                                                         |
-| Plan Ready → Plan Review → Implementing (plan-review gate)                                       | `plan-publisher` → VCS approval (sync) → `implement-coordinator`          | Optional `AIF_PLAN_REVIEW_PR_ENABLED` gate: plan-only commit + plan PR/MR published, then implementation only after human approval (GitHub/GitLab-issue-linked tasks) |
-| Planning → Improve → Plan Ready                                                                  | `/aif-improve`                                                            | Optional skills-mode plan refinement. Enabled per task with `runPlanImprove`; ignored when `useSubagents=true`                                                        |
-| Plan Ready → Implementing → Verify                                                               | `implement-coordinator`                                                   | Parallel execution with worktrees; implementation completed moves to verification stage                                                                               |
+| Backlog → Planning → Plan Review                                                                 | `plan-coordinator`                                                        | Iterative plan refinement via `plan-polisher`                                                                                                                         |
+| Plan Review → Plan Review → Implementing (plan-review gate)                                      | `plan-publisher` → VCS approval (sync) → `implement-coordinator`          | Optional `AIF_PLAN_REVIEW_PR_ENABLED` gate: plan-only commit + plan PR/MR published, then implementation only after human approval (GitHub/GitLab-issue-linked tasks) |
+| Planning → Improve → Plan Review                                                                 | `/aif-improve`                                                            | Optional skills-mode plan refinement. Enabled per task with `runPlanImprove`; ignored when `useSubagents=true`                                                        |
+| Plan Review → Implementing → Verify                                                              | `implement-coordinator`                                                   | Parallel execution with worktrees; implementation completed moves to verification stage                                                                               |
 | Verify → Review / Done                                                                           | `/aif-verify`                                                             | Mandatory verification stage after implementation. Validates code against the plan before review. skipReview flag bypasses both verify and review.                    |
 | Review → Done / Review → request_changes → Implementing / Review → Done + manual review required | `review-sidecar` + `security-sidecar` (+ auto review gate in coordinator) | Code review and security audit in parallel; in auto mode, structured blocking findings drive automatic rework until success or explicit manual handoff                |
 
@@ -227,7 +227,7 @@ and unavailable API services are surfaced or paused without creating a second ta
 
 ### Plan Review PR/MR Gate
 
-The plan-review gate is an optional hard gate between `plan_ready` and `implementing`
+The plan-review gate is an optional hard gate between `plan_review` and `implementing`
 for VCS-issue-linked tasks, enabled by `AIF_PLAN_REVIEW_PR_ENABLED=true`. It is
 designed to match the hand-off contract: the agent never starts implementation until a
 human approves the scope on the pull/merge request. Off by default, it leaves the
@@ -236,7 +236,7 @@ legacy local auto-implement flow untouched for tasks without VCS linkage.
 Flow (one Issue = one branch = one PR/MR):
 
 ```text
-plan_ready ──[plan-publisher]──► plan_review ──[PR/MR approved]──► implementing ──► review ──► done
+plan_review ──[plan-publisher]──► plan_review ──[PR/MR approved]──► implementing ──► review ──► done
                  │  deterministic plan-only commit (never product files)
                  │  push branch + publish/update plan PR/MR (`plan_review` mode)
                  ▼
@@ -245,7 +245,7 @@ plan_ready ──[plan-publisher]──► plan_review ──[PR/MR approved]─
                  ├─[PR/MR approval]──────────────► implementing (planReviewState=approved)
                  └─[changes requested / comments] ► improve (planReviewState=changes_requested,
                                                      planReviewFeedback persisted) → same branch
-                                                     → /aif-improve with PR/MR feedback → plan_ready
+                                                     → /aif-improve with PR/MR feedback → plan_review
                                                      → plan-publisher → plan_review again
 ```
 
@@ -299,7 +299,7 @@ The pipeline includes four reliability layers for long-running autonomous execut
 - **Runtime-limit auto-pause:** Exact/heuristic persisted runtime-limit snapshots can proactively move new work to `blocked_external` before a provider hard-fails, and structured `resetAt` / `retryAfterSeconds` replace random quota backoff when available.
 - **Transition reset:** valid transitions clear watchdog state (`blocked*`, `retryAfter`, `retryCount`) and refresh heartbeat baseline.
 
-For stale `implementing`, recovery resumes from `plan_ready` to force a clean implementation pass instead of continuing a potentially inconsistent in-flight run.
+For stale `implementing`, recovery resumes from `plan_review` to force a clean implementation pass instead of continuing a potentially inconsistent in-flight run.
 
 ### Layer-Driven Implementation Dispatch
 
@@ -398,7 +398,7 @@ Defined in `packages/shared/src/stateMachine.ts`. Human actions available per st
 | `backlog`          | `start_ai`                                               |
 | `planning`         | _(none — agent working)_                                 |
 | `improve`          | _(none — agent working)_                                 |
-| `plan_ready`       | `start_implementation`, `request_replanning`, `fast_fix` |
+| `plan_review`      | `start_implementation`, `request_replanning`, `fast_fix` |
 | `plan_review`      | _(none — waits for human approval on the plan PR/MR)_    |
 | `implementing`     | _(none — agent working)_                                 |
 | `review`           | _(none — agent working)_                                 |
@@ -412,7 +412,7 @@ for the plan-review gate and are **not** human actions in the UI: publishing hap
 the coordinator's `plan-publisher` stage, and approval/requested-changes arrive from PR/MR
 review state during VCS sync (see [Plan Review PR/MR Gate](#plan-review-prmr-gate)).
 
-Tasks have an `autoMode` flag. When `true`, the agent automatically transitions through all stages. This includes an automatic post-review gate: reviewer output is stored in a structured format, parsed deterministically, and converted into blocking findings for the next cycle. When blockers remain, the coordinator applies a `request_changes`-style transition (`done -> implementing`) with an agent comment containing required fixes. When `false`, the user must manually trigger `start_implementation` from `plan_ready`.
+Tasks have an `autoMode` flag. When `true`, the agent automatically transitions through all stages. This includes an automatic post-review gate: reviewer output is stored in a structured format, parsed deterministically, and converted into blocking findings for the next cycle. When blockers remain, the coordinator applies a `request_changes`-style transition (`done -> implementing`) with an agent comment containing required fixes. When `false`, the user must manually trigger `start_implementation` from `plan_review`.
 
 Auto-review strategy is controlled globally by `AGENT_AUTO_REVIEW_STRATEGY`:
 
@@ -422,7 +422,7 @@ Auto-review strategy is controlled globally by `AGENT_AUTO_REVIEW_STRATEGY`:
 
 Tasks also have a `skipReview` flag (default `false`). When `true`, the coordinator bypasses the review stage entirely — after successful implementation the task moves directly to `done`, skipping the `review-sidecar` and `security-sidecar` runs. This is useful for small changes or tasks where code review is unnecessary.
 
-Skills-mode tasks (`useSubagents=false`) also have two opt-in flags. `runPlanImprove` inserts `/aif-improve` after the initial plan and before `plan_ready`. This is plan refinement: it may replace the stored plan only when the improver returns a complete plan-shaped update. `runPostVerify` inserts `/aif-verify` after implementation and before review. This is an execution validation gate: it stores verification output, passes through to review/done on pass or warn, and moves to `blocked_external` for a blocking gate result. Both flags default to `false` and are ignored for subagent tasks.
+Skills-mode tasks (`useSubagents=false`) also have two opt-in flags. `runPlanImprove` inserts `/aif-improve` after the initial plan and before `plan_review`. This is plan refinement: it may replace the stored plan only when the improver returns a complete plan-shaped update. `runPostVerify` inserts `/aif-verify` after implementation and before review. This is an execution validation gate: it stores verification output, passes through to review/done on pass or warn, and moves to `blocked_external` for a blocking gate result. Both flags default to `false` and are ignored for subagent tasks.
 
 ### Participants, Ownership, and Manual Execution
 
@@ -450,8 +450,8 @@ and runtime-budget consumption.
 | Human-owned status    | Assigned participant actions                                            |
 | --------------------- | ----------------------------------------------------------------------- |
 | `backlog`             | `start_human_work` → `planning`                                         |
-| `planning`, `improve` | `mark_plan_ready` → `plan_ready`                                        |
-| `plan_ready`          | `start_implementation` → `implementing`                                 |
+| `planning`, `improve` | `mark_plan_review` → `plan_review`                                      |
+| `plan_review`         | `start_implementation` → `implementing`                                 |
 | `implementing`        | `submit_implementation` → `verify`, `review`, or `done` from task flags |
 | `review`              | `complete_review`, `request_review_changes`                             |
 | `verify`              | `pass_verification`, `fail_verification`                                |
@@ -467,7 +467,7 @@ action.
 Handoffs replace owner and assignments in one SQLite transaction. The request must match
 the expected ownership revision and may also assert the previous owner/status. A live AI
 lease, stale revision, inactive assignee, or invalid resume transition returns a structured
-conflict without partial writes. Human → AI at manual `plan_ready` requires
+conflict without partial writes. Human → AI at manual `plan_review` requires
 `start_implementation`; at `blocked_external` it requires `retry_from_blocked`.
 Executor-history and audit rows snapshot titles, statuses, actors, assignee names/roles,
 and active flags so later account edits do not rewrite history.
@@ -479,18 +479,18 @@ but operators must still avoid simultaneous edits to the same project root/workt
 
 Flag interaction table:
 
-| `useSubagents` | `skipReview` | `runPlanImprove` | `runPostVerify` | Effective pipeline after planning starts                                |
-| -------------- | ------------ | ---------------- | --------------- | ----------------------------------------------------------------------- |
-| `true`         | `false`      | ignored          | ignored         | Planning → Plan Ready → Implementing → Review → Done                    |
-| `true`         | `true`       | ignored          | ignored         | Planning → Plan Ready → Implementing → Done                             |
-| `false`        | `false`      | `false`          | `false`         | Planning → Plan Ready → Implementing → Review → Done                    |
-| `false`        | `true`       | `false`          | `false`         | Planning → Plan Ready → Implementing → Done                             |
-| `false`        | `false`      | `true`           | `false`         | Planning → Improve → Plan Ready → Implementing → Review → Done          |
-| `false`        | `true`       | `true`           | `false`         | Planning → Improve → Plan Ready → Implementing → Done                   |
-| `false`        | `false`      | `false`          | `true`          | Planning → Plan Ready → Implementing → Verify → Review → Done           |
-| `false`        | `true`       | `false`          | `true`          | Planning → Plan Ready → Implementing → Verify → Done                    |
-| `false`        | `false`      | `true`           | `true`          | Planning → Improve → Plan Ready → Implementing → Verify → Review → Done |
-| `false`        | `true`       | `true`           | `true`          | Planning → Improve → Plan Ready → Implementing → Verify → Done          |
+| `useSubagents` | `skipReview` | `runPlanImprove` | `runPostVerify` | Effective pipeline after planning starts                                 |
+| -------------- | ------------ | ---------------- | --------------- | ------------------------------------------------------------------------ |
+| `true`         | `false`      | ignored          | ignored         | Planning → Plan Review → Implementing → Review → Done                    |
+| `true`         | `true`       | ignored          | ignored         | Planning → Plan Review → Implementing → Done                             |
+| `false`        | `false`      | `false`          | `false`         | Planning → Plan Review → Implementing → Review → Done                    |
+| `false`        | `true`       | `false`          | `false`         | Planning → Plan Review → Implementing → Done                             |
+| `false`        | `false`      | `true`           | `false`         | Planning → Improve → Plan Review → Implementing → Review → Done          |
+| `false`        | `true`       | `true`           | `false`         | Planning → Improve → Plan Review → Implementing → Done                   |
+| `false`        | `false`      | `false`          | `true`          | Planning → Plan Review → Implementing → Verify → Review → Done           |
+| `false`        | `true`       | `false`          | `true`          | Planning → Plan Review → Implementing → Verify → Done                    |
+| `false`        | `false`      | `true`           | `true`          | Planning → Improve → Plan Review → Implementing → Verify → Review → Done |
+| `false`        | `true`       | `true`           | `true`          | Planning → Improve → Plan Review → Implementing → Verify → Done          |
 
 `verify` remains a coordinator stage, not a human action. That keeps it covered by the same claim, timeout, watchdog, runtime-profile, and activity-log machinery as other autonomous work. The semantic contract is narrower than review: verify validates the implementation against the accepted plan, while review/security sidecars evaluate code quality and risk.
 
@@ -519,7 +519,7 @@ Tasks have a `paused` flag (default `false`). When `true`, the coordinator skips
 
 **Important:** pausing a task does **not** abort an already running runtime session. If a query is in flight, it will finish. The pause takes effect on the **next** coordinator cycle — the task simply won't be picked up for the next stage transition.
 
-The Pause/Resume button is shown in the TaskDetail Actions bar for active processing stages (`planning`, `plan_ready`, `implementing`, `review`, `blocked_external`). It is hidden for `backlog`, `done`, and `accepted` where the agent pipeline is not running.
+The Pause/Resume button is shown in the TaskDetail Actions bar for active processing stages (`planning`, `plan_review`, `implementing`, `review`, `blocked_external`). It is hidden for `backlog`, `done`, and `accepted` where the agent pipeline is not running.
 
 ### Scheduled Execution
 
@@ -575,7 +575,7 @@ The advance step:
    then collapse it to `1` when branch isolation would use the shared project
    root.
 2. Read `active = countActivePipelineTasksForProject(project)` — counts tasks
-   in `planning`, `plan_ready`, `implementing`, `review`, or `blocked_external`.
+   in `planning`, `plan_review`, `implementing`, `review`, or `blocked_external`.
    Backlog (source) and `done`/`accepted` (terminal) do not count.
 3. While `active < limit`, pick the next backlog task by ascending `position`
    (skipping paused tasks and tasks with future `scheduledAt`), fire it into

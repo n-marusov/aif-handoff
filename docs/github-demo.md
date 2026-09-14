@@ -147,7 +147,7 @@ Create an Issue on GitHub.com (optionally labeled to match eligibility), then ru
 
 ## 7. Watch the task reach Plan Review
 
-The coordinator advances the task `backlog → planning → plan_ready`. Because
+The coordinator advances the task `backlog → planning → plan_review`. Because
 `AIF_PLAN_REVIEW_PR_ENABLED=true` and the task is GitHub-linked, the `plan-publisher`
 stage then:
 

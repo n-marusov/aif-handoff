@@ -214,7 +214,7 @@
 `taskPipeline`
 
 **Тип:** последовательность стадий.  
-**Определение.** Конвейер задач — детерминированная последовательность стадий (Backlog → Planning → Plan Ready → Implementing → Review → Done), через которую проходит каждая задача и каждая из которых обрабатывается специализированным сабагентом или человеком.  
+**Определение.** Конвейер задач — детерминированная последовательность стадий (Backlog → Planning → Improve → Plan Review → Implementing → Verify → Review → Done → Accepted), через которую проходит каждая задача и каждая из которых обрабатывается специализированным сабагентом или человеком.  
 **Связанные термины.** [Статус задачи](#статус-задачи-taskstatus), [событие задачи](#событие-задачи-taskevent), [координатор](#координатор-coordinator).
 
 ### Статус задачи
@@ -222,7 +222,7 @@
 `TaskStatus`
 
 **Тип:** метка состояния конечного автомата.  
-**Определение.** Статус задачи — одно из одиннадцати предопределённых значений (`backlog`, `planning`, `improve`, `plan_ready`, `plan_review`, `implementing`, `verify`, `review`, `blocked_external`, `done`, `verified`), в котором задача может находиться в данный момент.  
+**Определение.** Статус задачи — одно из десяти предопределённых значений (`backlog`, `planning`, `improve`, `plan_review`, `implementing`, `verify`, `review`, `blocked_external`, `done`, `accepted`), в котором задача может находиться в данный момент.  
 **Связанные термины.** [Автомат состояний](#автомат-состояний-statemachine), [упорядоченные статусы](#упорядоченные-статусы-ordered_statuses).
 
 ### Событие задачи
@@ -230,7 +230,7 @@
 `TaskEvent`
 
 **Тип:** имя действия.  
-**Определение.** Событие задачи — именованное действие, инициирующее переход задачи из одного статуса в другой: `start_ai`, `start_human_work`, `mark_plan_ready`, `start_implementation`, `publish_plan`, `approve_plan`, `request_plan_changes`, `submit_implementation`, `complete_review`, `request_review_changes`, `pass_verification`, `fail_verification`, `request_replanning`, `fast_fix`, `approve_done`, `request_changes`, `retry_from_blocked`.  
+**Определение.** Событие задачи — именованное действие, инициирующее переход задачи из одного статуса в другой: `start_ai`, `start_human_work`, `mark_plan_review`, `start_implementation`, `publish_plan`, `approve_plan`, `request_plan_changes`, `submit_implementation`, `complete_review`, `request_review_changes`, `pass_verification`, `fail_verification`, `request_replanning`, `fast_fix`, `approve_done`, `request_changes`, `retry_from_blocked`.  
 **Связанные термины.** [Автомат состояний](#автомат-состояний-statemachine), [разрешение действия](#разрешение-действия-resolvetaskaction).
 
 ### Автомат состояний
@@ -254,7 +254,7 @@
 `ORDERED_STATUSES`
 
 **Тип:** константа-массив.  
-**Определение.** Упорядоченные статусы — константный массив из одиннадцати статусов в порядке их визуального расположения на Kanban-доске: backlog, planning, improve, plan_ready, plan_review, implementing, verify, review, blocked_external, done, verified.  
+**Определение.** Упорядоченные статусы — константный массив из одиннадцати статусов в порядке их визуального расположения на Kanban-доске: backlog, planning, improve, plan_review, plan_review, implementing, verify, review, blocked_external, done, verified.  
 **Связанные термины.** [Kanban-доска](#kanban-доска-board).
 
 ### Конфигурация статуса
@@ -293,12 +293,12 @@
 **Определение.** Improve — статус, в котором планировщик выполняет второй проход для уточнения первоначального плана; инициируется флагом `runPlanImprove=true`.  
 **Связанные термины.** [Планировщик](#планировщик-planner), [улучшитель](#улучшитель-improver).
 
-### Plan Ready
+### Plan Review
 
-`plan_ready`
+`plan_review`
 
 **Тип:** статус готовности плана.  
-**Определение.** Plan Ready — статус, в котором план задачи завершён и задача ожидает начала реализации; из этого статуса доступны события `start_implementation`, `request_replanning` (возврат в planning) и `fast_fix` (корректировка плана).  
+**Определение.** Plan Review — статус, в котором план задачи завершён и задача ожидает начала реализации; из этого статуса доступны события `start_implementation`, `request_replanning` (возврат в planning) и `fast_fix` (корректировка плана).  
 **Связанные термины.** [План задачи](#план-задачи-plan).
 
 ### Plan Review
@@ -854,7 +854,7 @@
 `planChecker`
 
 **Тип:** сабагент.  
-**Определение.** Plan Checker — сабагент, проверяющий план на корректность, полноту и реализуемость перед переходом задачи в статус `plan_ready`.  
+**Определение.** Plan Checker — сабагент, проверяющий план на корректность, полноту и реализуемость перед переходом задачи в статус `plan_review`.  
 **Связанные термины.** [Планировщик](#планировщик-planner).
 
 ### Реализатор
@@ -1186,7 +1186,7 @@
 `planReview`
 
 **Тип:** стадия-гейт.  
-**Определение.** Plan Review Gate — стадия между `plan_ready` и `implementing`, на которой план публикуется как PR/MR в VCS и ожидает утверждения человеком, прежде чем начнётся реализация. Активна только для VCS-привязанных задач при включённом флаге `AIF_PLAN_REVIEW_PR_ENABLED`.  
+**Определение.** Plan Review Gate — стадия между `plan_review` и `implementing`, на которой план публикуется как PR/MR в VCS и ожидает утверждения человеком, прежде чем начнётся реализация. Активна только для VCS-привязанных задач при включённом флаге `AIF_PLAN_REVIEW_PR_ENABLED`.  
 **Связанные термины.** [Plan Review](#plan_review).
 
 ### Публикация плана
