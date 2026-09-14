@@ -163,7 +163,7 @@ function requiredResumeAction(
   targetOwner: ExecutionOwner,
 ): TaskEvent | undefined {
   if (targetOwner !== "ai" || task.executionOwner !== "human") return undefined;
-  if (task.status === "plan_ready" && !task.autoMode) return "start_implementation";
+  if (task.status === "plan_review" && !task.autoMode) return "start_implementation";
   if (task.status === "blocked_external") return "retry_from_blocked";
   return undefined;
 }

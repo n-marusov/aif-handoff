@@ -615,7 +615,7 @@ describe("GitHub project routes", () => {
         comments: [],
       },
     });
-    updateTaskStatus(imported.taskId, "plan_ready", {});
+    updateTaskStatus(imported.taskId, "plan_review", {});
     markTaskPlanPublished({ taskId: imported.taskId, commitSha: "feedface" });
     updateGitHubPullRequest({
       projectId: "project-1",
@@ -714,7 +714,7 @@ describe("GitHub project routes", () => {
         comments: [],
       },
     });
-    updateTaskStatus(imported.taskId, "plan_ready", {});
+    updateTaskStatus(imported.taskId, "plan_review", {});
     markTaskPlanPublished({ taskId: imported.taskId, commitSha: "feedface" });
     updateGitHubPullRequest({
       projectId: "project-1",

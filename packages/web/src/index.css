@@ -79,7 +79,7 @@
   --color-status-backlog: #6b7280;
   --color-status-planning: #8b5cf6;
   --color-status-improve: #d97706;
-  --color-status-plan_ready: #3b82f6;
+  --color-status-plan_review: #3b82f6;
   --color-status-implementing: #f59e0b;
   --color-status-review: #ec4899;
   --color-status-verify: #0ea5e9;
@@ -113,7 +113,7 @@
   --color-status-planning: #7c3aed;
   --color-status-ready: #0891b2;
   --color-status-improve: #b45309;
-  --color-status-plan_ready: #2563eb;
+  --color-status-plan_review: #2563eb;
   --color-status-implementing: #d97706;
   --color-status-review: #db2777;
   --color-status-verify: #0284c7;

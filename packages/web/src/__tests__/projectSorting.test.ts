@@ -6,7 +6,7 @@ const statuses: TaskStatus[] = [
   "backlog",
   "planning",
   "improve",
-  "plan_ready",
+  "plan_review",
   "implementing",
   "review",
   "verify",

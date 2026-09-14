@@ -1575,7 +1575,7 @@ describe("tasks API", () => {
           id: "ev-fast-fix-err",
           projectId: "project-fast-fix-err",
           title: "Fast fix error path",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: false,
           plan: "## Plan\n- Step A",
         })
@@ -1670,14 +1670,14 @@ describe("tasks API", () => {
       expect(res.status).toBe(409);
     });
 
-    it("should start implementation from plan_ready when autoMode=false", async () => {
+    it("should start implementation from plan_review when autoMode=false", async () => {
       const db = testDb.current;
       db.insert(tasks)
         .values({
           id: "ev-plan-1",
           projectId: "test-project",
           title: "Manual plan gate",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: false,
         })
         .run();
@@ -1700,7 +1700,7 @@ describe("tasks API", () => {
           id: "ev-plan-2",
           projectId: "test-project",
           title: "Auto plan",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: true,
         })
         .run();
@@ -2026,14 +2026,14 @@ describe("tasks API", () => {
       expect(task!.activeRuntimeSelectionJson).toBeNull();
     });
 
-    it("should send plan_ready task back to planning on request_replanning", async () => {
+    it("should send plan_review task to improve on request_replanning", async () => {
       const db = testDb.current;
       db.insert(tasks)
         .values({
           id: "ev-plan-replan-1",
           projectId: "test-project",
           title: "Need replanning",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: false,
         })
         .run();
@@ -2046,7 +2046,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("planning");
+      expect(body.status).toBe("improve");
     });
 
     it("should retry blocked task to blockedFromStatus", async () => {
@@ -2108,7 +2108,7 @@ describe("tasks API", () => {
           id: "ev-fast-fix-1",
           projectId: "project-fast-fix",
           title: "Need tiny plan update",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: false,
           plan: "## Plan\n- Step A",
         })
@@ -2140,7 +2140,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("plan_ready");
+      expect(body.status).toBe("plan_review");
       expect(body.plan).toBe("## Updated plan\n- Fast fix applied");
       expect(mockRunApiRuntimeOneShot).toHaveBeenCalledTimes(1);
     });
@@ -2152,7 +2152,7 @@ describe("tasks API", () => {
           id: "ev-fast-fix-no-plan",
           projectId: "project-fast-fix",
           title: "No plan task",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: false,
           plan: null,
         })
@@ -2191,7 +2191,7 @@ describe("tasks API", () => {
           id: "ev-fast-fix-no-comment",
           projectId: "test-project",
           title: "No comment task",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: false,
           plan: "## Plan\n- Step",
         })
@@ -2208,7 +2208,7 @@ describe("tasks API", () => {
       expect(body.error).toMatch(/human comment/);
     });
 
-    it("should reject fast_fix when task is not in plan_ready", async () => {
+    it("should reject fast_fix when task is not in plan_review", async () => {
       const db = testDb.current;
       db.insert(tasks)
         .values({
@@ -2229,7 +2229,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(409);
       const body = await res.json();
-      expect(body.error).toMatch(/plan_ready/);
+      expect(body.error).toMatch(/plan_review/);
     });
 
     it("should reject fast_fix for autoMode=true", async () => {
@@ -2239,7 +2239,7 @@ describe("tasks API", () => {
           id: "ev-fast-fix-2",
           projectId: "test-project",
           title: "Auto mode task",
-          status: "plan_ready",
+          status: "plan_review",
           autoMode: true,
         })
         .run();

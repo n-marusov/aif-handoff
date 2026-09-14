@@ -424,7 +424,7 @@ describe("task collaboration API", () => {
         id: "manual-plan-ready",
         projectId: PROJECT_ID,
         title: "Manual plan",
-        status: "plan_ready",
+        status: "plan_review",
         autoMode: false,
         executionOwner: "human",
       })

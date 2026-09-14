@@ -96,7 +96,7 @@ const mockBlockedTask: Task = {
 const mockPlanReadyManualTask: Task = {
   ...mockTask,
   id: "detail-plan-ready-manual",
-  status: "plan_ready",
+  status: "plan_review",
   autoMode: false,
   title: "Manual Plan Ready",
 };

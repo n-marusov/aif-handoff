@@ -48,7 +48,7 @@ const baseTask: Task = {
   worktreePath: null,
   roadmapAlias: "RM-1",
   tags: ["backend", "rm:ignore"],
-  status: "plan_ready",
+  status: "plan_review",
   priority: 2,
   position: 1000,
   plan: null,
@@ -83,7 +83,7 @@ describe("TaskDetailHeader", () => {
       />,
     );
     expect(screen.getByText("Header Test Task")).toBeDefined();
-    expect(screen.getByText("Plan Ready")).toBeDefined();
+    expect(screen.getByText("Plan Review")).toBeInTheDocument();
   });
 
   it("renders a heartbeat indicator for an in-progress task", () => {

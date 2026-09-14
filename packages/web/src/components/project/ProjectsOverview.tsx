@@ -38,7 +38,7 @@ const OVERVIEW_STATUSES: TaskStatus[] = [
   "backlog",
   "planning",
   "improve",
-  "plan_ready",
+  "plan_review",
   "implementing",
   "verify",
   "review",

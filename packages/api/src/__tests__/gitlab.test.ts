@@ -1285,7 +1285,7 @@ describe("GitLab project routes", () => {
         state: "open",
       },
     });
-    updateTaskStatus(imported.taskId, "plan_ready", {});
+    updateTaskStatus(imported.taskId, "plan_review", {});
     markTaskPlanPublished({ taskId: imported.taskId, commitSha: "feedface" });
     updateGitLabMergeRequest({
       projectId: "project-1",
@@ -1393,7 +1393,7 @@ describe("GitLab project routes", () => {
         state: "open",
       },
     });
-    updateTaskStatus(imported.taskId, "plan_ready", {});
+    updateTaskStatus(imported.taskId, "plan_review", {});
     markTaskPlanPublished({ taskId: imported.taskId, commitSha: "feedface" });
     updateGitLabMergeRequest({
       projectId: "project-1",

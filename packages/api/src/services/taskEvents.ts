@@ -92,8 +92,12 @@ async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResu
       error: "The task must be handed to AI before fast fix can run",
     };
   }
-  if (task.status !== "plan_ready") {
-    return { ok: false, status: 409, error: "fast_fix is only allowed from plan_ready" };
+  if (task.status !== "plan_review" && task.status !== "plan_ready") {
+    return {
+      ok: false,
+      status: 409,
+      error: "fast_fix is only allowed from plan_ready or plan_review",
+    };
   }
   if (task.autoMode) {
     return { ok: false, status: 409, error: "fast_fix is not needed when autoMode=true" };

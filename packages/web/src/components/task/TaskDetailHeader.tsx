@@ -40,7 +40,7 @@ type TaskActionButton = {
 
 const LEGACY_ACTION_BUTTONS_BY_STATUS: Partial<Record<TaskStatus, TaskActionButton[]>> = {
   backlog: [{ label: "Start AI", event: "start_ai" }],
-  plan_ready: [
+  plan_review: [
     {
       label: "Start implementation",
       event: "start_implementation",
@@ -71,9 +71,7 @@ const ACTION_BUTTONS_BY_EVENT: Record<TaskEvent, TaskActionButton> = {
   start_ai: { label: "Start AI", event: "start_ai" },
   start_human_work: { label: "Start work", event: "start_human_work" },
   mark_plan_ready: { label: "Mark plan ready", event: "mark_plan_ready" },
-  // Plan-review gate events are VCS-driven: publishing/approving/requesting
-  // changes happens on the PR/MR, never through a header button.
-  publish_plan: { label: "Publish plan", event: "publish_plan", visible: () => false },
+  // Plan-review gate events are VCS-driven: publishing no longer applies.
   approve_plan: { label: "Approve plan", event: "approve_plan", visible: () => false },
   request_plan_changes: {
     label: "Request plan changes",
@@ -155,9 +153,13 @@ export function TaskDetailHeader({
   ).filter(
     (action) =>
       (action.visible?.(task) ?? true) &&
-      // Implementation must not start while the plan PR/MR awaits human approval,
-      // even if the server reports the event (VCS approval is the only gate).
-      !(task.status === "plan_review" && action.event === "start_implementation") &&
+      // VCS-linked plan_review tasks must await human PR/MR approval before
+      // implementation can start; the server rejects the action otherwise.
+      !(
+        task.status === "plan_review" &&
+        (task.github || task.gitlab) &&
+        action.event === "start_implementation"
+      ) &&
       ((!task.github && !task.gitlab) ||
         (action.event !== "approve_done" && action.actionType !== "open_request_changes")),
   );
