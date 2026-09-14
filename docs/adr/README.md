@@ -40,6 +40,26 @@
 | `ADR-IMPL.PROCESS.auto-queue-advancement`        | Автоматическое наполнение пайплайна: sequential/parallel fill, FIFO, commit gate                | ПРИНЯТО | 2026-09-14 |
 | `ADR-IMPL.PROCESS.coordinator-pipeline-pattern`  | Pipeline stages + dual-trigger + claim-lease + error recovery                                   | ПРИНЯТО | 2026-09-14 |
 
+### Трассируемость ADR → бизнес-правила (BR-\*)
+
+Решения трассируются на политики продукта из каталога [Business Rules](../business-rules/README.md):
+
+| ADR-ID                                           | Связанные BR-\*                                                                                                                                                                                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADR-DES.STACK.modular-monolith-adoption`        | Бизнес-правила не затрагивает (архитектурный выбор)                                                                                                                                                                                         |
+| `ADR-DES.API.data-access-boundary`               | [BR-audit.immutable-trail](../business-rules/BR-audit.immutable-trail.md)                                                                                                                                                                   |
+| `ADR-DES.API.runtime-adapter-pattern`            | [BR-project.runtime-profiles](../business-rules/BR-project.runtime-profiles.md)                                                                                                                                                             |
+| `ADR-IMPL.PROCESS.task-state-machine`            | [BR-task-lifecycle.stages](../business-rules/BR-task-lifecycle.stages.md), [BR-task-lifecycle.transitions](../business-rules/BR-task-lifecycle.transitions.md), [BR-task-lifecycle.blocked](../business-rules/BR-task-lifecycle.blocked.md) |
+| `ADR-DES.API.hono-websocket-adoption`            | [BR-audit.observability](../business-rules/BR-audit.observability.md)                                                                                                                                                                       |
+| `ADR-IMPL.UI.react-vite-tailwind-adoption`       | Бизнес-правила не затрагивает (UI-стек)                                                                                                                                                                                                     |
+| `ADR-IMPL.DATA.sqlite-drizzle-adoption`          | [BR-audit.immutable-trail](../business-rules/BR-audit.immutable-trail.md)                                                                                                                                                                   |
+| `ADR-IMPL.DATA.migration-append-only`            | Бизнес-правила не затрагивает (эксплуатация схемы)                                                                                                                                                                                          |
+| `ADR-IMPL.INFRA.worktree-parallel-execution`     | [BR-git.worktree-isolation](../business-rules/BR-git.worktree-isolation.md), [BR-automation.concurrency](../business-rules/BR-automation.concurrency.md)                                                                                    |
+| `ADR-DES.SECURITY.auth-session-model`            | [BR-auth.roles](../business-rules/BR-auth.roles.md), [BR-auth.credentials](../business-rules/BR-auth.credentials.md), [BR-auth.sessions](../business-rules/BR-auth.sessions.md)                                                             |
+| `ADR-DES.INTEGRATION.github-gitlab-vcs-workflow` | [BR-git.vcs-workflow](../business-rules/BR-git.vcs-workflow.md), [BR-automation.plan-review-gate](../business-rules/BR-automation.plan-review-gate.md)                                                                                      |
+| `ADR-IMPL.PROCESS.auto-queue-advancement`        | [BR-automation.auto-queue](../business-rules/BR-automation.auto-queue.md), [BR-automation.completion-commit](../business-rules/BR-automation.completion-commit.md)                                                                          |
+| `ADR-IMPL.PROCESS.coordinator-pipeline-pattern`  | [BR-automation.pipeline](../business-rules/BR-automation.pipeline.md), [BR-automation.failure-recovery](../business-rules/BR-automation.failure-recovery.md), [BR-ownership.assignment](../business-rules/BR-ownership.assignment.md)       |
+
 ## Правила именования файлов
 
 Файлы именуются по шаблону `<ADR-ID>.md`, где `ADR-ID` — уникальный идентификатор решения.
@@ -108,6 +128,7 @@ ADR-<LEVEL>.<AREA>.<semantic-tag>
 - [Архитектура (.ai-factory)](../.ai-factory/ARCHITECTURE.md) — архитектурные решения для AI-агентов
 - [Документация API](api.md) — REST-эндпоинты и WebSocket-события
 - [Прецеденты использования](../use-cases/README.md) — спецификация UC
+- [Business Rules](../business-rules/README.md) — каталог бизнес-правил продукта (`BR-*`)
 - [Провайдеры и рантаймы](providers.md) — описание runtime-профилей и адаптеров
 - C4-модель (если есть): `docs/c4/`
 - [Правила проекта](../.ai-factory/RULES.md) — правила и конвенции
