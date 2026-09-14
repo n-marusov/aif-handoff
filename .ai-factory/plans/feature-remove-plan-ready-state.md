@@ -215,7 +215,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 ### Phase 4: API + Web Behavior
 
-- [ ] Task 4.1: RED — encode the API and UI gate behavior (depends on 3.2)
+- [x] Task 4.1: RED — encode the API and UI gate behavior (depends on 3.2)
 
   Files: `packages/api/src/__tests__/tasks.test.ts`, `packages/web/src/__tests__/ProjectsOverview.test.tsx`, `packages/web/src/__tests__/TaskDetailHeader.test.tsx`
 
@@ -226,7 +226,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-- [ ] Task 4.2: GREEN — implement the API and UI changes (depends on 4.1)
+- [x] Task 4.2: GREEN — implement the API and UI changes (depends on 4.1)
 
   Files: `packages/api/src/services/taskEvents.ts`, `packages/web/src/components/project/ProjectsOverview.tsx`, `packages/web/src/components/task/TaskDetailHeader.tsx`, `packages/web/src/components/task/TaskOwnership.tsx`
 
@@ -238,7 +238,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: keep the existing API 409 path with structured `status`; none for UI.
 
-- [ ] Task 4.3: REFACTOR — align the remaining api and web fixtures (depends on 4.2)
+- [x] Task 4.3: REFACTOR — align the remaining api and web fixtures (depends on 4.2)
 
   Files: `packages/api/src/__tests__/github.test.ts`, `gitlab.test.ts`, `taskCollaboration.test.ts`, `packages/web/src/__tests__/projectSorting.test.ts`, `TaskDetail.test.tsx`
 
@@ -251,7 +251,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 ### Phase 5: Remove `plan_ready` from the Status Model
 
-- [ ] Task 5.1: Remove the status and migrate the last references (depends on Phase 1-4)
+- [x] Task 5.1: Remove the status and migrate the last references (depends on Phase 1-4)
 
   Files: `packages/shared/src/types.ts`, `packages/shared/src/constants.ts`, plus every remaining `plan_ready` reference
 
@@ -261,7 +261,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — type-level change; `tsc` drives the enumeration.
 
-- [ ] Task 5.2: Add the removal assertions (depends on 5.1)
+- [x] Task 5.2: Add the removal assertions (depends on 5.1)
 
   Files: `packages/shared/src/__tests__/schema.test.ts`, `packages/shared/src/__tests__/stateMachine.test.ts`
 
@@ -271,7 +271,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — tests.
 
-- [ ] Task 5.3: Verify the whole workspace (depends on 5.2)
+- [x] Task 5.3: Verify the whole workspace (depends on 5.2)
 
   Files: none (verification only)
 
@@ -285,7 +285,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
 ### Phase 6: Documentation
 
-- [ ] Task 6.1: Update the core documentation (depends on Phase 5)
+- [x] Task 6.1: Update the core documentation (depends on Phase 5)
 
   Files: `docs/architecture.md`, `docs/api.md`, `docs/glossary.md`, `docs/configuration.md`
 
@@ -295,7 +295,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — docs.
 
-- [ ] Task 6.2: Update the demo, sync, ADR, and business-rules docs (depends on 6.1)
+- [x] Task 6.2: Update the demo, sync, ADR, and business-rules docs (depends on 6.1)
 
   Files: `docs/gitlab-demo.md`, `docs/github-demo.md`, `docs/dev-gui-demo.md`, `docs/mcp-sync.md`, `docs/adr/README.md`, `docs/adr/ADR-IMPL.PROCESS.task-state-machine.md`, `docs/business-rules/BR-task-lifecycle.stages.md`, `docs/business-rules/BR-task-lifecycle.transitions.md`, `docs/business-rules/BR-automation.pipeline.md`, `docs/business-rules/BR-automation.plan-review-gate.md`, `docs/business-rules/BR-ownership.handoff.md`
 
@@ -310,7 +310,7 @@ Open questions: research question #1 is resolved by this plan — `request_plan_
 
   LOGGING: none — docs.
 
-- [ ] Task 6.3: Update the agent context artifacts (depends on 6.1)
+- [x] Task 6.3: Update the agent context artifacts (depends on 6.1)
 
   Files: `AGENTS.md`, `.ai-factory/DESCRIPTION.md`
 
