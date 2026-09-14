@@ -35,6 +35,7 @@ import {
   getEnv,
   CLEAN_STATE_RESET,
   getHeadCommitSha,
+  getProjectConfig,
   withTimeout,
   type TaskStatus,
 } from "@aif/shared";
@@ -52,6 +53,8 @@ import {
   projectSupportsTaskWorktrees,
   projectUsesSharedBranchIsolation,
 } from "./gitBranch.js";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushActivityQueue, logActivity } from "./hooks.js";
 import {
   notifyTaskBroadcast,
@@ -628,6 +631,82 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     await runStageWithTimeout(stage.runner, task.id, executionRoot, stage.label);
 
     flushActivityQueue(task.id);
+
+    if (stage.label === "planner") {
+      // After plan generation, verify that the plan file was actually
+      // created with content. A stream error or empty model response
+      // can produce a commit without a valid plan. Stay in planning
+      // so the next poll cycle retries the planner.
+      const plannedTask = findTaskById(task.id);
+      let planValid = false;
+      if (plannedTask) {
+        try {
+          const cfg = getProjectConfig(executionRoot);
+          const planRelPath = task.isFix
+            ? cfg.paths.fix_plan
+            : plannedTask.planPath || cfg.paths.plan;
+          const planAbsPath = resolve(executionRoot, planRelPath);
+          if (existsSync(planAbsPath)) {
+            const content = readFileSync(planAbsPath, "utf8").trim();
+            planValid = content.length > 0;
+          }
+        } catch {
+          planValid = false;
+        }
+      }
+      if (!planValid) {
+        log.warn(
+          { taskId: task.id },
+          "Plan file is empty or missing after planner, staying in planning for retry",
+        );
+        clearTaskActiveRuntimeSelection(task.id);
+        clearTaskRuntimeLimitSnapshot(task.id);
+        updateTaskStatus(task.id, "planning", CLEAN_STATE_RESET, {
+          title: taskTitle,
+          fromStatus: stage.inProgress,
+        });
+        logActivity(task.id, "Agent", "planner: empty plan, staying in planning for retry");
+        return true;
+      }
+    }
+
+    if (stage.label === "improver") {
+      // After improve completes, check if a valid plan exists.
+      // If the plan is still empty (e.g. upstream stream error or
+      // missing content), return to planning so the planner
+      // can regenerate it — never leave the task looping in improve.
+      const improvedTask = findTaskById(task.id);
+      let planValid = false;
+      if (improvedTask) {
+        try {
+          const cfg = getProjectConfig(executionRoot);
+          const planRelPath = task.isFix
+            ? cfg.paths.fix_plan
+            : improvedTask.planPath || cfg.paths.plan;
+          const planAbsPath = resolve(executionRoot, planRelPath);
+          if (existsSync(planAbsPath)) {
+            const content = readFileSync(planAbsPath, "utf8").trim();
+            planValid = content.length > 0;
+          }
+        } catch {
+          planValid = false;
+        }
+      }
+      if (!planValid) {
+        log.warn(
+          { taskId: task.id },
+          "Plan not found or empty after improve, returning to planning",
+        );
+        clearTaskActiveRuntimeSelection(task.id);
+        clearTaskRuntimeLimitSnapshot(task.id);
+        updateTaskStatus(task.id, "planning", CLEAN_STATE_RESET, {
+          title: taskTitle,
+          fromStatus: stage.inProgress,
+        });
+        logActivity(task.id, "Agent", "improve returned to planning: plan is empty or missing");
+        return true;
+      }
+    }
 
     if (stage.label === "plan-publisher") {
       // The publisher self-loops on plan_review. The runner stamps

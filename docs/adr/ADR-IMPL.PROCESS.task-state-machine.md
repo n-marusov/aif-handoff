@@ -65,6 +65,7 @@ stateDiagram-v2
 - **Skill-mode флаги:** `runPlanImprove` (вставка improve), `skipReview` (пропустить verify и review), `useSubagents` (subagent vs skills-mode).
 - **AutoMode:** когда `true`, координатор автоматически проводит задачу по всем стадиям с auto-review gate.
 - **Fast gate (самовозврат):** если реализатор на очередном шаге не произвёл изменений (no-op), задача остаётся в `implementing`. Координатор повторяет стадию на следующем цикле опроса — это быстрый внутренний ретарри, без перехода в `verify`. Ограничивается числом попыток через `reworkRequested` и `reviewIterationCount`.
+- **Plan validation gate:** задача НЕ переводится из `planning` или `improve` в `plan_review`, если файл плана отсутствует или пуст. При пустом плане после `planning` задача остаётся в `planning` для повторной генерации; после `improve` — возвращается в `planning`.
 - **Blocked external:** при недоступности рантайма задача переходит в `blocked_external` с `retryAfter` и автоматическим возвратом.
 - **Action codes:** каждое возвращаемое действие имеет код (`action_not_allowed`, `actor_not_authorized` и т.д.) для однозначной обработки в API и UI.
 

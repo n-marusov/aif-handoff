@@ -46,7 +46,9 @@ export async function runImprover(taskId: string, projectRoot: string): Promise<
 
   const currentPlan = readPlanFromDisk(task, projectRoot) ?? task.plan;
   if (!currentPlan || currentPlan.trim().length === 0) {
-    throw new Error("Improve stage requires a persisted plan");
+    log.warn({ taskId }, "Plan is empty or missing, improve stage cannot proceed");
+    logActivity(taskId, "Agent", "improve stage skipped: plan is empty or missing");
+    return;
   }
 
   const project = findProjectById(task.projectId);
@@ -104,7 +106,8 @@ Task description: ${task.description}${feedbackBlock}`;
 
   const improvedPlan = readPlanFromDisk(task, projectRoot);
   if (!improvedPlan) {
-    throw new Error("Improve stage did not leave a readable plan");
+    log.warn({ taskId }, "Improve stage did not produce a readable plan; preserving previous plan");
+    return;
   }
 
   if (!looksLikeFullPlanUpdate(currentPlan, improvedPlan)) {
