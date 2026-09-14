@@ -222,6 +222,7 @@ const SHARED_FALLBACK_PATTERNS: ReadonlyArray<{
     patterns: [
       "model not found",
       "no endpoints found",
+      "no models provided",
       "model_not_available",
       "no available model",
       "providermodelnotfounderror",

@@ -1298,6 +1298,7 @@ export async function executeSubagentQuery(
         cwd: projectRoot,
         headers: context.headers,
         options: context.options,
+        model: context.model ?? undefined,
         execution: executionIntent,
         usageContext: {
           source: options.usageSource ?? UsageSource.SUBAGENT,
