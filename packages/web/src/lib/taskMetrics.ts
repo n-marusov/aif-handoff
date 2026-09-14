@@ -3,7 +3,7 @@ import type { ProjectTaskOverview, TaskListItem, TaskStatus } from "@aif/shared/
 export interface TaskMetricsSummary {
   totalTasks: number;
   completedTasks: number;
-  verifiedTasks: number;
+  acceptedTasks: number;
   backlogTasks: number;
   activeTasks: number;
   blockedTasks: number;
@@ -39,7 +39,7 @@ function toNonNegativeNumber(value: unknown): number {
 function buildTaskMetricsSummary(input: {
   totalTasks: number;
   completedTasks: number;
-  verifiedTasks: number;
+  acceptedTasks: number;
   backlogTasks: number;
   activeTasks: number;
   blockedTasks: number;
@@ -64,16 +64,16 @@ function buildTaskMetricsSummary(input: {
 }
 
 function isActiveStatus(status: TaskStatus): boolean {
-  return status !== "backlog" && status !== "done" && status !== "verified";
+  return status !== "backlog" && status !== "done" && status !== "accepted";
 }
 
 export function calculateTaskMetrics(tasks: TaskMetricsInput[]): TaskMetricsSummary {
   const totalTasks = tasks.length;
 
   const completedTasks = tasks.filter(
-    (task) => task.status === "done" || task.status === "verified",
+    (task) => task.status === "done" || task.status === "accepted",
   ).length;
-  const verifiedTasks = tasks.filter((task) => task.status === "verified").length;
+  const acceptedTasks = tasks.filter((task) => task.status === "accepted").length;
   const backlogTasks = tasks.filter((task) => task.status === "backlog").length;
   const blockedTasks = tasks.filter((task) => task.status === "blocked_external").length;
   const activeTasks = tasks.filter((task) => isActiveStatus(task.status)).length;
@@ -98,7 +98,7 @@ export function calculateTaskMetrics(tasks: TaskMetricsInput[]): TaskMetricsSumm
   return buildTaskMetricsSummary({
     totalTasks,
     completedTasks,
-    verifiedTasks,
+    acceptedTasks,
     backlogTasks,
     activeTasks,
     blockedTasks,
@@ -120,7 +120,7 @@ export function calculateOverviewMetrics(
       (acc, overview) => ({
         totalTasks: acc.totalTasks + toNonNegativeNumber(overview.totalTasks),
         completedTasks: acc.completedTasks + toNonNegativeNumber(overview.completedTasks),
-        verifiedTasks: acc.verifiedTasks + toNonNegativeNumber(overview.verifiedTasks),
+        acceptedTasks: acc.acceptedTasks + toNonNegativeNumber(overview.acceptedTasks),
         backlogTasks: acc.backlogTasks + toNonNegativeNumber(overview.backlogTasks),
         activeTasks: acc.activeTasks + toNonNegativeNumber(overview.activeTasks),
         blockedTasks: acc.blockedTasks + toNonNegativeNumber(overview.blockedTasks),
@@ -135,7 +135,7 @@ export function calculateOverviewMetrics(
       {
         totalTasks: 0,
         completedTasks: 0,
-        verifiedTasks: 0,
+        acceptedTasks: 0,
         backlogTasks: 0,
         activeTasks: 0,
         blockedTasks: 0,

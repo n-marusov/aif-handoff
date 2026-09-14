@@ -7,7 +7,7 @@ import type { TaskMetricsSummary } from "@/lib/taskMetrics";
 const zeroMetrics: TaskMetricsSummary = {
   totalTasks: 0,
   completedTasks: 0,
-  verifiedTasks: 0,
+  acceptedTasks: 0,
   backlogTasks: 0,
   activeTasks: 0,
   blockedTasks: 0,

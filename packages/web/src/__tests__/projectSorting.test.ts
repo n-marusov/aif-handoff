@@ -12,7 +12,7 @@ const statuses: TaskStatus[] = [
   "verify",
   "blocked_external",
   "done",
-  "verified",
+  "accepted",
 ];
 
 function project(id: string, name: string, pinnedAt: string | null = null): Project {
@@ -43,7 +43,7 @@ function overview(
     lastActivityAt,
     totalTasks: activeTasks,
     completedTasks: 0,
-    verifiedTasks: 0,
+    acceptedTasks: 0,
     backlogTasks: 0,
     activeTasks,
     blockedTasks: 0,

@@ -61,7 +61,7 @@ export function register(server: McpServer, context: ToolContext): void {
 
       // Guard: terminal statuses (done, verified) cannot be overwritten by sync.
       // Only human events (request_changes, approve_done) can transition out of these.
-      if (row.status === "done" || row.status === "verified") {
+      if (row.status === "done" || row.status === "accepted") {
         log.warn(
           {
             taskId: args.taskId,

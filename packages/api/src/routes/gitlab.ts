@@ -298,7 +298,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         updateGitLabMergeRequest(mergeRequestUpdate);
         let task = findTaskById(result.taskId);
         const discoveredMrNeedsDone =
-          closingMr && task && task.status !== "done" && task.status !== "verified";
+          closingMr && task && task.status !== "done" && task.status !== "accepted";
         if (discoveredMrNeedsDone && task) {
           updateTaskStatus(
             task.id,
@@ -315,7 +315,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           const verifiedTask = task;
           updateTaskStatus(
             task.id,
-            "verified",
+            "accepted",
             {},
             { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
           );

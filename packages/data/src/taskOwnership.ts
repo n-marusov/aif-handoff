@@ -302,7 +302,7 @@ export function handoffTaskExecution(
       }
 
       if (
-        task.status === "verified" ||
+        task.status === "accepted" ||
         (input.executionOwner === "ai" && requestedAssigneeIds.length > 0) ||
         (task.executionOwner === "human" &&
           input.executionOwner === "ai" &&

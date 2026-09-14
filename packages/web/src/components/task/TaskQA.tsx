@@ -57,7 +57,7 @@ interface QaArtifactSpec {
 }
 
 export function TaskQA({ task, onRunQa, isRunning }: TaskQAProps) {
-  const canRun = task.status === "done" || task.status === "verified";
+  const canRun = task.status === "done" || task.status === "accepted";
   const disabled = isRunning || !canRun;
   const [expanded, setExpanded] = useState<QaArtifactSpec | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);

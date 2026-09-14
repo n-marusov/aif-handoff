@@ -135,6 +135,7 @@ data/                    # SQLite database files (gitignored)
 | README          | README.md               | Project landing page                                 |
 | Getting Started | docs/getting-started.md | Installation, setup, first steps                     |
 | Architecture    | docs/architecture.md    | Agent pipeline, state machine, data flow             |
+| ADR             | docs/adr/README.md      | Architecture Decision Records (13 as-is decisions)   |
 | API Reference   | docs/api.md             | REST endpoints, WebSocket events                     |
 | Configuration   | docs/configuration.md   | Environment variables, logging, auth                 |
 | Providers       | docs/providers.md       | Runtime profiles and adapter capabilities            |

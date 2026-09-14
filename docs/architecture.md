@@ -111,20 +111,23 @@ The coordinator supports **parallel task execution** (experimental, per-project)
 It delegates workflow stages to `.claude/agents/` definitions, but actual execution transport/model/session behavior is adapter-owned through `@aif/runtime`:
 
 ```
-Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implementing ──► Review ──► Done ──► Verified
-                            │              │              │              │           │
-                            │              │              │              │           └─[request_changes]──► Implementing (rework)
-                            │              │              │              └─[auto-mode review gate]──► request_changes ─► Implementing (rework)
-                            │              │              │              │
-                            │              └─[request_    │              └─────────────────────────────────►
+Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implementing ──► Verify ──► Review ──► Done ──► Verified
+                            │              │              │         │            │           │
+                            │              │              │         │            │           └─[request_changes]──► Implementing (rework)
+                            │              │              │         │            └─[auto-mode review gate]──► request_changes ─► Implementing (rework)
+                            │              │              │         │            │
+                            │              │              │         │            └─[skipReview]──► Done (bypass)
+                            │              │              │         │
+                            │              │              │         └─[verification failed]──► Implementing
+                            │              │              │
+                            │              └─[request_    │
                             │                replanning]──┘
                             │
-                     plan-coordinator          implement-coordinator        review + security sidecars
+                     plan-coordinator     implement-coordinator    verifier      review + security sidecars
 
-Skills-mode tasks (`useSubagents=false`) can opt into two extra stages:
+Skills-mode tasks (`useSubagents=false`) can opt into one extra stage:
 
 Planning ──[runPlanImprove]──► Improve ──► Plan Ready
-Implementing ──[runPostVerify]──► Verify ──► Review
 ```
 
 When `AIF_PLAN_REVIEW_PR_ENABLED=true`, VCS-issue-linked tasks (GitHub or GitLab
@@ -137,10 +140,10 @@ VCS (see [Plan Review PR/MR Gate](#plan-review-prmr-gate)).
 | Stage Transition                                                                                 | Agent                                                                     | Description                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backlog → Planning → Plan Ready                                                                  | `plan-coordinator`                                                        | Iterative plan refinement via `plan-polisher`                                                                                                                         |
-| Planning → Improve → Plan Ready                                                                  | `/aif-improve`                                                            | Optional skills-mode plan refinement. Enabled per task with `runPlanImprove`; ignored when `useSubagents=true`                                                        |
-| Plan Ready → Implementing → Review                                                               | `implement-coordinator`                                                   | Parallel execution with worktrees + quality sidecars                                                                                                                  |
 | Plan Ready → Plan Review → Implementing (plan-review gate)                                       | `plan-publisher` → VCS approval (sync) → `implement-coordinator`          | Optional `AIF_PLAN_REVIEW_PR_ENABLED` gate: plan-only commit + plan PR/MR published, then implementation only after human approval (GitHub/GitLab-issue-linked tasks) |
-| Implementing → Verify → Review / Done                                                            | `/aif-verify`                                                             | Optional skills-mode implementation verification against the plan before review. Enabled per task with `runPostVerify`; ignored when `useSubagents=true`              |
+| Planning → Improve → Plan Ready                                                                  | `/aif-improve`                                                            | Optional skills-mode plan refinement. Enabled per task with `runPlanImprove`; ignored when `useSubagents=true`                                                        |
+| Plan Ready → Implementing → Verify                                                               | `implement-coordinator`                                                   | Parallel execution with worktrees; implementation completed moves to verification stage                                                                               |
+| Verify → Review / Done                                                                           | `/aif-verify`                                                             | Mandatory verification stage after implementation. Validates code against the plan before review. skipReview flag bypasses both verify and review.                    |
 | Review → Done / Review → request_changes → Implementing / Review → Done + manual review required | `review-sidecar` + `security-sidecar` (+ auto review gate in coordinator) | Code review and security audit in parallel; in auto mode, structured blocking findings drive automatic rework until success or explicit manual handoff                |
 
 ### GitHub Issue-to-PR Workflow
@@ -240,9 +243,10 @@ plan_ready ──[plan-publisher]──► plan_review ──[PR/MR approved]─
             plan_review  (planReviewState=published; waits for the human)
                  │
                  ├─[PR/MR approval]──────────────► implementing (planReviewState=approved)
-                 └─[changes requested / comments] ► planning (planReviewState=changes_requested,
-                                                     feedback persisted) → same branch → new plan
-                                                     commit → PR/MR body updated → plan_review again
+                 └─[changes requested / comments] ► improve (planReviewState=changes_requested,
+                                                     planReviewFeedback persisted) → same branch
+                                                     → /aif-improve with PR/MR feedback → plan_ready
+                                                     → plan-publisher → plan_review again
 ```
 
 Mechanics:
@@ -261,7 +265,7 @@ Mechanics:
   `Closes #...` — the issue must stay open until final implementation.
 - **Approval and replanning are sync-driven.** GitHub sync (`routes/github.ts`) moves a
   `plan_review` task to `implementing` when the latest review is `approved`, and back to
-  `planning` (with `planReviewState=changes_requested` and the review text persisted as
+  `improve` (with `planReviewState=changes_requested` and the review text persisted as
   `planReviewFeedback`) when changes are requested or new feedback arrives. GitLab sync
   mirrors this with the MR approvals endpoint and the request-changes note signal
   (`mrMode === "plan_review"`). Review/note identities are deduped so repeated syncs do
@@ -360,7 +364,7 @@ The database is the source of truth for worktree structure; folders are reconcil
 - **Delete:** snapshot → `git stash push -u` → reference check → `worktree remove` → `prune`.
   Uncommitted work is stashed, never destroyed; if another live (non-terminal) task
   references the same folder, physical removal is skipped.
-- **Merge:** when a merged PR/MR moves a task to `verified`, its worktree is cleaned up via
+- **Merge:** when a merged PR/MR moves a task to `accepted`, its worktree is cleaned up via
   the same mechanism. The branch is retained.
 - **Sweep:** at agent startup and after a poll cycle with no stage in flight, worktrees no
   live task references are removed and pruned, missing folders for live tasks are recreated
@@ -401,7 +405,7 @@ Defined in `packages/shared/src/stateMachine.ts`. Human actions available per st
 | `verify`           | _(none — agent working)_                                 |
 | `blocked_external` | `retry_from_blocked`                                     |
 | `done`             | `approve_done`, `request_changes`                        |
-| `verified`         | _(terminal state)_                                       |
+| `accepted`         | _(terminal state)_                                       |
 
 `publish_plan`, `approve_plan`, and `request_plan_changes` are agent/VCS-driven events
 for the plan-review gate and are **not** human actions in the UI: publishing happens via
@@ -453,7 +457,7 @@ and runtime-budget consumption.
 | `verify`              | `pass_verification`, `fail_verification`                                |
 | `blocked_external`    | `retry_from_blocked`                                                    |
 | `done`                | `approve_done`, `request_changes`                                       |
-| `verified`            | terminal; no handoff or action                                          |
+| `accepted`            | terminal; no handoff or action                                          |
 
 In legacy mode (Participants Mode off), Human-owned `review` tasks also get the two review
 events (`complete_review`, `request_review_changes`) so a manual-review handoff is always
@@ -498,8 +502,8 @@ The branch-slug is computed deterministically (`<safe-slug>-<git-hash-object-pre
 
 Two trigger paths exist:
 
-- **Manual** — `POST /tasks/:id/run-qa` (available in the UI once the task reaches `done` or `verified`).
-- **Automatic** — the `autoQa` flag (default `false`). When `true`, the QA pipeline starts after `approve_done` (`done → verified`).
+- **Manual** — `POST /tasks/:id/run-qa` (available in the UI once the task reaches `done` or `accepted`).
+- **Automatic** — the `autoQa` flag (default `false`). When `true`, the QA pipeline starts after `approve_done` (`done → accepted`).
 
 Progress is reported via `qaStatus` (`idle` → `running` → `done`/`error`) and the `task:qa_started` / `task:qa_done` / `task:qa_failed` WebSocket events.
 
@@ -515,7 +519,7 @@ Tasks have a `paused` flag (default `false`). When `true`, the coordinator skips
 
 **Important:** pausing a task does **not** abort an already running runtime session. If a query is in flight, it will finish. The pause takes effect on the **next** coordinator cycle — the task simply won't be picked up for the next stage transition.
 
-The Pause/Resume button is shown in the TaskDetail Actions bar for active processing stages (`planning`, `plan_ready`, `implementing`, `review`, `blocked_external`). It is hidden for `backlog`, `done`, and `verified` where the agent pipeline is not running.
+The Pause/Resume button is shown in the TaskDetail Actions bar for active processing stages (`planning`, `plan_ready`, `implementing`, `review`, `blocked_external`). It is hidden for `backlog`, `done`, and `accepted` where the agent pipeline is not running.
 
 ### Scheduled Execution
 
@@ -546,7 +550,7 @@ which makes ordinary backlog creation FIFO instead of LIFO.
 
 - **Sequential project** (`parallelEnabled = false`): pool depth = `1`. The
   next backlog task fires into `planning` only after the previous one
-  reaches a terminal status (`done` / `verified`). "In-flight" is counted by
+  reaches a terminal status (`done` / `accepted`). "In-flight" is counted by
   pipeline status, not by lock — so transitions between stages do not open a
   window for early advance.
 - **Parallel project** (`parallelEnabled = true`): pool depth =
@@ -572,7 +576,7 @@ The advance step:
    root.
 2. Read `active = countActivePipelineTasksForProject(project)` — counts tasks
    in `planning`, `plan_ready`, `implementing`, `review`, or `blocked_external`.
-   Backlog (source) and `done`/`verified` (terminal) do not count.
+   Backlog (source) and `done`/`accepted` (terminal) do not count.
 3. While `active < limit`, pick the next backlog task by ascending `position`
    (skipping paused tasks and tasks with future `scheduledAt`), fire it into
    `planning`, append an `[auto-queue]` activity-log entry, and broadcast
@@ -603,7 +607,7 @@ worktree before publishing the task as `done`:
 The flag defaults to `false`. In that state, terminal transitions and project
 concurrency follow the legacy path and no auto-queue commit state is prepared.
 
-Task worktrees are removed when their issue PR/MR is merged (task → `verified`) or when the
+Task worktrees are removed when their issue PR/MR is merged (task → `accepted`) or when the
 task is deleted; a reconciliation sweep is the backstop. Uncommitted work is stashed first,
 and removal is skipped while another live task still references the same folder. The issue
 branch is retained, since an open PR/MR may still need it.

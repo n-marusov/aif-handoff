@@ -1778,7 +1778,7 @@ function emptyProjectTaskOverview(projectId: string): ProjectTaskOverview {
     lastActivityAt: null,
     totalTasks: 0,
     completedTasks: 0,
-    verifiedTasks: 0,
+    acceptedTasks: 0,
     backlogTasks: 0,
     activeTasks: 0,
     blockedTasks: 0,
@@ -1855,11 +1855,11 @@ export function listProjectTaskOverviews(previewLimit = 3): ProjectTaskOverview[
       overview.lastActivityAt = row.lastActivityAt;
     }
 
-    if (status === "done" || status === "verified") {
+    if (status === "done" || status === "accepted") {
       overview.completedTasks += taskCount;
     }
-    if (status === "verified") {
-      overview.verifiedTasks += taskCount;
+    if (status === "accepted") {
+      overview.acceptedTasks += taskCount;
     }
     if (status === "backlog") {
       overview.backlogTasks += taskCount;
@@ -1867,7 +1867,7 @@ export function listProjectTaskOverviews(previewLimit = 3): ProjectTaskOverview[
     if (status === "blocked_external") {
       overview.blockedTasks += taskCount;
     }
-    if (status !== "backlog" && status !== "done" && status !== "verified") {
+    if (status !== "backlog" && status !== "done" && status !== "accepted") {
       overview.activeTasks += taskCount;
     }
   }
@@ -2407,7 +2407,7 @@ export function hasBlockingAutoQueueCommitForProject(projectId: string): boolean
         or(
           eq(tasks.autoQueueCommitStatus, "failed"),
           and(
-            inArray(tasks.status, ["done", "verified"]),
+            inArray(tasks.status, ["done", "accepted"]),
             inArray(tasks.autoQueueCommitStatus, ["pending", "running"]),
           ),
         ),

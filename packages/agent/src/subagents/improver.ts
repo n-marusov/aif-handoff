@@ -55,6 +55,13 @@ export async function runImprover(taskId: string, projectRoot: string): Promise<
   const improveSlashCommand = `/aif-improve @${planPath}`;
   const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}
 All file reads, searches, and plan updates must stay within this directory. Do NOT navigate to parent directories or other projects.`;
+  const feedbackBlock =
+    task.planReviewFeedback && task.planReviewFeedback.trim().length > 0
+      ? `
+
+Plan review feedback from PR/MR:
+${task.planReviewFeedback.trim()}`
+      : "";
   const prompt = `${improveSlashCommand}
 
 HANDOFF_MODE: 1
@@ -66,7 +73,7 @@ Apply useful plan refinements directly to @${planPath}; if no changes are needed
 ${scopeConstraint}
 
 Task title: ${task.title}
-Task description: ${task.description}`;
+Task description: ${task.description}${feedbackBlock}`;
 
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "improver",

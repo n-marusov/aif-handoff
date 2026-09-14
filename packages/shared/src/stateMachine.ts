@@ -96,11 +96,11 @@ function resolveLegacyAction(
         : denied("action_not_allowed", "approve_plan is only allowed from plan_review");
     case "request_plan_changes":
       return task.status === "plan_review"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } }
         : denied("action_not_allowed", "request_plan_changes is only allowed from plan_review");
     case "request_replanning":
       return task.status === "plan_ready"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "planning" } }
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "improve" } }
         : denied("action_not_allowed", "request_replanning is only allowed from plan_ready");
     case "fast_fix":
       return task.status === "plan_ready"
@@ -108,7 +108,7 @@ function resolveLegacyAction(
         : denied("action_not_allowed", "fast_fix is only allowed from plan_ready");
     case "approve_done":
       return task.status === "done"
-        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "verified" } }
+        ? { ok: true, patch: { ...CLEAN_STATE_RESET, status: "accepted" } }
         : denied("action_not_allowed", "approve_done is only allowed from done");
     case "request_changes":
       return task.status === "done"
@@ -145,7 +145,7 @@ function resolveLegacyAction(
         ok: true,
         patch: {
           ...CLEAN_STATE_RESET,
-          status: task.runPostVerify ? "verify" : "done",
+          status: "done",
         },
       };
     case "request_review_changes":
@@ -189,7 +189,7 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
           "submit_implementation is only allowed from implementing",
         );
       }
-      const status = task.runPostVerify ? "verify" : task.skipReview ? "done" : "review";
+      const status = "verify";
       return { ok: true, patch: { ...CLEAN_STATE_RESET, status } };
     }
     case "complete_review":
@@ -222,7 +222,7 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
         ok: true,
         patch: {
           ...CLEAN_STATE_RESET,
-          status: task.runPostVerify || task.skipReview ? "done" : "review",
+          status: "review",
         },
       };
     case "fail_verification":
@@ -382,5 +382,5 @@ export const HUMAN_ACTIONS_BY_STATUS: Record<TaskStatus, TaskEvent[]> = {
   verify: [],
   blocked_external: ["retry_from_blocked"],
   done: ["approve_done", "request_changes"],
-  verified: [],
+  accepted: [],
 };

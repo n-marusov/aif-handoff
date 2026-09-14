@@ -103,7 +103,7 @@ describe("tasks schema", () => {
       "review",
       "blocked_external",
       "done",
-      "verified",
+      "accepted",
     ];
 
     for (const status of statuses) {

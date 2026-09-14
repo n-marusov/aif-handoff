@@ -38,7 +38,7 @@ const emptyOverview: ProjectTaskOverview = {
   lastActivityAt: null,
   totalTasks: 0,
   completedTasks: 0,
-  verifiedTasks: 0,
+  acceptedTasks: 0,
   backlogTasks: 0,
   activeTasks: 0,
   blockedTasks: 0,
@@ -60,7 +60,7 @@ const emptyOverview: ProjectTaskOverview = {
     verify: 0,
     blocked_external: 0,
     done: 0,
-    verified: 0,
+    accepted: 0,
   },
   statusPreviews: {
     backlog: [],
@@ -73,7 +73,7 @@ const emptyOverview: ProjectTaskOverview = {
     verify: [],
     blocked_external: [],
     done: [],
-    verified: [],
+    accepted: [],
   },
 };
 

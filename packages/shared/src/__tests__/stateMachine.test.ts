@@ -91,7 +91,7 @@ describe("task state machine", () => {
     const result = applyHumanTaskEvent(task, "approve_done");
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.patch.status).toBe("verified");
+      expect(result.patch.status).toBe("accepted");
       expect(result.patch.reviewIterationCount).toBe(0);
       expect(result.patch.manualReviewRequired).toBe(false);
       expect(result.patch.autoReviewState).toBeNull();
@@ -284,7 +284,7 @@ describe("task state machine", () => {
     ["plan_ready", "start_implementation", "implementing"],
     ["review", "request_review_changes", "implementing"],
     ["verify", "fail_verification", "implementing"],
-    ["done", "approve_done", "verified"],
+    ["done", "approve_done", "accepted"],
     ["done", "request_changes", "implementing"],
   ] as const)("resolves assigned human action %s -> %s -> %s", (status, event, expectedStatus) => {
     const task = {

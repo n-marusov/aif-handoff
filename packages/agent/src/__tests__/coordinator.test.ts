@@ -416,7 +416,7 @@ describe("coordinator", () => {
         id: "task-verified",
         projectId: "test-project",
         title: "Verified task",
-        status: "verified",
+        status: "accepted",
       })
       .run();
 
@@ -427,7 +427,7 @@ describe("coordinator", () => {
     expect(runImplementer).not.toHaveBeenCalled();
     expect(runReviewer).not.toHaveBeenCalled();
     const task = db.select().from(tasks).where(eq(tasks.id, "task-verified")).get();
-    expect(task!.status).toBe("verified");
+    expect(task!.status).toBe("accepted");
   });
 
   it("should pick up plan_ready tasks and dispatch implementer + reviewer", async () => {

@@ -183,14 +183,14 @@ describe("Board", () => {
       makeTask({
         id: "verified-newer",
         title: "Verified Newer",
-        status: "verified",
+        status: "accepted",
         position: 3000,
         updatedAt: "2026-03-01T00:00:00.000Z",
       }),
       makeTask({
         id: "verified-older",
         title: "Verified Older",
-        status: "verified",
+        status: "accepted",
         position: 1000,
         updatedAt: "2026-02-01T00:00:00.000Z",
       }),

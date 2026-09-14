@@ -258,7 +258,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
         });
         let task = findTaskById(result.taskId);
         const discoveredPullNeedsDone =
-          closingPull && task && task.status !== "done" && task.status !== "verified";
+          closingPull && task && task.status !== "done" && task.status !== "accepted";
         if (discoveredPullNeedsDone && task) {
           updateTaskStatus(
             task.id,
@@ -272,7 +272,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           const verifiedTask = task;
           updateTaskStatus(
             task.id,
-            "verified",
+            "accepted",
             {},
             { kind: "system", id: "github-sync", displayNameSnapshot: "GitHub Sync" },
           );

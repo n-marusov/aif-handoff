@@ -1029,7 +1029,7 @@ describe("GitLab project routes", () => {
       headers: { "Content-Type": "application/json" },
       body: "{}",
     });
-    expect(findTaskById(imported.taskId)?.status).toBe("verified");
+    expect(findTaskById(imported.taskId)?.status).toBe("accepted");
 
     // Closed unmerged MR → paused
     vi.stubGlobal(

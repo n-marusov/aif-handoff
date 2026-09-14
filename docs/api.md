@@ -257,7 +257,7 @@ This endpoint does not return full task rows.
       "review": 1,
       "blocked_external": 1,
       "done": 2,
-      "verified": 0
+      "accepted": 0
     },
     "statusPreviews": {
       "backlog": [{ "id": "task-1", "title": "Queued work" }],
@@ -267,14 +267,14 @@ This endpoint does not return full task rows.
       "review": [],
       "blocked_external": [],
       "done": [],
-      "verified": []
+      "accepted": []
     }
   }
 ]
 ```
 
-`completedTasks` counts `done` + `verified`. `activeTasks` counts every status
-that is not `backlog`, `done`, or `verified`. `blockedTasks` counts
+`completedTasks` counts `done` + `accepted`. `activeTasks` counts every status
+that is not `backlog`, `done`, or `accepted`. `blockedTasks` counts
 `blocked_external`. `statusPreviews` lists are small (bounded in SQL) and
 include only task id/title pairs — never plan text, logs, or other detail-only
 fields. `lastActivityAt` is the latest task `updatedAt` timestamp for the
@@ -732,7 +732,7 @@ For a newly imported issue, sync also detects an open PR whose body contains a s
 `done`. If that PR already has an outstanding changes-requested review, the task instead
 resumes at `implementing`. A closed issue pauses its task; an unmerged closed PR also pauses
 it. A later `changes_requested` review resumes the same task at `implementing`; a merged PR
-advances a PR-ready `done` task to `verified`.
+advances a PR-ready `done` task to `accepted`.
 
 When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the linked PR
 is in `plan_review` mode (`prMode === "plan_review"`), sync also drives the gate: an
@@ -833,7 +833,7 @@ a same-repository `Closes`, `Fixes`, or `Resolves #<iid>` reference and creates 
 task directly in `done`. Review state is approvals-only: `approved` when
 `GET /merge_requests/:iid/approvals` reports `approved=true`, otherwise `pending`. A closed
 issue pauses its task; a closed unmerged MR also pauses it. A merged MR advances a MR-ready
-`done` task to `verified`; the coordinator never merges an MR itself.
+`done` task to `accepted`; the coordinator never merges an MR itself.
 
 When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the linked MR
 is in `plan_review` mode (`mrMode === "plan_review"`), sync drives the gate the same way:
@@ -1101,7 +1101,7 @@ Administrators may assign/handoff; a member may self-assign an unassigned Human 
 hand an assigned Human task back to AI. For Human → AI at manual `plan_ready`, include
 `resumeAction: "start_implementation"`; for `blocked_external`, include
 `resumeAction: "retry_from_blocked"` and the task must have `blockedFromStatus`.
-`verified` is terminal and cannot be handed off.
+`accepted` is terminal and cannot be handed off.
 
 Conflicts return `409` with `task_locked`, `ownership_revision_conflict`,
 `inactive_assignee`, or `invalid_ownership_transition`. Authorization returns `403`
@@ -1164,7 +1164,7 @@ PUT /tasks/:id
 | `useSubagents` | boolean | Run via custom subagents. When set to `true`, `runPlanImprove` and `runPostVerify` are reset to `false` |
 | `runPlanImprove` | boolean | Skills-mode only: run optional `/aif-improve` after planning and before `plan_ready` |
 | `runPostVerify` | boolean | Skills-mode only: run optional `/aif-verify` after implementation and before review. With `skipReview=true`, verification moves directly to `done` |
-| `autoQa` | boolean | Auto-run the QA pipeline when the task is approved (`done → verified`) |
+| `autoQa` | boolean | Auto-run the QA pipeline when the task is approved (`done → accepted`) |
 | `paused` | boolean | Pause/resume agent processing for this task |
 | `runtimeProfileId` | string\|null | Task-specific runtime override |
 | `isFix` | boolean | Marks task as fix-flow |
@@ -1810,7 +1810,7 @@ The branch is retained.
 | `400`  | `{ error, code: "invalid_body" }`                                   | Missing `taskId`, `projectId`, or `projectRoot`.                                                          |
 | `500`  | `{ error, code: "worktree_cleanup_internal" }`                      | Unexpected failure (e.g. stash failed — the worktree is left in place).                                   |
 
-Callers are **best-effort**: `DELETE /tasks/:id` and the GitHub/GitLab `merged → verified`
+Callers are **best-effort**: `DELETE /tasks/:id` and the GitHub/GitLab `merged → accepted`
 transitions request cleanup but never fail the primary operation when the agent is
 unreachable. The reconciliation sweep (agent startup + after each poll cycle) is the
 backstop.

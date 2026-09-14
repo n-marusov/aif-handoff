@@ -358,7 +358,7 @@ describe("atomic execution handoff", () => {
     expect(
       transitionTaskStatus({
         taskId: task.id,
-        status: "verified",
+        status: "accepted",
         actor: { kind: "system", id: "test", displayNameSnapshot: "Test" },
       }).ok,
     ).toBe(true);
@@ -530,7 +530,7 @@ describe("atomic execution handoff", () => {
     ]);
     Reflect.apply(setTaskFields, undefined, [
       task.id,
-      { status: "verified", executionOwner: "ai", ownershipRevision: 99 },
+      { status: "accepted", executionOwner: "ai", ownershipRevision: 99 },
     ]);
     expect(findTaskById(task.id)).toMatchObject({
       executionOwner: "human",

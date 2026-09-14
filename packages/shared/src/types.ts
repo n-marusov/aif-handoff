@@ -9,7 +9,7 @@ export const TASK_STATUSES = [
   "verify",
   "blocked_external",
   "done",
-  "verified",
+  "accepted",
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -518,7 +518,7 @@ export interface ProjectTaskOverview {
   lastActivityAt: string | null;
   totalTasks: number;
   completedTasks: number;
-  verifiedTasks: number;
+  acceptedTasks: number;
   backlogTasks: number;
   activeTasks: number;
   blockedTasks: number;

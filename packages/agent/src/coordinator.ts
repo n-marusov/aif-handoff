@@ -131,7 +131,7 @@ const PIPELINE: StatusTransition[] = [
   {
     from: ["plan_ready", "implementing"],
     inProgress: "implementing",
-    onSuccess: "review",
+    onSuccess: "verify",
     runner: runImplementer,
     label: "implementer",
   },
@@ -387,9 +387,6 @@ function shouldRunSkillsModeVerify(task: TaskRow): boolean {
 function getStageSuccessStatus(task: TaskRow, stage: StatusTransition): TaskStatus {
   if (stage.label === "planner" && shouldRunSkillsModeImprove(task)) {
     return "improve";
-  }
-  if (stage.label === "implementer" && shouldRunSkillsModeVerify(task)) {
-    return "verify";
   }
   if (stage.label === "verifier" && task.skipReview) {
     return "done";
@@ -708,7 +705,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     if (stage.label === "implementer" && task.skipReview) {
       clearTaskActiveRuntimeSelection(task.id);
       clearTaskRuntimeLimitSnapshot(task.id);
-      const doneStatus = shouldRunSkillsModeVerify(task) ? "verify" : "done";
+      const doneStatus = "done";
       if (doneStatus === "done") {
         await ensureCommitBeforeTerminalStatus(task, project.rootPath);
       }
@@ -718,9 +715,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       });
       log.info(
         { taskId: task.id, from: stage.inProgress, to: doneStatus },
-        shouldRunSkillsModeVerify(task)
-          ? "Skip review enabled — bypassing review stage and moving to verify"
-          : "Skip review enabled — bypassing review stage",
+        "Skip review and verify bypassed — moving to done",
       );
       return true;
     }
@@ -841,7 +836,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     }
 
     const successStatus = getStageSuccessStatus(task, stage);
-    if (successStatus === "done" || successStatus === "verified") {
+    if (successStatus === "done" || successStatus === "accepted") {
       await ensureCommitBeforeTerminalStatus(task, project.rootPath);
     }
     clearTaskActiveRuntimeSelection(task.id);

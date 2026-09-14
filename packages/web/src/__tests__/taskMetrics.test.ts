@@ -68,7 +68,7 @@ describe("calculateTaskMetrics", () => {
         costUsd: 1.25,
       }),
       makeTask({
-        status: "verified",
+        status: "accepted",
         tokenInput: 700,
         tokenOutput: 200,
         tokenTotal: 900,
@@ -97,7 +97,7 @@ describe("calculateTaskMetrics", () => {
 
     expect(summary.totalTasks).toBe(4);
     expect(summary.completedTasks).toBe(2);
-    expect(summary.verifiedTasks).toBe(1);
+    expect(summary.acceptedTasks).toBe(1);
     expect(summary.activeTasks).toBe(2);
     expect(summary.blockedTasks).toBe(1);
     expect(summary.totalTokenInput).toBe(2200);

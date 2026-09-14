@@ -12,7 +12,7 @@ export const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; o
   review: { label: "Review", color: "#EC4899", order: 7 },
   blocked_external: { label: "Blocked", color: "#EF4444", order: 8 },
   done: { label: "Done", color: "#10B981", order: 9 },
-  verified: { label: "Verified", color: "#14B8A6", order: 10 },
+  accepted: { label: "Accepted", color: "#14B8A6", order: 10 },
 };
 
 export const ORDERED_STATUSES: TaskStatus[] = [
@@ -26,7 +26,7 @@ export const ORDERED_STATUSES: TaskStatus[] = [
   "review",
   "blocked_external",
   "done",
-  "verified",
+  "accepted",
 ];
 
 export const WARMUP_TARGETS = [

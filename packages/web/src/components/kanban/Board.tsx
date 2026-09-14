@@ -29,7 +29,7 @@ interface BoardProps {
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_CUTOFF_REFERENCE_TS = Date.now();
-const TERMINAL_STATUSES = new Set<TaskStatus>(["done", "verified"]);
+const TERMINAL_STATUSES = new Set<TaskStatus>(["done", "accepted"]);
 
 const STATUS_ORDER = Object.fromEntries(
   ORDERED_STATUSES.map((status, idx) => [status, idx]),

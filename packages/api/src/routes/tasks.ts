@@ -616,7 +616,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
   if (
     result.ownership.executionOwner === "ai" &&
     updated.status !== "done" &&
-    updated.status !== "verified"
+    updated.status !== "accepted"
   ) {
     broadcast({ type: "agent:wake", payload: { id: taskId } });
   }

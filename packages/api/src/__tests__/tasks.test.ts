@@ -1728,7 +1728,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("verified");
+      expect(body.status).toBe("accepted");
     });
 
     it("should delete PLAN.md on approve_done when deletePlanFile=true", async () => {
@@ -1761,7 +1761,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("verified");
+      expect(body.status).toBe("accepted");
       expect(existsSync(planFilePath)).toBe(false);
     });
 
@@ -1822,7 +1822,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("verified");
+      expect(body.status).toBe("accepted");
     });
 
     it("should delete FIX_PLAN.md on approve_done when task isFix=true", async () => {
@@ -1857,7 +1857,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("verified");
+      expect(body.status).toBe("accepted");
       expect(existsSync(fixPlanFilePath)).toBe(false);
       expect(existsSync(planFilePath)).toBe(true);
     });
@@ -1885,7 +1885,7 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("verified");
+      expect(body.status).toBe("accepted");
       await vi.waitFor(
         () => {
           expect(mockRunApiRuntimeOneShot).toHaveBeenCalled();

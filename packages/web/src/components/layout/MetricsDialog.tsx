@@ -103,7 +103,7 @@ export function MetricsDialog({
           </div>
           <div className="border border-border bg-card/50 px-3 py-2">
             <p className="text-xs text-muted-foreground">Verified</p>
-            <p className="text-base font-medium">{fmtInt(taskMetrics.verifiedTasks)}</p>
+            <p className="text-base font-medium">{fmtInt(taskMetrics.acceptedTasks)}</p>
           </div>
           <div className="border border-border bg-card/50 px-3 py-2">
             <p className="text-xs text-muted-foreground">Auto mode tasks</p>

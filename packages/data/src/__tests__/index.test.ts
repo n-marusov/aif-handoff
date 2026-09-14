@@ -2518,7 +2518,7 @@ describe("worktree reconciliation queries", () => {
         projectId: "proj-1",
         title: "Done",
         description: "D",
-        status: "verified",
+        status: "accepted",
         worktreePath: "/tmp/wt",
       })
       .run();

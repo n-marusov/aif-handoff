@@ -137,7 +137,7 @@ describe("processAutoQueueAdvance", () => {
     });
 
     it("treats verified the same as done (terminal)", () => {
-      seedTask("t1", "seq", 100, { status: "verified" });
+      seedTask("t1", "seq", 100, { status: "accepted" });
       seedTask("t2", "seq", 200);
       expect(processAutoQueueAdvance()).toBe(1);
       expect(findTaskById("t2")?.status).toBe("planning");

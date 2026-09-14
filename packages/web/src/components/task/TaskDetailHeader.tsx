@@ -186,7 +186,7 @@ export function TaskDetailHeader({
   // would otherwise advance — paused backlog tasks are skipped by both the
   // scheduler and the auto-queue advancer.
   const showPauseButton =
-    task.executionOwner === "ai" && !["done", "verified"].includes(task.status);
+    task.executionOwner === "ai" && !["done", "accepted"].includes(task.status);
 
   return (
     <div className="border-b border-border p-6 pb-4 pr-14">
