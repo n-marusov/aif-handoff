@@ -110,6 +110,7 @@ export interface GitHubRepositoryConnection {
   tokenConfigured: boolean;
   lastSyncedAt: string | null;
   syncError: string | null;
+  gitPreparedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

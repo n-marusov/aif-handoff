@@ -1184,6 +1184,13 @@ const MIGRATIONS: Migration[] = [
       return { statusUpdated: statusCount, blockedFromStatusUpdated: blockedCount };
     },
   },
+  {
+    version: 35,
+    description: "Track when a GitHub repository was auto-prepared (git_prepared_at)",
+    sql: `
+      ALTER TABLE github_repositories ADD COLUMN git_prepared_at TEXT;
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

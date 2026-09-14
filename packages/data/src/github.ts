@@ -112,6 +112,7 @@ function toConnection(row: typeof githubRepositories.$inferSelect): GitHubReposi
     tokenConfigured: Boolean(process.env[row.tokenEnvVar]?.trim()),
     lastSyncedAt: row.lastSyncedAt,
     syncError: row.syncError,
+    gitPreparedAt: row.gitPreparedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -144,6 +145,7 @@ export function upsertGitHubRepository(input: {
   tokenEnvVar: string;
   eligibility: GitHubEligibility;
   enabled: boolean;
+  gitPreparedAt?: string | null;
 }): GitHubRepositoryConnection {
   const now = new Date().toISOString();
   getDb()
@@ -166,12 +168,33 @@ export function upsertGitHubRepository(input: {
         eligibilityJson: JSON.stringify(input.eligibility),
         enabled: input.enabled,
         syncError: null,
+        gitPreparedAt: input.gitPreparedAt ?? null,
         updatedAt: now,
       },
     })
     .run();
   log.info({ projectId: input.projectId, repository: `${input.owner}/${input.name}` }, "GitHub repository connection saved");
   return findGitHubRepository(input.projectId)!;
+}
+
+/**
+ * Record that the agent auto-prepared the local git repo (origin/credentials/
+ * default branch + AI Factory scaffold) for this GitHub connection. Returns the
+ * updated connection, or undefined when the project has no connection.
+ */
+export function markGitHubRepositoryPrepared(
+  projectId: string,
+): GitHubRepositoryConnection | undefined {
+  const now = new Date().toISOString();
+  const existing = findGitHubRepository(projectId);
+  if (!existing) return undefined;
+  getDb()
+    .update(githubRepositories)
+    .set({ gitPreparedAt: now, updatedAt: now })
+    .where(eq(githubRepositories.projectId, projectId))
+    .run();
+  log.debug({ projectId, gitPreparedAt: now }, "GitHub repository marked prepared");
+  return findGitHubRepository(projectId);
 }
 
 export function deleteGitHubRepository(projectId: string): boolean {
