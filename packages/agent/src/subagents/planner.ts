@@ -497,9 +497,7 @@ Always write the final plan to @${planPath}.`;
       },
     });
   } else {
-    prompt = `${handoffContext}\n${scopeConstraint}\n\n${plannerSlashCommand}
-
-${taskContext}`;
+    prompt = `${handoffContext}\n${scopeConstraint}\n\n${plannerSlashCommand}\n\n${taskContext}\n\nCreate an implementation-ready markdown checklist plan.\nCRITICAL: Do NOT modify, create, or delete any files during planning. Do NOT write any code, create any new files, or make any changes to the project. Your ONLY task is to write a checklist plan document to @${planPath}.\nThe plan must contain actionable checklist items in format "- [ ] Step description". Never mark items as completed "- [x]" — all items start unchecked.\n\nCRITICAL OUTPUT CONSTRAINT: The plan MUST contain ONLY structured sections (headings, checklist items, tables, code blocks). Do NOT include:\n- Agent reasoning, investigation notes, or analysis\n- Alternatives considered or tool call traces\n- Any chain-of-thought or narrative text\n- Explanatory paragraphs outside defined sections\n- First-person statements\nIf you catch yourself writing any of these, remove them before outputting the plan.\n\nAlways write the final plan to @${planPath}.`;
     workflowSpec = createRuntimeWorkflowSpec({
       workflowKind: "planner",
       prompt,
