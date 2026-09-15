@@ -14,6 +14,7 @@ import {
   markTaskPlanChangesRequested,
   recordGitHubRepositorySync,
   setTaskFields,
+  transitionTaskStatus,
   updateGitHubPullRequest,
   updateGitHubPullRequestLastReviewId,
   updateGitHubPullRequestMode,
@@ -325,6 +326,58 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           );
         } else if (task && prState === "closed" && !pull.merged_at) {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
+        } else if (
+          task &&
+          effectiveReviewState === "approved" &&
+          effectiveReviewId !== null &&
+          effectiveReviewId !== (existing?.lastReviewId ?? null) &&
+          task.status === "done"
+        ) {
+          // A confirmed review (official APPROVED or a COMMENTED review
+          // containing "/approve") on an open PR finalizes a done task.
+          const transitioned = transitionTaskStatus({
+            taskId: task.id,
+            status: "accepted",
+            expectedStatus: "done",
+            actor: {
+              kind: "system",
+              id: "github-sync",
+              displayNameSnapshot: "GitHub Sync",
+            },
+            action: "task.accepted",
+            reason: "GitHub review approved",
+          });
+          if (transitioned.ok) {
+            // Record the review ID only after a successful transition so a
+            // transient failure does not block retry on the next sync cycle.
+            updateGitHubPullRequestLastReviewId({
+              projectId,
+              issueNumber: issue.number,
+              lastReviewId: effectiveReviewId,
+            });
+            log.info(
+              {
+                taskId: task.id,
+                issueNumber: issue.number,
+                prNumber: pull.number,
+                reviewId: effectiveReviewId,
+                viaComment: Boolean(approveComment),
+              },
+              "GitHub review approved; task accepted",
+            );
+          } else {
+            log.error(
+              {
+                taskId: task.id,
+                issueNumber: issue.number,
+                prNumber: pull.number,
+                reviewId: effectiveReviewId,
+                code: transitioned.code,
+                currentStatus: transitioned.currentStatus ?? null,
+              },
+              "Failed to accept task; will retry on next sync",
+            );
+          }
         } else if (
           task &&
           review.state === "changes_requested" &&

@@ -27,6 +27,7 @@ const {
   updateGitHubPullRequest,
   updateGitHubPullRequestMode,
   updateTaskStatus,
+  updateGitHubPullRequestLastReviewId,
   upsertGitHubRepository,
 } = await import("@aif/data");
 
@@ -687,6 +688,216 @@ describe("GitHub project routes", () => {
       prMode: "plan_review",
       reviewState: "approved",
       lastReviewId: 11,
+    });
+  });
+
+  it.each([
+    {
+      caseName: "official APPROVED review",
+      reviews: [{ id: 21, state: "APPROVED", body: "LGTM", submitted_at: "2026-08-09T00:00:00Z" }],
+      viaComment: false,
+    },
+    {
+      caseName: "a COMMENTED /approve review",
+      reviews: [
+        {
+          id: 22,
+          state: "COMMENTED",
+          body: "/approve",
+          submitted_at: "2026-08-09T01:00:00Z",
+        },
+      ],
+      viaComment: true,
+    },
+  ] as const)(
+    "accepts a done task when the PR receives $caseName",
+    async ({ reviews, viaComment }) => {
+      upsertGitHubRepository({
+        projectId: "project-1",
+        owner: "owner",
+        name: "repo",
+        htmlUrl: "https://github.com/owner/repo",
+        defaultBranch: "main",
+        tokenEnvVar: "GITHUB_TEST_TOKEN",
+        eligibility: { labels: [], assignee: null, milestone: null },
+        enabled: true,
+      });
+      const imported = importGitHubIssueTask({
+        projectId: "project-1",
+        owner: "owner",
+        repository: "repo",
+        issueNumber: 154,
+        nodeId: "I_154",
+        htmlUrl: "https://github.com/owner/repo/issues/154",
+        state: "open",
+        sourceUpdatedAt: "2026-08-08T00:00:00Z",
+        snapshot: {
+          title: "GitHub mode",
+          body: "Implement it",
+          author: "author",
+          labels: [],
+          assignees: [],
+          milestone: null,
+          comments: [],
+        },
+      });
+      updateTaskStatus(imported.taskId, "done", {});
+      updateGitHubPullRequest({
+        projectId: "project-1",
+        issueNumber: 154,
+        prNumber: 200,
+        prUrl: "https://github.com/owner/repo/pull/200",
+        prState: "open",
+        reviewState: "pending",
+      });
+
+      const pull = {
+        number: 200,
+        html_url: "https://github.com/owner/repo/pull/200",
+        state: "open",
+        merged_at: null,
+        head: { sha: "0123456789abcdef" },
+      };
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              number: 154,
+              node_id: "I_154",
+              html_url: "https://github.com/owner/repo/issues/154",
+              state: "open",
+              title: "GitHub mode",
+              body: "Implement it",
+              user: { login: "author" },
+              labels: [],
+              assignees: [],
+              milestone: null,
+              comments: 0,
+              updated_at: "2026-08-08T00:00:00Z",
+            },
+          ]),
+        ) // listIssues
+        .mockResolvedValueOnce(jsonResponse(pull)) // getPullRequest
+        .mockResolvedValueOnce(jsonResponse(reviews)) // listReviews
+        .mockResolvedValueOnce(jsonResponse({ state: "success", total_count: 1, statuses: [{}] }))
+        .mockResolvedValueOnce(jsonResponse({ total_count: 0, check_runs: [] }));
+      vi.stubGlobal("fetch", fetchMock);
+      const app = new Hono();
+      app.route("/projects", githubRouter);
+
+      const response = await app.request("/projects/project-1/github/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+
+      expect(response.status).toBe(200);
+      expect(findTaskById(imported.taskId)).toMatchObject({
+        status: "accepted",
+      });
+      expect(findGitHubIssue("project-1", 154)).toMatchObject({
+        reviewState: "approved",
+        lastReviewId: viaComment ? 22 : 21,
+      });
+    },
+  );
+
+  it("does not re-accept an already-processed approved review on a done task", async () => {
+    upsertGitHubRepository({
+      projectId: "project-1",
+      owner: "owner",
+      name: "repo",
+      htmlUrl: "https://github.com/owner/repo",
+      defaultBranch: "main",
+      tokenEnvVar: "GITHUB_TEST_TOKEN",
+      eligibility: { labels: [], assignee: null, milestone: null },
+      enabled: true,
+    });
+    const imported = importGitHubIssueTask({
+      projectId: "project-1",
+      owner: "owner",
+      repository: "repo",
+      issueNumber: 154,
+      nodeId: "I_154",
+      htmlUrl: "https://github.com/owner/repo/issues/154",
+      state: "open",
+      sourceUpdatedAt: "2026-08-08T00:00:00Z",
+      snapshot: {
+        title: "GitHub mode",
+        body: "Implement it",
+        author: "author",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        comments: [],
+      },
+    });
+    updateTaskStatus(imported.taskId, "done", {});
+    updateTaskStatus(imported.taskId, "accepted", {});
+    updateGitHubPullRequest({
+      projectId: "project-1",
+      issueNumber: 154,
+      prNumber: 200,
+      prUrl: "https://github.com/owner/repo/pull/200",
+      prState: "open",
+      reviewState: "pending",
+    });
+    updateGitHubPullRequestLastReviewId({
+      projectId: "project-1",
+      issueNumber: 154,
+      lastReviewId: 21,
+    });
+
+    const pull = {
+      number: 200,
+      html_url: "https://github.com/owner/repo/pull/200",
+      state: "open",
+      merged_at: null,
+      head: { sha: "0123456789abcdef" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            number: 154,
+            node_id: "I_154",
+            html_url: "https://github.com/owner/repo/issues/154",
+            state: "open",
+            title: "GitHub mode",
+            body: "Implement it",
+            user: { login: "author" },
+            labels: [],
+            assignees: [],
+            milestone: null,
+            comments: 0,
+            updated_at: "2026-08-08T00:00:00Z",
+          },
+        ]),
+      ) // listIssues
+      .mockResolvedValueOnce(jsonResponse(pull)) // getPullRequest
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { id: 21, state: "APPROVED", body: "LGTM", submitted_at: "2026-08-09T00:00:00Z" },
+        ]),
+      ) // listReviews
+      .mockResolvedValueOnce(jsonResponse({ state: "success", total_count: 1, statuses: [{}] }))
+      .mockResolvedValueOnce(jsonResponse({ total_count: 0, check_runs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = new Hono();
+    app.route("/projects", githubRouter);
+
+    const response = await app.request("/projects/project-1/github/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
+    expect(findTaskById(imported.taskId)).toMatchObject({ status: "accepted" });
+    expect(findGitHubIssue("project-1", 154)).toMatchObject({
+      reviewState: "approved",
     });
   });
 
