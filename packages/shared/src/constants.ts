@@ -52,3 +52,10 @@ export function isWarmupWorkflowKind(
 ): workflowKind is WarmupWorkflowKind {
   return WARMUP_WORKFLOW_KINDS.some((kind) => kind === workflowKind);
 }
+
+/**
+ * Directory prefixes that must never appear in a committed diff.
+ * These are local tooling/infrastructure artifacts that have no place in the
+ * target project's repository and must be excluded from all commits and PR/MRs.
+ */
+export const NON_COMMIT_PATH_PATTERNS = [".claude/", ".llm-backup/"] as const;

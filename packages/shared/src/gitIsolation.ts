@@ -493,6 +493,27 @@ export function listChangedFiles(projectRoot: string, sinceRef?: string | null):
   return Array.from(new Set(files)).sort();
 }
 
+/**
+ * Repo-relative file paths committed in a specific commit.
+ * Uses `git diff-tree --no-commit-id -r --name-only` which works on any object
+ * (commit, merge commit, etc.) without needing a worktree.
+ * Returns an empty array when the SHA does not exist or is not a commit.
+ */
+export function listCommitFiles(projectRoot: string, commitSha: string): string[] {
+  if (!commitSha) return [];
+  const { stdout, status } = runGit(
+    projectRoot,
+    ["diff-tree", "--no-commit-id", "-r", "--name-only", commitSha],
+    { ignoreExit: true },
+  );
+  if (status !== 0 || !stdout) return [];
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .sort();
+}
+
 export function assertWorkingTreeClean(projectRoot: string, branchName: string | null): void {
   const dirty = describeDirtyWorkingTree(projectRoot);
   if (dirty) {

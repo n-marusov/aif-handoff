@@ -198,7 +198,7 @@ export function ensurePlanReviewCommit(input: {
   // (planner, initProject), never product/implementation code. Allow files
   // under these prefixes in the plan commit so plan review doesn't block on
   // setup artifacts while still catching real product files.
-  const INFRASTRUCTURE_PREFIXES = [".ai-factory/", ".claude/"];
+  const INFRASTRUCTURE_PREFIXES = [".ai-factory/", ".claude/", ".llm-backup/"];
 
   const dirty = listDirtyPaths(executionRoot);
   const dirtyAbs = new Set(dirty.map((path) => resolve(executionRoot, path)));

@@ -1,3 +1,5 @@
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { appendTaskActivityLog, findTaskById, getAutoQueueMode, setTaskFields } from "@aif/data";
 import { createRuntimeWorkflowSpec, UsageSource } from "@aif/runtime";
 import {
@@ -166,6 +168,24 @@ export async function ensureAutoQueueTaskCommit(input: {
       baseSha,
       currentSha,
     });
+  }
+
+  /**
+   * Pre-commit cleanup: remove `.llm-backup/` — a local workspace backup
+   * created by our own `apply_patch` tool that must never be committed.
+   * `.claude/` is NOT removed here because it may contain agent definitions
+   * (e.g. `.claude/agents/aif-commit`) that the commit agent itself needs,
+   * and in shared checkouts it could hold user configuration.
+   * `.claude/` exclusion is handled by the `$aif-commit` skill prompt.
+   */
+  const llmBackupPath = join(executionRoot, ".llm-backup");
+  if (existsSync(llmBackupPath)) {
+    try {
+      rmSync(llmBackupPath, { recursive: true, force: true });
+      log.debug({ taskId: task.id }, "Removed .llm-backup/ before commit");
+    } catch (cleanErr) {
+      log.warn({ taskId: task.id, err: cleanErr }, "Failed to remove .llm-backup/");
+    }
   }
 
   setTaskFields(task.id, {

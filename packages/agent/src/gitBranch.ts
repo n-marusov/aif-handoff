@@ -14,6 +14,7 @@ export {
   isGitRepo,
   isWorktreeUsable,
   listChangedFiles,
+  listCommitFiles,
   listWorktrees,
   projectSupportsTaskWorktrees,
   projectUsesSharedBranchIsolation,
