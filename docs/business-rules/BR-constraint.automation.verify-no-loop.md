@@ -22,7 +22,7 @@ Verify-стадия может запускаться многократно д�
 
 - **Нормальный множественный запуск:** задача проходит `implementing → verify → implementing → verify → ...` — это разрешено и соответствует ADR-IMP.PROCESS.task-state-machine (переход `verify → implementing : verification failed`).
 - **Самовозврат implementing (fast gate):** задача может оставаться в `implementing` при no-op-результате реализатора (`implementing → implementing`). Это не цикл Verify, а внутренний ретарри стадии реализации, также разрешённый ADR.
-- **Запрещённый цикл:** ошибка или исключение в `runVerifier` не должны возвращать задачу в `verify` автоматически. Все нераспознанные ошибки классифицируются через `classifyStageError`: `RuntimeValidationError` (включая превышение лимита tool-call loop) → `blocked_external`; `StageManualBlockError` → `blocked_external`. Ни один из этих путей не приводит к `revert` (который оставил бы задачу в `verify`).
+- **Запрещённый цикл:** ошибка или исключение в `runVerifier` не должны возвращать задачу в `verify` автоматически. `executeSubagentQuery` обёрнут в try-catch: если субагент упал (tool loop limit, stream error, denied command), ошибка перехватывается, в `reviewComments` записывается предупреждение, и задача переходит в `review` без блокировки. `StageManualBlockError` выбрасывается только когда субагент успешно завершился и сам выставил `status: "fail"` / `blocking: true`.
 - **Принцип:** машина состояний (stateMachine.ts) и классификатор ошибок (stageErrorHandler.ts) — единственные источники истины для переходов. Никакие side-channel проверки (содержимое `reviewComments`, флаги в task fields) не должны блокировать или разрешать запуск Verify.
 
 ## Обоснование
@@ -34,7 +34,7 @@ Verify-стадия может запускаться многократно д�
 | Артефакт     | Ссылка                                                                                                                                                                                                |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Документация | [`docs/adr/ADR-IMPL.PROCESS.task-state-machine.md`](../adr/ADR-IMPL.PROCESS.task-state-machine.md) (граф переходов), [`docs/architecture.md`](../architecture.md) (Verify Stage, Stage Error Handler) |
-| Реализация   | `packages/agent/src/stageErrorHandler.ts` (classifyStageError — все пути к blocked_external, ни один к revert для Verify), `packages/agent/src/subagents/verifier.ts` (runVerifier)                   |
+| Реализация   | `packages/agent/src/subagents/verifier.ts` (runVerifier — try-catch вокруг executeSubagentQuery, запись предупреждения в reviewComments)                                                              |
 
 ## Связанные правила
 

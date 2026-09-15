@@ -83,17 +83,49 @@ Task description: ${task.description}`;
     systemPromptAppend: scopeConstraint,
   });
 
-  const { resultText } = await executeSubagentQuery({
-    taskId,
-    projectRoot,
-    agentName: "aif-verify",
-    prompt,
-    profileMode: "review",
-    maxBudgetUsd: sidecarBudget,
-    workflowSpec,
-    workflowKind: "verifier",
-    fallbackSlashCommand: verifySlashCommand,
-  });
+  let resultText: string;
+  try {
+    const subagentResult = await executeSubagentQuery({
+      taskId,
+      projectRoot,
+      agentName: "aif-verify",
+      prompt,
+      profileMode: "review",
+      maxBudgetUsd: sidecarBudget,
+      workflowSpec,
+      workflowKind: "verifier",
+      fallbackSlashCommand: verifySlashCommand,
+    });
+    resultText = subagentResult.resultText;
+  } catch (err) {
+    // Subagent failed to complete verification (tool loop limit, stream
+    // error, denied command, etc.). Verification is advisory — do NOT
+    // block the pipeline. Log the failure, write a warning note, and
+    // proceed to review.
+    log.warn({ taskId, err }, "Verify subagent failed; proceeding without blocking");
+    const failedAt = new Date().toISOString();
+    logActivity(
+      taskId,
+      "Agent",
+      `verify subagent failed at ${failedAt}: ${err instanceof Error ? err.message : String(err)}; proceeding without blocking`,
+    );
+    const existingReview = task.reviewComments?.trim();
+    const warningNote = [
+      "## Verification",
+      "",
+      "**⚠️ Verification subagent did not complete successfully.**",
+      "",
+      `Error: ${err instanceof Error ? err.message : String(err)}`,
+      "",
+      "The task proceeds to review without a full verification gate. Inspect the implementation manually.",
+    ].join("\n");
+    const combinedReview = existingReview ? `${existingReview}\n\n${warningNote}` : warningNote;
+    setTaskFields(taskId, {
+      reviewComments: combinedReview,
+      updatedAt: new Date().toISOString(),
+    });
+    return;
+  }
 
   if (task.branchName && !task.isFix) {
     assertCurrentBranch(projectRoot, task.branchName);
