@@ -45,6 +45,7 @@ import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer, hasImplementationNoOp } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
 import { runVerifier } from "./subagents/verifier.js";
+import { runDoneChecker } from "./subagents/doneChecker.js";
 import { reconcileAllProjectWorktrees } from "./worktreeReconcile.js";
 import { runPlanReviewPublisher, taskRequiresPlanReview } from "./planReviewPublisher.js";
 import {
@@ -151,6 +152,13 @@ const PIPELINE: StatusTransition[] = [
     onSuccess: "done",
     runner: runReviewer,
     label: "reviewer",
+  },
+  {
+    from: ["done"],
+    inProgress: "done",
+    onSuccess: "accepted",
+    runner: runDoneChecker,
+    label: "done-checker",
   },
 ];
 

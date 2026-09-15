@@ -198,7 +198,8 @@ export type CoordinatorStage =
   | "plan-publisher"
   | "implementer"
   | "reviewer"
-  | "verifier";
+  | "verifier"
+  | "done-checker";
 
 export interface CoordinatorTaskClaimInput {
   taskId: string;

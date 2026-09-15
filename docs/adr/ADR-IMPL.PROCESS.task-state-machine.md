@@ -55,7 +55,7 @@ stateDiagram-v2
 | `implementing`     | AI реализует план                            | `plan_review`                                | Реализация завершена → `verify`; флаг `skipReview` → `done`; **fast gate (самовозврат)** → `implementing` — агент повторяет реализацию без перехода в Verify |
 | `verify`           | Проверка реализации на соответствие плану    | `implementing`                               | Проверка пройдена → `review`; не пройдена → `implementing`                                                                                                   |
 | `review`           | Ревью кода (auto или human)                  | `verify`                                     | Ревью пройдено → `done`; изменения запрошены → `implementing`                                                                                                |
-| `done`             | Реализация завершена, ожидает подтверждения  | `review` / `implementing` (skipReview)       | `approve_done` → `accepted`; `request_changes` → `implementing`                                                                                              |
+| `done`             | Реализация завершена, ожидает подтверждения  | `review` / `implementing` (skipReview)       | `approve_done` → `accepted`; `request_changes` → `implementing`; **auto-approve (PR/MR merged, review approved, `/approve` comment)** → `accepted`           |
 | `accepted`         | Задача принята (терминальное состояние)      | `done`                                       | —                                                                                                                                                            |
 | `blocked_external` | Задача заблокирована внешней причиной        | Любой статус (через error recovery)          | `retry_from_blocked` → исходный статус (`planning` / `improve` / `plan_review` / `implementing`)                                                             |
 
@@ -66,6 +66,7 @@ stateDiagram-v2
 - **AutoMode:** когда `true`, координатор автоматически проводит задачу по всем стадиям с auto-review gate.
 - **Fast gate (самовозврат):** если реализатор на очередном шаге не произвёл изменений (no-op), задача остаётся в `implementing`. Координатор повторяет стадию на следующем цикле опроса — это быстрый внутренний ретарри, без перехода в `verify`. Ограничивается числом попыток через `reworkRequested` и `reviewIterationCount`.
 - **Plan validation gate:** задача НЕ переводится из `planning` или `improve` в `plan_review`, если файл плана отсутствует или пуст. При пустом плане после `planning` задача остаётся в `planning` для повторной генерации; после `improve` — возвращается в `planning`.
+- **Done auto-approval:** задача в `done` с VCS-linked PR/MR автоматически переходит в `accepted` при слиянии PR/MR (`prState=merged`), одобрении ревью (`reviewState=approved`) или команде `/approve` в комментариях. Стадия `done-checker` проверяет это на каждом poll-цикле.
 - **Blocked external:** при недоступности рантайма задача переходит в `blocked_external` с `retryAfter` и автоматическим возвратом.
 - **Action codes:** каждое возвращаемое действие имеет код (`action_not_allowed`, `actor_not_authorized` и т.д.) для однозначной обработки в API и UI.
 
