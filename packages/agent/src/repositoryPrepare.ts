@@ -143,8 +143,10 @@ function safeHasHead(projectRoot: string): boolean {
  *    repository with no commits force-adopts the remote branch (clone
  *    semantics); otherwise the branch is reset onto the remote;
  * 7. initialize the AI Factory scaffold when `.ai-factory/` is missing;
- * 8. commit any outstanding scaffold files;
- * 9. when the remote default branch did not exist yet, push the scaffold as
+ * 8. configure local git user identity (user.email / user.name) so subsequent
+ *    commits don't fail with "Author identity unknown" in containers;
+ * 9. commit any outstanding scaffold files;
+ * 10. when the remote default branch did not exist yet, push the scaffold as
  *    the initial content of that branch.
  *
  * Runs synchronously and throws a typed {@link RepositoryPrepareError} on the
@@ -317,7 +319,21 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
     log.debug({ projectId, provider }, "AI Factory scaffold already present");
   }
 
-  // 8. commit scaffold — commit ANY untracked/modified files (fresh init or
+  // 8. ensure git user identity is configured for this repo (Docker containers
+  // may lack global user.name/user.email, causing "Author identity unknown").
+  try {
+    runGit(projectRoot, ["config", "user.email", "aif-handoff@ai-factory"]);
+    runGit(projectRoot, ["config", "user.name", "AIF Handoff"]);
+  } catch (err) {
+    throw new RepositoryPrepareError(
+      "commit_failed",
+      `git config user failed: ${errorMessage(err)}`,
+      projectId,
+      provider,
+    );
+  }
+
+  // 9. commit scaffold — commit ANY untracked/modified files (fresh init or
   // leftover from a partial run) so the default branch is clean. A clean tree
   // is not an error.
   const dirty = captureGit(projectRoot, ["status", "--porcelain"]);
@@ -341,7 +357,7 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
     log.debug({ projectId, provider }, "No scaffold files to commit");
   }
 
-  // 9. empty-origin path: push the scaffold as the initial default branch (only
+  // 10. empty-origin path: push the scaffold as the initial default branch (only
   // when there is a local commit to push).
   if (!remoteExists && safeHasHead(projectRoot)) {
     try {
