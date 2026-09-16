@@ -1342,7 +1342,7 @@ async function runPollCycle(): Promise<void> {
           // Per-project concurrency: non-parallel projects limited to 1 task at a time
           if (spawned.length >= projectMax) {
             log.debug(
-              { taskId: task.id, projectId: task.projectId, projectMax },
+              { taskId: task.id, projectId: task.projectId, projectMax, stage: stage.label },
               "Project at capacity, skipping task",
             );
             continue;
