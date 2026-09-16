@@ -16,6 +16,7 @@ export type RepositoryPrepareErrorKind =
   | "safe_directory_failed"
   | "fetch_failed"
   | "checkout_failed"
+  | "submodule_failed"
   | "init_failed"
   | "commit_failed"
   | "push_failed"
@@ -142,11 +143,13 @@ function safeHasHead(projectRoot: string): boolean {
  * 6. check out the remote **default branch** — whatever it is named. A local
  *    repository with no commits force-adopts the remote branch (clone
  *    semantics); otherwise the branch is reset onto the remote;
- * 7. initialize the AI Factory scaffold when `.ai-factory/` is missing;
- * 8. configure local git user identity (user.email / user.name) so subsequent
+ * 7. initialize git submodules when `.gitmodules` exists — ensures linked
+ *    dependencies are available after branch checkout;
+ * 8. initialize the AI Factory scaffold when `.ai-factory/` is missing;
+ * 9. configure local git user identity (user.email / user.name) so subsequent
  *    commits don't fail with "Author identity unknown" in containers;
- * 9. commit any outstanding scaffold files;
- * 10. when the remote default branch did not exist yet, push the scaffold as
+ * 10. commit any outstanding scaffold files;
+ * 11. when the remote default branch did not exist yet, push the scaffold as
  *    the initial content of that branch.
  *
  * Runs synchronously and throws a typed {@link RepositoryPrepareError} on the
@@ -294,7 +297,26 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
     }
   }
 
-  // 7. AI Factory init (idempotent) — only when the scaffold is missing.
+  // 7. initialize git submodules (idempotent) — only when the project defines
+  // submodules via `.gitmodules`. After checkout the submodule URLs are known;
+  // this pulls down linked dependencies so the working tree is complete.
+  if (existsSync(join(projectRoot, ".gitmodules"))) {
+    try {
+      runGit(projectRoot, ["submodule", "update", "--init", "--recursive"]);
+      log.info({ projectId, provider }, "Initialized git submodules");
+    } catch (err) {
+      throw new RepositoryPrepareError(
+        "submodule_failed",
+        `git submodule update --init --recursive failed: ${errorMessage(err)}`,
+        projectId,
+        provider,
+      );
+    }
+  } else {
+    log.debug({ projectId, provider }, "No .gitmodules found; skipping submodule init");
+  }
+
+  // 8. AI Factory init (idempotent) — only when the scaffold is missing.
   if (!existsSync(join(projectRoot, ".ai-factory"))) {
     const registry = getRuntimeRegistrySync();
     if (!registry) {
@@ -319,7 +341,7 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
     log.debug({ projectId, provider }, "AI Factory scaffold already present");
   }
 
-  // 8. ensure git user identity is configured for this repo (Docker containers
+  // 9. ensure git user identity is configured for this repo (Docker containers
   // may lack global user.name/user.email, causing "Author identity unknown").
   try {
     runGit(projectRoot, ["config", "user.email", "aif-handoff@ai-factory"]);
@@ -357,7 +379,7 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
     log.debug({ projectId, provider }, "No scaffold files to commit");
   }
 
-  // 10. empty-origin path: push the scaffold as the initial default branch (only
+  // 11. empty-origin path: push the scaffold as the initial default branch (only
   // when there is a local commit to push).
   if (!remoteExists && safeHasHead(projectRoot)) {
     try {

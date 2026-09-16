@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,6 +101,11 @@ describe("prepareGitLabRepository", () => {
     root = mkdtempSync(join(tmpdir(), "aif-gitlab-prepare-"));
     origin = createOriginWithMain();
     vi.stubEnv("GITLAB_TOKEN", "secret-token");
+    // Allow local filesystem submodule clones (blocked by default since Git 2.38.1)
+    execFileSync("git", ["config", "--global", "protocol.file.allow", "always"], {
+      encoding: "utf8",
+      stdio: ["ignore", "ignore", "pipe"],
+    });
   });
 
   afterEach(() => {
@@ -223,6 +228,81 @@ describe("prepareGitLabRepository", () => {
 
     expect(() => prepareGitLabRepositoryForProject("p1")).toThrowError(
       expect.objectContaining({ kind: "connection_not_found" }),
+    );
+  });
+
+  it("initializes git submodules when .gitmodules exists on the remote", () => {
+    // Create a bare repo to serve as the submodule target
+    const subBare = mkdtempSync(join(tmpdir(), "aif-gitlab-sub-bare-"));
+    gitQuiet(subBare, ["init", "--bare", "--initial-branch=main"]);
+    // Push content to submodule repo so submodule update can clone it
+    const subWs = mkdtempSync(join(tmpdir(), "aif-gitlab-sub-ws-"));
+    gitQuiet(subWs, ["init", "--initial-branch=main"]);
+    gitQuiet(subWs, ["config", "user.email", "t@t.local"]);
+    gitQuiet(subWs, ["config", "user.name", "T"]);
+    gitQuiet(subWs, ["commit", "--allow-empty", "-m", "init", "--no-verify"]);
+    gitQuiet(subWs, ["remote", "add", "origin", subBare]);
+    gitQuiet(subWs, ["push", "-u", "origin", "main"]);
+
+    // Set up the origin repo with a properly-registered submodule
+    const ws = mkdtempSync(join(tmpdir(), "aif-gitlab-ws-"));
+    gitQuiet(ws, ["init", "--initial-branch=main"]);
+    gitQuiet(ws, ["config", "user.email", "t@t.local"]);
+    gitQuiet(ws, ["config", "user.name", "T"]);
+    gitQuiet(ws, ["commit", "--allow-empty", "-m", "init", "--no-verify"]);
+    gitQuiet(ws, ["remote", "add", "origin", origin]);
+    gitQuiet(ws, ["push", "-u", "origin", "main"]);
+
+    // Use git submodule add to properly register the submodule (creates .gitmodules + gitlink entry)
+    const subUrl = subBare.replace(/\\/g, "/");
+    gitQuiet(ws, ["submodule", "add", subUrl, "lib"]);
+    gitQuiet(ws, ["commit", "-m", "add submodule", "--no-verify"]);
+    gitQuiet(ws, ["push", "origin", "main"]);
+
+    const connection = makeConnection(origin);
+    prepareGitLabRepository({ projectRoot: root, connection });
+
+    // Submodule should be checked out (lib/.git should exist)
+    expect(existsSync(join(root, "lib", ".git"))).toBe(true);
+  });
+
+  it("throws submodule_failed when a submodule URL is unreachable", () => {
+    // Create a bare repo to serve as a temporary valid submodule target
+    const tmpBare = mkdtempSync(join(tmpdir(), "aif-gitlab-tmp-bare-"));
+    gitQuiet(tmpBare, ["init", "--bare", "--initial-branch=main"]);
+    const tmpWs = mkdtempSync(join(tmpdir(), "aif-gitlab-tmp-ws-"));
+    gitQuiet(tmpWs, ["init", "--initial-branch=main"]);
+    gitQuiet(tmpWs, ["config", "user.email", "t@t.local"]);
+    gitQuiet(tmpWs, ["config", "user.name", "T"]);
+    gitQuiet(tmpWs, ["commit", "--allow-empty", "-m", "init", "--no-verify"]);
+    gitQuiet(tmpWs, ["remote", "add", "origin", tmpBare]);
+    gitQuiet(tmpWs, ["push", "-u", "origin", "main"]);
+
+    // Set up origin with a properly-registered submodule
+    const ws = mkdtempSync(join(tmpdir(), "aif-gitlab-ws-"));
+    gitQuiet(ws, ["init", "--initial-branch=main"]);
+    gitQuiet(ws, ["config", "user.email", "t@t.local"]);
+    gitQuiet(ws, ["config", "user.name", "T"]);
+    gitQuiet(ws, ["commit", "--allow-empty", "-m", "init", "--no-verify"]);
+    gitQuiet(ws, ["remote", "add", "origin", origin]);
+    gitQuiet(ws, ["push", "-u", "origin", "main"]);
+
+    const tmpUrl = tmpBare.replace(/\\/g, "/");
+    gitQuiet(ws, ["submodule", "add", tmpUrl, "missing"]);
+    // Replace the submodule URL with a non-existent path so submodule update fails
+    const badUrl = join(tmpdir(), "aif-gitlab-nonexistent-" + Date.now()).replace(/\\/g, "/");
+    writeFileSync(
+      join(ws, ".gitmodules"),
+      `[submodule "missing"]\n\tpath = missing\n\turl = ${badUrl}\n`,
+    );
+    gitQuiet(ws, ["add", ".gitmodules"]);
+    gitQuiet(ws, ["commit", "-m", "break submodule url", "--no-verify"]);
+    gitQuiet(ws, ["push", "origin", "main"]);
+
+    const connection = makeConnection(origin);
+
+    expect(() => prepareGitLabRepository({ projectRoot: root, connection })).toThrow(
+      expect.objectContaining({ kind: "submodule_failed" }),
     );
   });
 
