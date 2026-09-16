@@ -207,13 +207,18 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
       provider,
     );
   }
+  const credentialHelper = `!f() { echo username=${credentialUsername}; echo password=$${tokenEnvVar}; }; f`;
   try {
-    runGit(projectRoot, [
-      "config",
-      "credential.helper",
-      `!f() { echo username=${credentialUsername}; echo password=$${tokenEnvVar}; }; f`,
-    ]);
-    log.debug({ projectId, provider }, "Configured credential helper");
+    // Repo-level: used for fetch/push operations on this repo
+    runGit(projectRoot, ["config", "credential.helper", credentialHelper]);
+    // Global-level: inherited by git clone during submodule init (new repos
+    // do not inherit repo-level config). Container-scoped, so multiple
+    // projects on the same agent still share one credential helper.
+    execFileSync("git", ["config", "--global", "credential.helper", credentialHelper], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    log.debug({ projectId, provider }, "Configured credential helper (repo + global)");
   } catch (err) {
     throw new RepositoryPrepareError(
       "credential_failed",

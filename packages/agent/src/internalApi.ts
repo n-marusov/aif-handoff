@@ -5,6 +5,7 @@ import { RepositoryPrepareError, type RepositoryProvider } from "./repositoryPre
 import { prepareGitLabRepositoryForProject } from "./gitlabPrepare.js";
 import { prepareGitHubRepositoryForProject } from "./githubPrepare.js";
 import { stashAndRemoveWorktree } from "./worktreeLifecycle.js";
+import { syncProjectSubmodules } from "./submoduleSync.js";
 
 const log = logger("agent-internal-api");
 
@@ -147,6 +148,8 @@ export function createInternalApiApp(): Hono {
   mountPrepareRoute(app, "gitlab", prepareGitLabRepositoryForProject);
   mountPrepareRoute(app, "github", prepareGitHubRepositoryForProject);
 
+  mountSubmoduleSyncRoute(app);
+
   return app;
 }
 
@@ -193,6 +196,32 @@ function mountWorktreeCleanupRoute(app: Hono): void {
       log.error({ taskId: body.taskId, err: error }, "Worktree cleanup failed");
       return c.json({ error: "Worktree cleanup failed", code: "worktree_cleanup_internal" }, 500);
     }
+  });
+}
+
+interface SubmoduleSyncBody {
+  projectId?: string;
+}
+
+function mountSubmoduleSyncRoute(app: Hono): void {
+  app.post("/submodules/sync", async (c) => {
+    let body: SubmoduleSyncBody;
+    try {
+      body = (await c.req.json()) as SubmoduleSyncBody;
+    } catch {
+      return c.json({ error: "Invalid JSON body", code: "invalid_body" }, 400);
+    }
+    if (!body.projectId) {
+      return c.json({ error: "projectId is required", code: "invalid_body" }, 400);
+    }
+
+    log.info({ projectId: body.projectId }, "Submodule sync requested");
+    const result = syncProjectSubmodules(body.projectId);
+    log.info(
+      { projectId: body.projectId, ok: result.ok, initialized: result.submodulesInitialized },
+      "Submodule sync completed",
+    );
+    return c.json(result);
   });
 }
 

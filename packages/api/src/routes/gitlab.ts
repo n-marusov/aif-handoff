@@ -30,7 +30,7 @@ import {
   gitlabPublishSchema,
   gitlabSyncSchema,
 } from "../schemas.js";
-import { callAgentGitPrepare } from "../services/gitPrepareBridge.js";
+import { callAgentGitPrepare, callAgentSubmoduleSync } from "../services/gitPrepareBridge.js";
 import {
   GitLabApiError,
   GitLabClient,
@@ -206,6 +206,10 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
   if (project?.rootPath) {
     pullDefaultBranch(project.rootPath);
   }
+
+  // Best-effort submodule sync: populate submodules if .gitmodules exists.
+  // Non-blocking — failure is logged but import continues.
+  callAgentSubmoduleSync(projectId).catch(() => {});
 
   try {
     const client = clientFor(connection);
