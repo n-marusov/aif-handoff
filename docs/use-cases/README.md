@@ -86,7 +86,7 @@ UC-<L1>.<L2>.<L3>
 | `handoff`     | HF7 (роли, handoff и эскалация)              | Передача владения задачей, эскалация вне правил, история исполнителей, диагностика             | `UC-handoff.transfer.ownership-to-executor`    |
 | `chat`        | HF8 (чат с AI-ассистентом)                   | Диалог в контексте проекта или изменения                                                       | `UC-chat.project-context.consult-ai-assistant` |
 | `auth`        | HF9 (участники и аутентификация)             | Регистрация, вход, разграничение ролей и прав                                                  | `UC-auth.registration.sign-up-participant`     |
-| `audit`       | HF10 (аудит и наблюдаемость)                 | Иммутабельный аудит, хартбиты выполнения, категоризация ошибок                                 | `UC-audit.logging.audit-state-transition`      |
+| `audit`       | HF10 (аудит и наблюдаемость)                 | Иммутабельный аудит, хартбиты выполнения, категоризация ошибок, OTel-телеметрия (`to be`)      | `UC-audit.logging.audit-state-transition`      |
 | `integration` | HF11 (VCS-интеграция)                        | Синхронизация с Issues GitHub/GitLab, публикация PR/MR, проверка CI-статусов                   | `UC-integration.pr-mr.publish-github-pr`       |
 | `warmup`      | HF12 (разогрев сессий)                       | Предварительный прогрев сессий runtime для ускорения старта                                    | `UC-warmup.preheat.warmup-runtime-session`     |
 
@@ -134,6 +134,9 @@ UC-<L1>.<L2>.<L3>
 | HF10.1 Аудит действий                                   | `audit.logging`                     | `UC-audit.logging.audit-state-transition`                   |
 | HF10.2 Хартбиты выполнения                              | `audit.heartbeat`                   | `UC-audit.heartbeat.receive-agent-heartbeat`                |
 | HF10.3 Категоризация ошибок                             | `audit.errors`                      | `UC-audit.errors.classify-runtime-error`                    |
+| HF10.4 Сквозная трасса задачи (предложено)              | `audit.telemetry`                   | `UC-audit.telemetry.view-task-telemetry`                    |
+| HF10.5 Управление телеметрией (предложено)              | `audit.telemetry`                   | `UC-audit.telemetry.control-content-capture`                |
+| HF10.6 AI-разбор инцидентов (предложено)                | `audit.telemetry`                   | — (Фаза 5; без UC на MVP)                                   |
 | HF11.1 Синхронизация с Issues                           | `integration.issues`                | `UC-integration.issues.sync-github-issue`                   |
 | HF11.2 Публикация PR/MR                                 | `integration.pr-mr`                 | `UC-integration.pr-mr.publish-github-pr`                    |
 | HF11.3 Проверка CI-статусов                             | `integration.ci-status`             | `UC-integration.ci-status.check-pipeline-status`            |

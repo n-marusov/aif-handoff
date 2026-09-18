@@ -1,4 +1,4 @@
-[← Configuration](configuration.md) · [Back to README](../README.md)
+[← Telemetry](telemetry.md) · [Back to README](../README.md)
 
 # Providers
 

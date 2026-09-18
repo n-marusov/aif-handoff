@@ -95,6 +95,8 @@
 | [UC-audit.logging.audit-state-transition](UC-audit.logging.audit-state-transition.md)       | P0        | Agent/API | `as is` |
 | [UC-audit.heartbeat.receive-agent-heartbeat](UC-audit.heartbeat.receive-agent-heartbeat.md) | P1        | Agent     | `as is` |
 | [UC-audit.errors.classify-runtime-error](UC-audit.errors.classify-runtime-error.md)         | P1        | Agent     | `as is` |
+| [UC-audit.telemetry.view-task-telemetry](UC-audit.telemetry.view-task-telemetry.md)         | P1        | GUI       | `to be` |
+| [UC-audit.telemetry.control-content-capture](UC-audit.telemetry.control-content-capture.md) | P2        | Mixed     | `to be` |
 
 ## integration — VCS-интеграция GitHub/GitLab (HF11)
 
