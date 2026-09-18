@@ -46,9 +46,9 @@
 | [`container.md`](container.md) | 2 — Container      | актуален: контейнеры `web`, `api`, `agent`, `mcp` и БД SQLite, их интерфейсы и связи     |
 | `component-*.md`               | 3 — Component      | планируется                                                                              |
 | `code-*.md`                    | 4 — Code           | планируется                                                                              |
-| `deployment.md`                | Deployment         | планируется                                                                              |
+| [`deployment.md`](deployment.md) | Deployment       | актуален: развёртывание по окружениям (development compose, production compose, MCP stdio mode) |
 
-> Уровни 1–2 ([context.md](context.md), [container.md](container.md)) синхронизированы с фактической реализацией в `packages/`.
+> Уровни 1–2 и Deployment ([context.md](context.md), [container.md](container.md), [deployment.md](deployment.md)) синхронизированы с фактической реализацией в `packages/` и compose-конфигурациями.
 
 Каталог уровней 3–4 создаётся по мере описания: сначала контейнеры ядра (`api`, `agent`), затем остальные. Исходная диаграмма системного контекста (уровень 1) также представлена в [vision.md §3.3](../vision.md).
 

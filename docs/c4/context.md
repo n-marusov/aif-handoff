@@ -24,16 +24,18 @@ C4Context
         System_Ext(openrouter, "OpenRouter", "Адаптер API")
     }
 
+    System_Ext(browser, "Web Browser", "Клиентский runtime для web-spa")
     System_Ext(mcpclients, "MCP-клиенты", "Claude Code, Codex, редакторы")
     System_Ext(telegram, "Telegram Bot API", "Уведомления о переходах (опционально)")
     System_Ext(git, "Git-репозитории проектов", "Исходный код, ветки, worktree")
     System_Ext(vcs, "VCS-платформы (GitHub/GitLab)", "Issues, PR/MR, CI-статусы")
 
-    Rel(developer, handoff, "Создаёт задачи, задаёт правила, принимает эскалации", "Web UI / REST")
-    Rel(techlead, handoff, "Настраивает профили и лимиты, наблюдает гейты", "Web UI / REST")
-    Rel(po, handoff, "Участвует в эскалациях по бизнес-правилам", "Web UI")
-    Rel(qa, handoff, "Определяет тестовые критерии и гейты", "Web UI")
-    Rel(admin, handoff, "Управляет участниками, ролями, адаптерами, аудитом", "Web UI / REST")
+    Rel(developer, browser, "Работает через браузер", "GUI")
+    Rel(techlead, browser, "Настраивает профили и лимиты", "GUI")
+    Rel(po, browser, "Участвует в эскалациях", "GUI")
+    Rel(qa, browser, "Определяет тестовые критерии", "GUI")
+    Rel(admin, browser, "Администрирует систему", "GUI")
+    Rel(browser, handoff, "Использует web-spa (доступ к API/WS)", "HTTPS / WebSocket")
 
     Rel(handoff, claude, "Выполнение стадий конвейера, чат", "по протоколу провайдера")
     Rel(handoff, codex, "Выполнение стадий конвейера, чат", "по протоколу провайдера")
@@ -56,7 +58,7 @@ C4Context
 
 ## Контекст
 
-- **Граница системы.** Внутрь границы попадает модульный монолит из семи пакетов (`shared`, `runtime`, `data`, `api`, `web`, `agent`, `mcp`), разворачиваемый как набор Docker-сервисов. Человеческие персоны работают с системой через веб-браузер (SPA `web`, REST и WebSocket `api`); браузер — канал доступа, а не самостоятельная система.
+- **Граница системы.** Внутрь границы попадает модульный монолит из семи пакетов (`shared`, `runtime`, `data`, `api`, `web`, `agent`, `mcp`), разворачиваемый как набор Docker-сервисов. Человеческие персоны работают с системой через веб-браузер; канал доступа на этом уровне показан явно: `Person -> Web Browser -> AIF Handoff` (web-spa + API/WS).
 - **AI-агенты — не внешний актор.** Программные исполнители конвейера (планировщик, реализатор, sidecar-агенты) запускаются координатором внутри системы через runtime-адаптеры. В требованиях они перечислены как программные пользователи ([vision.md](../vision.md) §3.1), но на диаграмме контекста внешним актором не являются: система владеет их запуском и их результатами.
 - **AI-провайдеры — внешние системы.** Claude, Codex, OpenCode и OpenRouter вынесены в отдельную границу: конкретный провайдер выбирается runtime-профилем задачи проекта, поэтому система остаётся провайдер-независимой.
 - **Git-репозитории целевых проектов** — предмет работы конвейера: изменения выполняются в изолированных git worktree и завершаются коммитами.
@@ -102,6 +104,7 @@ C4Context
 | AI-провайдеры (внешняя граница)           | Исполнение стадий конвейера и чата                 | Адаптеры `packages/runtime/src/adapters/{claude,codex,opencode,openrouter}`; контракт `RuntimeAdapter` (`packages/runtime/src/types.ts`); выбор — runtime-профиль задачи/проекта |
 | `git` (внешняя система)                   | Репозитории целевых проектов: код, ветки, worktree | `PROJECTS_DIR` / `PROJECTS_MOUNT`; изоляция — `packages/agent/src/worktreeLifecycle.ts`, `gitOperationLock.ts`                                                                   |
 | `vcs` (внешняя система)                   | GitHub и GitLab: Issues, PR/MR, CI-статусы         | `packages/api/src/services/github.ts`, `gitlab.ts`; `packages/agent/src/githubWorkflow.ts`, `gitlabWorkflow.ts`, `githubPrepare.ts`, `gitlabPrepare.ts`                          |
+| `browser` (внешняя система)               | Клиентский runtime для web-spa                     | Пользовательский браузер; конкретное размещение web-spa внутри browser показано в `deployment.md`                                                                                |
 | `mcpclients` (внешние системы)            | AI-инструменты, работающие с задачами              | `packages/mcp` — транспорт stdio или HTTP (`MCP_PORT`, по умолчанию `3100`)                                                                                                      |
 | `telegram` (внешняя система, опционально) | Push-уведомления о переходах стадий                | `packages/shared/src/telegram.ts`, `packages/agent/src/notifier.ts`; включается `TELEGRAM_BOT_TOKEN` + `TELEGRAM_USER_ID`                                                        |
 
