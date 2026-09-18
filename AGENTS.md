@@ -137,6 +137,7 @@ data/                    # SQLite database files (gitignored)
 | Getting Started     | docs/getting-started.md       | Installation, setup, first steps                                |
 | Architecture        | docs/architecture.md          | Agent pipeline, state machine, data flow                        |
 | ADR                 | docs/adr/README.md            | Architecture Decision Records (13 as-is decisions)              |
+| C4 Diagrams         | docs/c4/README.md             | C4 model: context, containers, components, deployment           |
 | API Reference       | docs/api.md                   | REST endpoints, WebSocket events                                |
 | Configuration       | docs/configuration.md         | Environment variables, logging, auth                            |
 | Providers           | docs/providers.md             | Runtime profiles and adapter capabilities                       |
