@@ -46,7 +46,7 @@ export function useTaskFiltering(
   const filteredTasks = useMemo(() => {
     let result = tasks;
 
-    // Filter by search query (title, description)
+    // Фильтр по строке поиска (название, описание)
     const query = searchQuery.trim().toLowerCase();
     if (query) {
       result = result.filter(
@@ -56,12 +56,12 @@ export function useTaskFiltering(
       );
     }
 
-    // Filter by active tag filters
+    // Фильтр по активным тегам
     if (activeFilters.length > 0) {
       result = result.filter((task) => activeFilters.every((tag) => task.tags?.includes(tag)));
     }
 
-    // Sort
+    // Сортировка
     const sorted = [...result].sort((a, b) => {
       let cmp = 0;
       switch (sortField) {

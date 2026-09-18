@@ -1,3 +1,19 @@
+/**
+ * Fire-and-forget запуск /aif-qa через runtime: прогоняет QA-пайплайн, читает три
+ * артефакта и фиксирует терминальный qaStatus на задаче.
+ *
+ * Почему файл устроен именно так:
+ *  - "никогда не бросает": это фоновый воркер, которого никто не ждёт через await,
+ *    поэтому единственный контракт с вызывающим - структурированный RunQaQueryResult,
+ *    а любой сбой превращается в qaStatus:"error" плюс broadcast;
+ *  - слот "running" захватывает вызывающий (tryStartQaRun) ДО вызова воркера, а не сам
+ *    воркер: только так два конкурентных старта остаются взаимоисключающими;
+ *  - пути артефактов считаются заранее и запекаются в промпт текстом: CLI-транспорт
+ *    сам разворачивает /aif-qa в свой slug-каталог, а API-транспорты исполняют ровно
+ *    то, что написано в промпте - иначе они писали бы в разные места;
+ *  - slug повторяет алгоритм skill'а побайтово (включая завершающий перевод строки
+ *    в git hash-object), поэтому расхождение с SKILL.md ломает чтение артефактов.
+ */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -10,6 +26,10 @@ import { broadcast } from "../ws.js";
 
 const log = logger("qa-runner");
 
+/**
+ * Результат намеренно бедный: воркер не возвращает тексты артефактов, потому что
+ * источник истины для UI - поля задачи в БД, а не ответ этого вызова.
+ */
 export interface RunQaQueryResult {
   ok: boolean;
   error?: string;
@@ -19,24 +39,25 @@ export interface RunQaQueryResult {
 export interface RunQaQueryInput {
   projectId: string;
   taskId: string;
-  /** Worktree-aware root (task.worktreePath ?? project.rootPath). */
+  /** Корень с учётом worktree (task.worktreePath ?? project.rootPath). */
   executionRoot: string;
 }
 
 /**
- * Deterministic, filesystem-safe, collision-resistant slug for QA artifacts.
+ * Детерминированный, безопасный для файловой системы, устойчивый к коллизиям
+ * slug для QA-артефактов.
  *
- * HARD CONTRACT with `.claude/skills/aif-qa/SKILL.md` (steps 84-93). If the
- * skill changes its slug algorithm, this function and the matching test in
- * `qaRunner.test.ts` MUST be updated in lockstep — otherwise the runner reads
- * from a different directory than the skill writes to and gets `null` artifacts.
+ * ЖЁСТКИЙ КОНТРАКТ с `.claude/skills/aif-qa/SKILL.md` (шаги 84-93). Если скилл
+ * сменит алгоритм slug, эту функцию и соответствующий тест в `qaRunner.test.ts`
+ * НУЖНО обновлять синхронно — иначе раннер читает не тот каталог, куда скилл
+ * пишет, и получает `null` артефакты.
  *
- * Algorithm:
- *  1. safe_slug — replace every char not in [A-Za-z0-9._-] with `-`, collapse
- *     repeated `-`, trim leading/trailing `-`, fall back to "branch", truncate
- *     to 40 chars.
- *  2. hash8 — first 8 hex chars of `git hash-object --stdin` over the ORIGINAL
- *     branch name (with a trailing newline, mirroring the skill's `<<<` here-string).
+ * Алгоритм:
+ *  1. safe_slug — заменить каждый символ вне [A-Za-z0-9._-] на `-`, схлопнуть
+ *     повторяющиеся `-`, обрезать ведущие/замыкающие `-`, при пустоте взять
+ *     "branch", обрезать до 40 символов.
+ *  2. hash8 — первые 8 hex-символов `git hash-object --stdin` по ИСХОДНОМУ
+ *     имени ветки (с завершающим переводом строки, как в here-string `<<<` у скилла).
  *  3. combine — `<safe_slug>-<hash8>`.
  */
 export function computeQaBranchSlug(branch: string, executionRoot: string): string {
@@ -47,28 +68,34 @@ export function computeQaBranchSlug(branch: string, executionRoot: string): stri
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "branch";
 
-  // `<<< "<branch>"` appends a trailing newline; replicate it so the hash
-  // matches the skill exactly (e.g. feature/foo -> a72ccce7).
+  // `<<< "<branch>"` дописывает завершающий перевод строки; повторяем это, чтобы
+  // хеш совпадал со скиллом точно (напр. feature/foo -> a72ccce7).
+  // Хеш считается от ИСХОДНОГО имени ветки, а не от уже очищенного slug: skill
+  // хеширует строку до санитайза, и любая перестановка шагов даст другой каталог.
   const hashOutput = execFileSync("git", ["hash-object", "--stdin"], {
     cwd: executionRoot,
     input: `${branch}\n`,
     encoding: "utf-8",
   });
+  // slice(0, 8), а не полный хеш: восемь hex-символов дают достаточное разнообразие
+  // для каталогов и keep путь короче лимитов файловых систем.
   const hash8 = hashOutput.trim().slice(0, 8);
 
   return `${safeSlug}-${hash8}`;
 }
 
 /**
- * Resolve the branch QA artifacts are keyed under. Mirrors the aif-qa skill's
- * Step 0.2 resolution: prefer the task's persisted branch, otherwise fall back
- * to the branch currently checked out in `executionRoot` (`git branch
- * --show-current`). Fast-mode tasks never persist a branchName — they run on the
- * project's current branch by design (planner.ts) — so without this fallback QA
- * would be a silent no-op for them. Returns "" on detached HEAD / non-git roots;
- * `computeQaBranchSlug` normalizes that to the "branch" slug, matching the skill.
+ * Разрешает ветку, под которой ключуются QA-артефакты. Повторяет разрешение
+ * шага 0.2 скилла aif-qa: приоритет у сохранённой ветки задачи, иначе — ветка,
+ * на которой сейчас checkout в `executionRoot` (`git branch
+ * --show-current`). Задачи быстрого режима никогда не сохраняют branchName — по
+ * замыслу (planner.ts) они идут на текущей ветке проекта — поэтому без этого
+ * резерва QA для них был бы молчаливым no-op. Возвращает "" при detached HEAD /
+ * не-git корнях; `computeQaBranchSlug` нормализует это в slug "branch", как скилл.
  */
 export function resolveQaBranch(persistedBranch: string | null, executionRoot: string): string {
+  // Persisted-ветка приоритетнее текущей: работа может идти в worktree задачи,
+  // где HEAD другой, и QA обязан попасть в каталог именно своей ветки.
   if (persistedBranch) return persistedBranch;
   try {
     return execFileSync("git", ["branch", "--show-current"], {
@@ -80,7 +107,7 @@ export function resolveQaBranch(persistedBranch: string | null, executionRoot: s
   }
 }
 
-/** Build the explicit aif-qa pipeline prompt with absolute artifact paths baked in. */
+/** Строит явный промпт конвейера aif-qa с запечёнными абсолютными путями артефактов. */
 export function buildQaPrompt(artifactDir: string): string {
   return [
     "You are running the aif-qa workflow in --all mode. Run the full QA pipeline for the",
@@ -106,6 +133,10 @@ export function buildQaPrompt(artifactDir: string): string {
   ].join("\n");
 }
 
+/**
+ * Чтение артефакта не бросает исключение: отсутствие файла - ожидаемый результат
+ * (runtime мог отработать без записи), и вызывающий сам решает, как это трактовать.
+ */
 function readArtifact(path: string): string | null {
   if (!existsSync(path)) return null;
   try {
@@ -116,12 +147,11 @@ function readArtifact(path: string): string | null {
 }
 
 /**
- * Single failure exit for runQaQuery: persist qaStatus:"error", broadcast the
- * update, and return the structured { ok:false } result. Shared by the
- * missing-artifact branch and the catch-all so neither re-implements error
- * handling — and so runQaQuery returns ok:false directly rather than throwing
- * to its own catch. Persistence is wrapped defensively: a DB failure here must
- * not mask the original error.
+ * Единый аварийный выход runQaQuery: сохранить qaStatus:"error", разослать
+ * обновление и вернуть структурированный результат { ok:false }. Общий для
+ * ветки отсутствующих артефактов и catch-all, чтобы не дублировать обработку
+ * ошибок — и чтобы runQaQuery возвращал ok:false напрямую, а не бросал в
+ * собственный catch. Запись защищена: сбой БД здесь не должен затмить исходную ошибку.
  */
 function persistQaError(taskId: string, error: string): RunQaQueryResult {
   try {
@@ -137,26 +167,31 @@ function persistQaError(taskId: string, error: string): RunQaQueryResult {
 }
 
 /**
- * Fire-and-forget worker: run the aif-qa pipeline via the shared runtime and
- * persist the three artifacts + a terminal qaStatus on the task. Mirrors
- * `runCommitQuery` (services/commitGeneration.ts) — returns a structured result
- * and NEVER throws. Broadcasts `task:updated` on completion so the UI picks up
- * qaStatus/artifacts without racing the qa_* events.
+ * Fire-and-forget воркер: выполняет конвейер aif-qa через общий runtime и
+ * сохраняет три артефакта + терминальный qaStatus на задаче. Зеркалирует
+ * `runCommitQuery` (services/commitGeneration.ts) — возвращает структурированный
+ * результат и НИКОГДА не бросает. По завершении рассылает `task:updated`, чтобы
+ * UI забрал qaStatus/артефакты без гонки с событиями qa_*.
  *
- * PRECONDITION: the caller must have already claimed the run by transitioning
- * qaStatus to "running" (routes/tasks `startQaRun` → `tryStartQaRun`). This
- * worker does NOT set "running" itself — it only finalizes to "done" / "error"
- * — so the atomic claim stays the single point that serializes concurrent runs.
+ * ПРЕДУСЛОВИЕ: вызывающий уже захватил прогон, переведя qaStatus в "running"
+ * (routes/tasks `startQaRun` → `tryStartQaRun`). Этот воркер сам НЕ выставляет
+ * "running" — только завершает в "done" / "error", чтобы атомарный захват
+ * оставался единственной точкой сериализации конкурентных прогонов.
  */
 export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResult> {
+  // Переменные сразу разворачиваются: воркер работает в фоне, и обращаться к
+  // объекту input после await было бы рискованно при переиспользовании аргумента.
   const { projectId, taskId, executionRoot } = input;
 
   const task = findTaskById(taskId);
+  // Задача могла быть удалена между постановкой в очередь и запуском воркера.
   if (!task) {
     const msg = `Task not found: ${taskId}`;
     log.error({ taskId, projectId }, msg);
     return { ok: false, error: msg };
   }
+  // QA тратит токены и меняет состояние задачи, поэтому для human-owned задачи
+  // воркер отвечает структурным кодом, а не просто отказом без причины.
   if (task.executionOwner === "human") {
     log.warn(
       { taskId, projectId, executionOwner: task.executionOwner },
@@ -169,24 +204,28 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
     };
   }
 
-  // Branch/config/slug resolution lives INSIDE the try alongside the runtime
-  // call so runQaQuery honors its "NEVER throws" contract. computeQaBranchSlug
-  // runs `git hash-object` against executionRoot; a stale/missing root (e.g. a
-  // deleted worktree) makes execFileSync throw synchronously. Without this guard
-  // the throw would escape the route's fire-and-forget dispatch with no
-  // task:qa_failed event and no persisted qaStatus:"error".
+  // Разрешение ветки/конфига/slug живёт ВНУТРИ try вместе с вызовом runtime,
+  // чтобы runQaQuery соблюдал контракт "NEVER throws". computeQaBranchSlug
+  // запускает `git hash-object` в executionRoot; устаревший/отсутствующий корень
+  // (например, удалённый worktree) заставляет execFileSync бросить синхронно.
+  // Без этой защиты бросок вылетел бы из fire-and-forget рассылки маршрута без
+  // события task:qa_failed и без сохранённого qaStatus:"error".
   try {
-    // Resolve the QA branch the same way the aif-qa skill does (Step 0.2): the
-    // task's persisted branch, or the current git branch as a fallback. This keeps
-    // the runner's slug in lockstep with the skill so CLI/API transports agree on
-    // the artifact directory even for branchless (fast-mode) tasks.
+    // Разрешаем QA-ветку так же, как скилл aif-qa (шаг 0.2): сохранённая ветка
+    // задачи, иначе — текущая git-ветка как резерв. Это держит slug раннера
+    // синхронно со скиллом, чтобы CLI/API транспорты сходились в каталоге
+    // артефактов даже для безветочных (быстрых) задач.
     const resolvedBranch = resolveQaBranch(task.branchName, executionRoot);
 
-    // Resolve artifact paths deterministically BEFORE running the runtime so the
-    // exact paths can be baked into the prompt (CLI resolves /aif-qa --all to its
-    // own slug dir, but Codex-API/OpenRouter only execute the spelled-out prompt).
+    // Пути артефактов вычисляются детерминированно ДО запуска runtime, чтобы
+    // точные пути можно было запечь в промпт (CLI разрешает /aif-qa --all в свой
+    // slug-каталог, а Codex-API/OpenRouter исполняют ровно расписанный промпт).
+    // Корень проекта вычисляется из executionRoot, а не из полей проекта напрямую:
+    // для worktree-задач конфиг и каталог QA должны лежать в дереве задачи.
     const cfg = getProjectConfig(executionRoot);
     const qaRoot = join(executionRoot, cfg.paths.qa);
+    // Slug является ключом каталога, поэтому он вычисляется до промпта: те же самые
+    // строки попадают и в текст промпта, и в последующее чтение артефактов.
     const branchSlug = computeQaBranchSlug(resolvedBranch, executionRoot);
     const artifactDir = join(qaRoot, branchSlug);
 
@@ -199,12 +238,15 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
       "[QA] Resolved artifact dir",
     );
 
-    // qaStatus is already "running": the caller (routes/tasks startQaRun) claims
-    // the slot atomically via tryStartQaRun BEFORE dispatching this worker, which
-    // is what makes concurrent starts mutually exclusive. This worker only
-    // finalizes the run to "done" / "error".
+    // qaStatus уже "running": вызывающий (routes/tasks startQaRun) атомарно
+    // захватывает слот через tryStartQaRun ДО запуска этого воркера, поэтому
+    // конкурентные старты взаимоисключающи. Воркер лишь завершает прогон в
+    // "done" / "error".
     const prompt = buildQaPrompt(artifactDir);
 
+    // Повторное чтение задачи перед прогоном: между стартом воркера и этим шагом
+    // мог пройти handoff, поэтому проверка владельца повторяется у самой границы
+    // выполнения, где отменить уже ничего нельзя.
     const executionBoundaryTask = findTaskById(taskId);
     if (!executionBoundaryTask || executionBoundaryTask.executionOwner === "human") {
       return {
@@ -213,6 +255,9 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
         error: "The task must be handed to AI before QA can run",
       };
     }
+    // workflowKind и fallbackSlashCommand задают две разные стратегии исполнения:
+    // первый путь - нативный workflow рантайма, второй - слэш-команда для транспортов,
+    // которые умеют только её.
     const { result } = await runApiRuntimeOneShot({
       projectId,
       projectRoot: executionRoot,
@@ -228,15 +273,19 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
       "[QA] Reading artifacts from artifact dir",
     );
 
+    // Три артефакта читаются всегда, даже если первый уже null: иначе сообщение об
+    // ошибке не показало бы полный список пропавших файлов.
     const qaChangeSummary = readArtifact(join(artifactDir, "change-summary.md"));
     const qaTestPlan = readArtifact(join(artifactDir, "test-plan.md"));
     const qaTestCases = readArtifact(join(artifactDir, "test-cases.md"));
 
-    // A successful QA run is defined as producing ALL THREE artifacts. If the
-    // runtime finished but one or more files are missing (null), fail the run
-    // rather than persisting a misleading qaStatus:"done" with gaps. This is a
-    // validation failure (not a runtime exception), so we return ok:false
-    // directly with an actionable message — no throwing to our own catch.
+    // Успешный QA-прогон = созданы ВСЕ ТРИ артефакта. Если runtime завершился,
+    // но один или несколько файлов отсутствуют (null), прогон считается упавшим,
+    // а не сохраняется вводящий в заблуждение qaStatus:"done" с пробелами. Это
+    // сбой валидации (не исключение runtime), поэтому возвращаем ok:false
+    // напрямую с полезным сообщением — без броска в собственный catch.
+    // Фильтр идёт по null, а не по пустой строке: пустой файл - это осознанно
+    // записанный артефакт, а null значит, что рантайм его вовсе не создал.
     const missingArtifacts = (
       [
         ["change-summary.md", qaChangeSummary],
@@ -246,12 +295,16 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
     )
       .filter(([, content]) => content === null)
       .map(([name]) => name);
+    // persistQaError вместо локального возврата: терминальное состояние и broadcast
+    // должны проходить через одну точку, иначе UI останется на qaStatus:"running".
     if (missingArtifacts.length > 0) {
       const msg = `QA run did not produce required artifact(s): ${missingArtifacts.join(", ")}`;
       log.error({ taskId, artifactDir, missingArtifacts }, `[QA] ${msg}`);
       return persistQaError(taskId, msg);
     }
 
+    // Статус и артефакты пишутся одним вызовом: раздельные записи дали бы окно, в
+    // котором задача уже "done", но тексты ещё пустые.
     updateTask(taskId, {
       qaStatus: "done",
       qaChangeSummary,
@@ -266,6 +319,8 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
     log.info({ taskId }, "[QA] QA completed");
     return { ok: true };
   } catch (err) {
+    // Категория берётся из структурированного поля ошибки, а не из текста: тексты
+    // локализуются и меняются, а поле остаётся стабильным для логов и метрик.
     const category = err instanceof RuntimeExecutionError ? err.category : "unknown";
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err, taskId, projectId, category }, "[QA] QA failed");

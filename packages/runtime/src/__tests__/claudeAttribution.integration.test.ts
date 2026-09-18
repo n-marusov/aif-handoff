@@ -12,29 +12,29 @@ import type { RuntimeRunInput } from "../types.js";
 import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
 
 /**
- * Behavioral smoke test for the formerly-crashing `/chat` path — requested in
- * PR #162 review ("execute the real Handoff SDK adapter path ... with the
- * default suppression settings and confirm that the query starts and completes").
+ * Поведенческий smoke-тест ранее падавшего пути `/chat` — запрошен в
+ * ревью PR #162 («выполнить реальный путь адаптера Handoff SDK ... с
+ * default-настройками подавления и подтвердить, что query стартует и завершается»).
  *
- * It exercises the real adapter end to end (`createClaudeRuntimeAdapter().run`)
- * — `parseExecutionOptions` → version guard → `runClaudeRuntime` →
- * `buildClaudeQueryOptions` (which applies the default suppression
- * `settings.attribution = { commit: "", pr: "" }`) → Agent SDK `query` → stream.
- * A green result here proves the empty-attribution payload starts and completes
- * against the effective Claude Code binary, i.e. the HTTP 500 regression is gone.
+ * Прогоняет реальный адаптер end to end (`createClaudeRuntimeAdapter().run`):
+ * `parseExecutionOptions` → version guard → `runClaudeRuntime` →
+ * `buildClaudeQueryOptions` (применяет подавление по умолчанию
+ * `settings.attribution = { commit: "", pr: "" }`) → Agent SDK `query` → поток.
+ * Зелёный результат доказывает, что payload с пустым attribution стартует и завершается
+ * на фактическом бинарнике Claude Code — регрессия HTTP 500 ушла.
  *
- * Gated: requires a real, authenticated `claude` on PATH AND
- * `AIF_CLAUDE_INTEGRATION=1`. CI does not satisfy this, so the main suite stays
- * hermetic. Run locally with:
+ * Под флагом: требует реального аутентифицированного `claude` на PATH и
+ * `AIF_CLAUDE_INTEGRATION=1`. CI этому не удовлетворяет, поэтому основной
+ * набор остаётся герметичным. Локальный запуск:
  *   AIF_CLAUDE_INTEGRATION=1 npx vitest run claudeAttribution.integration.test.ts
  *
- * The previous version of this file asserted that a generated git commit lacked
- * a Co-Authored-By trailer. That assertion was non-discriminating: in the Agent
- * SDK + Bash-commit path the trailer is not injected regardless of attribution,
- * so the test passed identically for `{ attribution: { commit: "", pr: "" } }`,
- * `{}`, and no `settings` at all — it could not catch the regression. It is
- * replaced by this startup/completion smoke test, which directly observes the
- * failure mode (startup exit-code 1).
+ * Предыдущая версия файла утверждала, что сгенерированный git-коммит не содержит
+ * трейлер Co-Authored-By. Утверждение было неразличающим: в пути Agent
+ * SDK + Bash-commit трейлер не вставляется вне зависимости от attribution,
+ * и тест проходил одинаково для `{ attribution: { commit: "", pr: "" } }`,
+ * `{}` и без `settings` вообще — регрессию он поймать не мог. Заменён этим
+ * smoke-тестом старта/завершения, который напрямую наблюдает
+ * модуль отказа (exit-code 1 на старте).
  */
 const ENABLED = process.env.AIF_CLAUDE_INTEGRATION === "1";
 
@@ -47,12 +47,12 @@ const silentLogger = {
 
 describe.skipIf(!ENABLED)("Claude runtime — default suppression settings (integration)", () => {
   it("starts and completes a run under the default empty-attribution settings", async () => {
-    // The Claude Code binary the Agent SDK actually launches (its bundled
-    // native binary, whose version is declared in the SDK manifest) must be
-    // at/above the supported minimum — otherwise the version guard exercised
-    // by adapter.run rejects the run before it starts, which is itself the
-    // correct, non-opaque failure mode. Reading the manifest (not probing a
-    // `claude` on PATH) keeps this pre-check aligned with what query() runs.
+    // Бинарник Claude Code, который Agent SDK реально запускает (встроенный
+    // нативный, чья версия объявлена в манифесте SDK), обязан быть не ниже
+    // поддерживаемого минимума — иначе version guard, задействованный в
+    // adapter.run, отклонит запуск до старта, а это тоже корректный,
+    // непрозрачный режим отказа. Чтение манифеста (а не проба `claude` на
+    // PATH) держит пред-проверку в согласии с тем, что выполняет query().
     const version = readBundledClaudeVersion();
     expect(
       version && !isVersionBelowMin(version),
@@ -68,17 +68,17 @@ describe.skipIf(!ENABLED)("Claude runtime — default suppression settings (inte
         prompt: "Reply with exactly this and nothing else: OK",
         cwd,
         projectRoot: cwd,
-        // No `execution.hooks.settings` override → buildClaudeQueryOptions
-        // applies the default suppression { attribution: { commit: "", pr: "" } },
-        // the exact payload that crashed older Claude Code builds at startup.
+        // Нет override `execution.hooks.settings` → buildClaudeQueryOptions
+        // применит подавление по умолчанию { attribution: { commit: "", pr: "" } } —
+        // ровно тот payload, на котором старые сборки Claude Code падали на старте.
         execution: { hooks: { runTimeoutMs: 60_000 } },
         usageContext: TEST_USAGE_CONTEXT,
       };
 
       const result = await adapter.run(input);
 
-      // Completed with output — the run started (did not exit with code 1) and
-      // produced a result through the Agent SDK stream.
+      // Завершено с выводом — запуск стартовал (не вышел с кодом 1) и
+      // выдал результат через поток Agent SDK.
       expect(typeof result.outputText).toBe("string");
       expect((result.outputText ?? "").trim().length).toBeGreaterThan(0);
       const completed = (result.events ?? []).some((event) => event.type === "result:success");

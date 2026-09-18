@@ -145,7 +145,7 @@ describe("data layer", () => {
     seedProject();
   });
 
-  // ── Tasks CRUD ──────────────────────────────────────────
+  // ── CRUD задач ──────────────────────────────────────────
 
   describe("createTask", () => {
     it("creates a task with defaults", () => {
@@ -390,7 +390,7 @@ describe("data layer", () => {
     it("is mutually exclusive: a second claim while running returns false", () => {
       const t = createTask({ projectId: "proj-1", title: "T", description: "D" });
       expect(tryStartQaRun(t!.id)).toBe(true);
-      // Already running — the compare-and-set affects no rows.
+      // Уже выполняется — compare-and-set не затрагивает ни одной строки.
       expect(tryStartQaRun(t!.id)).toBe(false);
       expect(findTaskById(t!.id)!.qaStatus).toBe("running");
     });
@@ -429,7 +429,7 @@ describe("data layer", () => {
       const t = createTask({ projectId: "proj-1", title: "T", description: "D" });
       expect(tryStartQaRun(t!.id)).toBe(true);
       resetStaleQaRuns();
-      // Stale "running" released — the compare-and-set can win again.
+      // Устаревший "running" отпущен — compare-and-set снова может выиграть.
       expect(tryStartQaRun(t!.id)).toBe(true);
     });
   });
@@ -502,7 +502,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── toTaskResponse / parseTags edge cases ───────────────
+  // ── toTaskResponse / граничные случаи parseTags ─────────
 
   describe("toTaskResponse", () => {
     it("handles empty tags", () => {
@@ -608,7 +608,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Comments ────────────────────────────────────────────
+  // ── Комментарии ────────────────────────────────────────
 
   describe("comments", () => {
     it("creates and lists comments", () => {
@@ -681,7 +681,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Projects CRUD ───────────────────────────────────────
+  // ── CRUD проектов ─────────────────────────────────────
 
   describe("projects", () => {
     it("listProjects returns all projects", () => {
@@ -803,7 +803,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Activity / heartbeat / status ───────────────────────
+  // ── Активность / хартбит / статус ─────────────────────
 
   describe("appendTaskActivityLog", () => {
     it("appends to empty log", () => {
@@ -880,7 +880,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Token usage ─────────────────────────────────────────
+  // ── Расход токенов ───────────────────────────────────────
 
   describe("incrementTaskTokenUsage", () => {
     it("increments token usage", () => {
@@ -931,7 +931,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Coordinator candidate ────────────────────────────────
+  // ── Кандидат координатора ────────────────────────────────
 
   describe("findCoordinatorTaskCandidate", () => {
     it("finds plan-checker candidates", () => {
@@ -968,7 +968,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Batch task selection ─────────────────────────────────
+  // ── Пакетный выбор задач ─────────────────────────────────
 
   describe("findCoordinatorTaskCandidates", () => {
     it("returns multiple candidates up to limit", () => {
@@ -1076,7 +1076,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Task claiming ──────────────────────────────────────
+  // ── Захват задач ──────────────────────────────────────
 
   describe("claimTask", () => {
     it("claims an unlocked task", () => {
@@ -1307,7 +1307,7 @@ describe("data layer", () => {
       const future = new Date(Date.now() + 3600000).toISOString();
       const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-      // Lock not expired, but heartbeat dead and updatedAt stale → should release
+      // Блокировка не истекла, но хартбит мёртв, а updatedAt устарел → отпускать
       db.insert(tasks).values({
         id: "dead-hb", projectId: "proj-1", title: "Dead HB", status: "implementing",
         lockedBy: "crashed-coord", lockedUntil: future,
@@ -1324,10 +1324,10 @@ describe("data layer", () => {
       const future = new Date(Date.now() + 3600000).toISOString();
       const staleHeartbeat = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-      // Regression test: a dead process whose lock is still within TTL and whose
-      // updatedAt is kept fresh by unrelated writers (e.g. GitLab/GitHub sync)
-      // must still be recovered via the stale heartbeat. Previously the updatedAt
-      // guard blocked this until the lock TTL expired.
+      // Регрессия: мёртвый процесс, чья блокировка ещё в пределах TTL и у которого
+      // updatedAt поддерживается свежим посторонними записями (например, синхронизацией GitLab/GitHub),
+      // всё равно должен восстанавливаться по устаревшему хартбиту. Раньше защита по
+      // updatedAt блокировала это до истечения TTL блокировки.
       db.insert(tasks).values({
         id: "polluted-fresh-updated", projectId: "proj-1", title: "Polluted", status: "review",
         lockedBy: "crashed-coord", lockedUntil: future,
@@ -1344,7 +1344,7 @@ describe("data layer", () => {
       const future = new Date(Date.now() + 3600000).toISOString();
       const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-      // QA runs never write a heartbeat; their lock must live until TTL expiry.
+      // QA-запуски никогда не пишут хартбит; их блокировка должна жить до истечения TTL.
       db.insert(tasks).values({
         id: "qa-lock", projectId: "proj-1", title: "QA", status: "implementing",
         lockedBy: "qa:some-run-id", lockedUntil: future,
@@ -1403,7 +1403,7 @@ describe("data layer", () => {
 
       const task = findTaskById("renew-1")!;
       expect(task.lockedBy).toBe("coord-1");
-      // New expiry should be ~30 min from now, much later than the original 1 min
+      // Новый срок — примерно +30 минут от текущего момента, намного позже исходных 1 минуты
       const newExpiry = new Date(task.lockedUntil!).getTime();
       expect(newExpiry).toBeGreaterThan(Date.now() + 25 * 60 * 1000);
     });
@@ -1419,7 +1419,7 @@ describe("data layer", () => {
       renewTaskClaim("renew-other", "coord-2", 30 * 60 * 1000);
 
       const task = findTaskById("renew-other")!;
-      // Lock unchanged — still owned by coord-1 with original expiry
+      // Блокировка не изменилась — по-прежнему принадлежит coord-1 с прежним сроком
       expect(task.lockedBy).toBe("coord-1");
       expect(task.lockedUntil).toBe(soon);
     });
@@ -1438,7 +1438,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Roadmap alias ───────────────────────────────────────
+  // ── Алиас roadmap ───────────────────────────────────────
 
   describe("findTasksByRoadmapAlias", () => {
     it("finds tasks by roadmap alias", () => {
@@ -1462,7 +1462,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Search ────────────────────────────────────────────────
+  // ── Поиск ────────────────────────────────────────────────
 
   describe("searchTasks", () => {
     it("finds tasks by title", () => {
@@ -1513,7 +1513,7 @@ describe("data layer", () => {
     it("orders by updatedAt desc", () => {
       const t1 = createTask({ projectId: "proj-1", title: "Search order A", description: "" });
       const t2 = createTask({ projectId: "proj-1", title: "Search order B", description: "" });
-      // Manually set updatedAt to control ordering
+      // Вручную выставляем updatedAt, чтобы управлять порядком
       if (t1 && t2) {
         setTaskFields(t1.id, { updatedAt: "2026-01-01T00:00:00.000Z" });
         setTaskFields(t2.id, { updatedAt: "2026-01-02T00:00:00.000Z" });
@@ -1524,7 +1524,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Sync timestamps ───────────────────────────────────────
+  // ── Метки времени синхронизации ──────────────────────────
 
   describe("touchLastSyncedAt", () => {
     it("sets lastSyncedAt timestamp", () => {
@@ -1544,7 +1544,7 @@ describe("data layer", () => {
       touchLastSyncedAt(task!.id);
       const first = findTaskById(task!.id)!.lastSyncedAt;
 
-      // Small delay to ensure different timestamp
+      // Небольшая задержка, чтобы метка времени отличалась
       const later = new Date(Date.now() + 100).toISOString();
       setTaskFields(task!.id, { lastSyncedAt: later });
       const second = findTaskById(task!.id)!.lastSyncedAt;
@@ -1552,13 +1552,13 @@ describe("data layer", () => {
     });
   });
 
-  // ── Millisecond precision ─────────────────────────────────
+  // ── Миллисекундная точность ───────────────────────────────
 
   describe("millisecond timestamp precision", () => {
     it("createdAt has millisecond precision", () => {
       const task = createTask({ projectId: "proj-1", title: "Precision", description: "" });
       expect(task).toBeDefined();
-      // JS toISOString always includes milliseconds
+      // JS toISOString всегда включает миллисекунды
       expect(task!.createdAt).toMatch(/\.\d{3}Z$/);
     });
 
@@ -1570,7 +1570,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Paginated list ────────────────────────────────────────
+  // ── Постраничный список ────────────────────────────────────
 
   describe("listTasksPaginated", () => {
     it("returns paginated results with total", () => {
@@ -1637,7 +1637,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Paginated search ──────────────────────────────────────
+  // ── Постраничный поиск ──────────────────────────────────
 
   describe("searchTasksPaginated", () => {
     it("returns paginated search results", () => {
@@ -1664,7 +1664,7 @@ describe("data layer", () => {
     });
   });
 
-  // ── Scheduler queries ────────────────────────────────────
+  // ── Запросы планировщика ────────────────────────────────
 
   describe("scheduled tasks", () => {
     it("listDueScheduledTasks returns only due backlog tasks", () => {
@@ -1684,7 +1684,7 @@ describe("data layer", () => {
       const past = new Date(Date.now() - 60_000).toISOString();
       const t = createTask({ projectId: "proj-1", title: "Due paused", description: "", paused: true, scheduledAt: past });
       expect(t).toBeDefined();
-      // createTask path does not force paused=true into insert defaults — verify via setTaskFields
+      // Ветка createTask не проставляет paused=true в значениях по умолчанию вставки — проверяем через setTaskFields
       setTaskFields(t!.id, { paused: true, scheduledAt: past });
       const rows = listDueScheduledTasks(new Date().toISOString());
       expect(rows.find((r) => r.id === t!.id)).toBeUndefined();
@@ -1878,7 +1878,7 @@ describe("data layer", () => {
       const b = createTask({ projectId: "proj-1", title: "B", description: "" });
       const c = createTask({ projectId: "proj-1", title: "C", description: "" });
       const d = createTask({ projectId: "proj-1", title: "D", description: "" });
-      // a stays in backlog (source — doesn't count)
+      // a остаётся в backlog (исходный статус — не считается)
       updateTaskStatus(b!.id, "planning");
       updateTaskStatus(c!.id, "implementing");
       updateTaskStatus(d!.id, "done");
@@ -1947,8 +1947,8 @@ describe("data layer", () => {
     });
 
     it("hasActiveBranchBoundTasksForProject true for a queued backlog task that already has branchName", () => {
-      // replan can leave a branch-bound task in
-      // backlog briefly; serialization must already kick in.
+      // Перепланирование может кратковременно оставить задачу с веткой в
+      // backlog; сериализация обязана включаться уже тогда.
       const a = createTask({ projectId: "proj-1", title: "A", description: "" });
       setTaskFields(a!.id, { branchName: "feature/a-prepared" });
       expect(hasActiveBranchBoundTasksForProject("proj-1")).toBe(true);
@@ -2551,8 +2551,8 @@ describe("worktree reconciliation queries", () => {
   it("clears dangling VCS issue task links and keeps live ones", () => {
     const live = createTask({ projectId: "proj-1", title: "Live", description: "D" });
     const now = new Date().toISOString();
-    // FK enforcement is ON in tests, so disable it briefly to simulate the
-    // production drift this sweep repairs (a link pointing at a deleted task).
+    // В тестах контроль внешних ключей включён, поэтому кратко отключаем его,
+    // чтобы смоделировать продуктовый дрейф, который лечит эта сводка (ссылка на удалённую задачу).
     testDb.current.run(sql`PRAGMA foreign_keys = OFF`);
     try {
       testDb.current

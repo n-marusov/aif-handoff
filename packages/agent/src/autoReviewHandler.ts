@@ -1,6 +1,16 @@
 /**
- * Auto review gate handler — evaluates review comments in autoMode
- * and decides whether to accept, request rework, or stop at manual review.
+ * Обработчик Auto Review Gate для стадии Review.
+ *
+ * Модуль переводит результат reviewGate в доменное решение конвейера:
+ * accepted, rework_requested или manual_review_required.
+ *
+ * Инварианты:
+ * - null = gate неприменим (autoMode off или human-owned задача);
+ * - iteration считается с 1 и проверяется до ветки request_changes;
+ * - решение всегда материализуется в комментарий задачи и activity log.
+ *
+ * Потенциальное улучшение: вынести форматирование summary/activity в общий
+ * reporting-слой для единообразия gate-комментариев.
  */
 
 import { createTaskComment, findTaskById } from "@aif/data";
@@ -14,8 +24,11 @@ import {
 
 const log = logger("auto-review-handler");
 
+// Причина handoff объединяет причину reviewGate и локальное правило max_iterations.
 export type AutoReviewHandlerHandoffReason = ReviewGateManualHandoffReason | "max_iterations";
 
+// Результат gate задаёт явный маршрут координатора.
+// Для accepted autoReviewState очищается, чтобы не переносить старые finding'и.
 export type ReviewGateOutcome =
   | {
       status: "accepted";
@@ -29,6 +42,7 @@ export type ReviewGateOutcome =
       metrics: ReviewGateMetrics;
       autoReviewState: AutoReviewState;
     }
+  // Эскалация: автоматическая сходимость не достигнута, требуется ручное ревью.
   | {
       status: "manual_review_required";
       currentIteration: number;
@@ -37,11 +51,14 @@ export type ReviewGateOutcome =
       handoffReason: AutoReviewHandlerHandoffReason;
     };
 
+// Вход минимален: актуальное состояние задачи читается из БД внутри gate.
 interface AutoReviewInput {
   taskId: string;
   projectRoot: string;
 }
 
+// Summary-комментарий публикуется в историю задачи.
+// outcome в комментарии — отчётный термин, а не enum машинного решения.
 function buildSummaryComment(input: {
   outcome: "success" | "request_changes" | "manual_review_required";
   metrics: ReviewGateMetrics;
@@ -68,6 +85,7 @@ function buildSummaryComment(input: {
 
   lines.push("");
 
+  // Для success секция blocking findings не добавляется.
   if (input.outcome === "success") {
     lines.push("Review comments passed auto-gate; transitioning task to Done.");
     return lines.join("\n");
@@ -81,6 +99,7 @@ function buildSummaryComment(input: {
     lines.push("Automatic review found blocking issues. Returning task to implementing.");
   }
 
+  // Пустая строка нужна для корректного Markdown-рендеринга fixesMarkdown.
   lines.push("");
   lines.push("## Blocking Findings");
   lines.push(input.fixesMarkdown);
@@ -88,6 +107,7 @@ function buildSummaryComment(input: {
   return lines.join("\n");
 }
 
+// Activity-log формат: одна строка key=value для фильтрации и корреляции инцидентов.
 function buildActivityMessage(input: {
   outcome: "accepted" | "rework_requested" | "manual_review_required";
   metrics: ReviewGateMetrics;
@@ -115,15 +135,21 @@ function buildActivityMessage(input: {
 export async function handleAutoReviewGate(
   input: AutoReviewInput,
 ): Promise<ReviewGateOutcome | null> {
+  // Политика ревью и лимиты читаются единым snapshot на этот запуск handler.
   const env = getEnv();
+  // Повторное чтение задачи исключает stale state перед gate-решением.
   const refreshedTask = findTaskById(input.taskId);
+  // Gate не применяется к human-owned или non-autoMode задаче.
   if (!refreshedTask?.autoMode || refreshedTask.executionOwner === "human") {
     return null;
   }
 
+  // Итерация начинается с 1; значение рассчитывается до вызова reviewGate.
   const currentIteration = (refreshedTask.reviewIterationCount ?? 0) + 1;
+  // Приоритет лимита: task-level maxReviewIterations -> глобальный env.
   const maxIterations = refreshedTask.maxReviewIterations ?? env.AGENT_MAX_REVIEW_ITERATIONS;
 
+  // Старт gate логируется до оценки, чтобы видеть факт входа в критическую секцию.
   logActivity(
     input.taskId,
     "Agent",
@@ -136,9 +162,12 @@ export async function handleAutoReviewGate(
     reviewComments: refreshedTask.reviewComments,
     strategy: env.AGENT_AUTO_REVIEW_STRATEGY,
     iteration: currentIteration,
+    // previousFindings нужны для метрик сходимости между итерациями.
     previousFindings: refreshedTask.autoReviewState?.findings ?? [],
   });
 
+  // При success комментарий создаётся до возврата, чтобы переход в Done был объясним
+  // в истории задачи.
   if (reviewGate.status === "success") {
     createTaskComment({
       taskId: input.taskId,
@@ -172,6 +201,8 @@ export async function handleAutoReviewGate(
     };
   }
 
+  // max_iterations проверяется до общей ветки request_changes.
+  // Иначе конвейер может зациклиться на rework.
   if (reviewGate.status === "request_changes" && currentIteration >= maxIterations) {
     createTaskComment({
       taskId: input.taskId,
@@ -218,6 +249,8 @@ export async function handleAutoReviewGate(
     };
   }
 
+  // До достижения лимита задача возвращается в implementing
+  // с сохранением autoReviewState.
   if (reviewGate.status === "request_changes") {
     createTaskComment({
       taskId: input.taskId,
@@ -261,6 +294,8 @@ export async function handleAutoReviewGate(
     };
   }
 
+  // Хвостовая ветка обрабатывает ручной handoff.
+  // Явный fallback защищает от тихого пропуска при расширении статусов reviewGate.
   createTaskComment({
     taskId: input.taskId,
     author: "agent",

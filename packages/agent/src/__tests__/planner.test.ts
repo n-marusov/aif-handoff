@@ -514,7 +514,7 @@ describe("runPlanner comment selection", () => {
 
     expect(sharedBranch).toBe("main");
     expect(updatedTask?.branchName).toMatch(/^feature\/parallel-worktree-/);
-    // Branch-scoped path: project segment + branch segment, never the task id.
+    // Путь уровня ветки: сегмент проекта + сегмент ветки, никогда не id задачи.
     expect(updatedTask?.worktreePath).toContain("project-worktree");
     expect(updatedTask?.worktreePath).toContain("feature-parallel-worktree-");
     expect(updatedTask?.worktreePath).not.toContain("task-worktree-1");
@@ -545,7 +545,7 @@ describe("runPlanner comment selection", () => {
       cwd: projectRoot,
       stdio: "ignore",
     });
-    // Bind a feature branch then drift HEAD back to main.
+    // Привязываем feature-ветку, затем смещаем HEAD обратно на main.
     execFileSync("git", ["checkout", "-b", "feature/bound-fast"], {
       cwd: projectRoot,
       stdio: "ignore",
@@ -562,9 +562,9 @@ describe("runPlanner comment selection", () => {
         title: "Mode drift",
         description: "",
         status: "planning",
-        // FAST mode + persisted branchName = the dangerous case the previous
-        // gating broke: restore must still happen, otherwise the planner
-        // writes plan/log on whatever HEAD happens to be.
+        // FAST-режим + сохранённый branchName = опасный случай, который сломало
+        // прежнее гейтирование: восстановление всё равно должно происходить, иначе
+        // planner запишет план/лог туда, где окажется HEAD.
         plannerMode: "fast",
         useSubagents: false,
         branchName: "feature/bound-fast",
@@ -602,7 +602,7 @@ describe("runPlanner comment selection", () => {
       cwd: projectRoot,
       stdio: "ignore",
     });
-    // Pre-create the branch so drift test has something to drift AWAY from
+    // Заранее создаём ветку — тесту дрейфа нужно, ОТ чего смещаться
     execFileSync("git", ["checkout", "-b", "feature/some-drift"], {
       cwd: projectRoot,
       stdio: "ignore",
@@ -623,7 +623,7 @@ describe("runPlanner comment selection", () => {
       })
       .run();
 
-    // Simulate subagent switching HEAD away while "running"
+    // Симулируем переключение HEAD сабагентом в другую ветку во время его «работы»
     queryMock.mockReset();
     queryMock.mockImplementation(() => {
       execFileSync("git", ["checkout", "main"], { cwd: projectRoot, stdio: "ignore" });
@@ -798,7 +798,7 @@ describe("runPlanner stale plan cleanup", () => {
     expect(existsSync(planFilePath)).toBe(true);
     await runPlanner("task-stale-1", projectRoot);
 
-    // First-time planning: stale content should be replaced by the fresh subagent result.
+    // Первичное планирование: устаревшее содержимое должно замениться свежим результатом сабагента.
     expect(existsSync(planFilePath)).toBe(true);
     const content = readFileSync(planFilePath, "utf8");
     expect(content).toContain("## New Plan");
@@ -842,7 +842,7 @@ describe("runPlanner stale plan cleanup", () => {
     expect(existsSync(planFilePath)).toBe(true);
     await runPlanner("task-replan-stale", projectRoot);
 
-    // Replanning: stale file should NOT be deleted
+    // Перепланирование: устаревший файл НЕ должен удаляться
     expect(existsSync(planFilePath)).toBe(true);
     const content = readFileSync(planFilePath, "utf8");
     expect(content).toContain("Task 1: Create user model");
@@ -955,7 +955,7 @@ describe("runPlanner stale plan cleanup", () => {
       })
       .run();
 
-    // File doesn't exist — should not throw
+    // Файла не существует — бросать не должно
     await expect(runPlanner("task-no-file-1", projectRoot)).resolves.toBeUndefined();
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
@@ -989,7 +989,7 @@ describe("runPlanner stale plan cleanup", () => {
     expect(existsSync(planFilePath)).toBe(true);
     await runPlanner("task-fix-skip-1", projectRoot);
 
-    // isFix tasks skip the stale cleanup guard
+    // Задачи isFix пропускают защиту очистки устаревших планов
     expect(existsSync(planFilePath)).toBe(true);
     expect(queryMock).toHaveBeenCalledTimes(1);
   });

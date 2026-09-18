@@ -1,6 +1,14 @@
 /**
- * Per-task AbortController registry for concurrent coordinator stages.
- * Supports parallel task execution — each task gets its own controller.
+ * Реестр AbortController по задачам для параллельных стадий координатора.
+ *
+ * Один контроллер на задачу - обязательное условие: общий контроллер позволил бы
+ * отмене одной стадии погасить соседние, которые прямо сейчас пишут в свои
+ * репозитории. Реестр живёт в памяти процесса и не переживает перезапуск агента.
+ */
+
+/**
+ * Реестр AbortController по задачам для конкурентных стадий координатора.
+ * Поддерживает параллельное исполнение задач — у каждой свой контроллер.
  */
 
 import { releaseTaskClaim } from "@aif/data";
@@ -16,23 +24,28 @@ export function setActiveStageAbortController(taskId: string, abort: AbortContro
 }
 
 export function getActiveStageAbortController(taskId?: string): AbortController | null {
+  // При нескольких активных стадиях ответ без taskId неоднозначен - лучше null.
   if (taskId) return _activeAborts.get(taskId) ?? null;
-  // Backward compat: if only one active, return it
+  // Обратная совместимость: если активна только одна — вернуть её
   if (_activeAborts.size === 1) {
     return _activeAborts.values().next().value ?? null;
   }
   return null;
 }
 
-/** Abort all active stages and release their locks (used during shutdown). */
+/** Прерывает все активные стадии и отпускает их локи (используется при завершении). */
 export function abortAllActiveStages(): void {
   for (const [taskId, abort] of _activeAborts) {
+    // Повторный abort на уже отменённом сигнале безвреден, но пропускаем его
+    // явно, чтобы не плодить лишние события.
     if (!abort.signal.aborted) abort.abort();
+    // Снятие claim best-effort: при shutdown база может быть уже недоступна.
     try {
       releaseTaskClaim(taskId);
     } catch {
-      /* best-effort during shutdown */
+      /* best-effort при завершении */
     }
+    // Удаление текущего ключа во время обхода Map безопасно: итератор не сбивается.
     _activeAborts.delete(taskId);
   }
 }

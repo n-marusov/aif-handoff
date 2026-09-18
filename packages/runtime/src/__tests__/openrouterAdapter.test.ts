@@ -48,7 +48,7 @@ describe("OpenRouter runtime adapter", () => {
     ]);
   });
 
-  // --- Descriptor ---
+  // --- Дескриптор ---
 
   it("exposes openrouter descriptor and capabilities", () => {
     const adapter = createOpenRouterRuntimeAdapter();

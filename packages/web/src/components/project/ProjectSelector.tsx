@@ -304,8 +304,8 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
 
   const handleConnectGitHub = () => {
     if (!editingId || !githubRepository.trim() || !githubTokenEnvVar.trim()) return;
-    // Guard against pasting a token value into the env-var-name field. The API
-    // only accepts an env var name (GITHUB_*); a secret must live in .env.
+    // Защита от вставки значения токена в поле имени переменной окружения. API
+    // принимает только имя переменной (GITHUB_*); секрет должен лежать в .env.
     if (!/^GITHUB_[A-Z0-9_]+$/.test(githubTokenEnvVar.trim())) {
       toast("Enter the env variable name (e.g. GITHUB_TOKEN), not the token value", "error", 8000);
       return;
@@ -361,7 +361,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
         id: editingId,
         input: {
           repository: normalizeRepositoryPath(gitlabRepository),
-          // GIT_PROVIDER=gitlab mode always reads the token from GITLAB_TOKEN.
+          // Режим GIT_PROVIDER=gitlab всегда читает токен из GITLAB_TOKEN.
           tokenEnvVar: "GITLAB_TOKEN",
           enabled: true,
           eligibility: {
@@ -473,8 +473,8 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
         },
       );
     } else if (editingId) {
-      // Look up the project being edited, NOT the currently selected one —
-      // edit dialog can be opened for a non-selected project from the picker.
+      // Ищем редактируемый проект, а НЕ выбранный сейчас —
+      // диалог редактирования можно открыть для невыбранного проекта из пикера.
       const editingProject = projects?.find((p) => p.id === editingId);
       const previousAutoQueue = editingProject?.autoQueueMode ?? false;
       updateProject.mutate(

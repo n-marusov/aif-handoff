@@ -75,10 +75,10 @@ describe("fastFix service", () => {
 
     expect(updated).toBe("## Plan\n- Updated");
     expect(mockRunApiRuntimeOneShot).toHaveBeenCalledTimes(1);
-    // Usage is now persisted by the runtime registry wrapper via createDbUsageSink,
-    // so the only thing we verify at the service layer is that the call site
-    // tagged the run with the correct source — the sink test in the runtime
-    // package covers the recording path end-to-end.
+    // Usage теперь сохраняется обёрткой реестра runtime через createDbUsageSink,
+    // поэтому на слое сервиса проверяем только то, что место вызова
+    // пометило прогон верным источником — путь записи целиком покрыт тестом
+    // стока в пакете runtime.
     expect(mockRunApiRuntimeOneShot).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: "task-1",

@@ -55,15 +55,16 @@ export function useChat(
     useState<RuntimeLimitSnapshot | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
 
-  // Per-session streaming state: conversationId → streamKey (sessionId or conversationId)
+  // Состояние потокового ответа по сессиям: conversationId -> streamKey
+  // (sessionId или conversationId).
   const activeStreamsRef = useRef<Map<string, string>>(new Map());
-  // Per-session stream data: streamKey → state
+  // Данные потокового ответа по сессиям: streamKey -> state.
   const sessionStreamsRef = useRef<Map<string, SessionStreamState>>(new Map());
-  // Track conversationId used when no session exists (for matching events)
+  // Храним conversationId для случая без sessionId (для сопоставления событий).
   const conversationIdForNoSession = useRef<string | null>(null);
-  // Deduplicate WS and HTTP error handling for the same conversation.
+  // Исключаем двойную обработку одной и той же ошибки из WS и HTTP.
   const handledErrorConversationsRef = useRef<Set<string>>(new Set());
-  // Coordinate HTTP fallback and forced-stop timeouts per conversation.
+  // Таймеры HTTP-резерва и принудительной остановки по каждому conversationId.
   const fallbackTimersRef = useRef<Map<string, number>>(new Map());
   const forcedStopTimersRef = useRef<Map<string, number>>(new Map());
 
@@ -91,7 +92,7 @@ export function useChat(
     }
   }, [clearConversationTimers]);
 
-  // Check if a specific session is currently streaming
+  // Проверяет, идёт ли сейчас потоковый ответ для указанной сессии.
   const isSessionStreaming = useCallback((sid: string | null) => {
     if (!sid) return false;
     for (const [, streamSid] of activeStreamsRef.current) {
@@ -100,11 +101,9 @@ export function useChat(
     return false;
   }, []);
 
-  // True when `streamKey` belongs to the session the user is currently viewing.
-  // Any `setIsStreaming` / `setChatErrorCode` / `setMessages` call that ends a
-  // run must be gated by this — otherwise a background session terminating
-  // would wipe the Stop button / banner / transcript of an unrelated session
-  // the user has already switched to.
+  // true, если `streamKey` относится к сессии, которую пользователь видит сейчас.
+  // Все завершения потока должны проходить через эту проверку,
+  // иначе фоновая сессия может испортить состояние текущей вкладки.
   const isCurrentStream = useCallback((streamKey: string) => {
     return (
       currentSessionIdRef.current === streamKey ||
@@ -113,7 +112,7 @@ export function useChat(
   }, []);
 
   const prevSessionIdRef = useRef<string | null>(null);
-  // Load messages when sessionId changes
+  // Загружает сообщения при смене sessionId.
   useEffect(() => {
     const prevSessionId = prevSessionIdRef.current;
     prevSessionIdRef.current = sessionId;
@@ -137,7 +136,7 @@ export function useChat(
 
     currentSessionIdRef.current = sessionId;
 
-    // If this session is actively streaming, restore its in-flight messages
+    // Если в сессии идёт поток, восстанавливаем промежуточные сообщения.
     const streamState = sessionStreamsRef.current.get(sessionId);
     if (streamState) {
       console.debug("[useChat] Restoring streaming session %s", sessionId);
@@ -149,7 +148,7 @@ export function useChat(
       return;
     }
 
-    // Otherwise load from server — clear stale content and show spinner
+    // Иначе загружаем с сервера: очищаем устаревшие данные и показываем индикатор загрузки.
     queueMicrotask(() => {
       setIsStreaming(false);
       setMessages([]);
@@ -191,7 +190,7 @@ export function useChat(
       });
   }, [projectId, sessionId, sessionRuntimeProfileId, isSessionStreaming]);
 
-  // Listen for chat stream events dispatched by useWebSocket
+  // Подписка на потоковые события чата, отправляемые из useWebSocket.
   useEffect(() => {
     const handleToken = (e: Event) => {
       const { conversationId, token } = (e as CustomEvent<ChatStreamTokenPayload>).detail;
@@ -258,12 +257,9 @@ export function useChat(
         setIsStreaming(false);
         setChatErrorCode(code ?? null);
         setChatRuntimeLimitSnapshot(runtimeLimitSnapshot ?? null);
-        // User-initiated aborts surface as a banner via chatErrorCode, not a
-        // phantom assistant bubble. The bubble was misleading because only
-        // partial streamed text (if any) is persisted to DB — the "Chat run
-        // aborted by user" text disappeared after reload, and the partial
-        // reply took its place. Any partial assistant content is already
-        // visible in the transcript via handleToken.
+        // Пользовательский abort показываем через banner (chatErrorCode),
+        // без искусственного сообщения ассистента. Частичный текст уже виден
+        // в транскрипте через handleToken.
         if (code !== "aborted") {
           setMessages((prev) => [
             ...prev,
@@ -293,7 +289,7 @@ export function useChat(
         console.debug("[useChat] No clientId available, proceeding with HTTP fallback");
       }
 
-      // When runtime changed, force a new session instead of resuming the old one
+      // При смене runtime запускаем новую сессию вместо продолжения старой.
       if (forceNewSession) {
         currentSessionIdRef.current = null;
       }
@@ -302,7 +298,8 @@ export function useChat(
       const effectiveSessionId = forceNewSession
         ? null
         : (sessionId ?? currentSessionIdRef.current);
-      // Use sessionId or conversationId as stream key (for sessions not yet created)
+      // В качестве stream key используем sessionId или conversationId
+      // (если сессия ещё не создана).
       const streamKey = effectiveSessionId ?? newConversationId;
 
       const messageAttachments: ChatMessageAttachment[] | undefined = attachments?.map((a) => ({
@@ -315,10 +312,10 @@ export function useChat(
         content: text.trim(),
         ...(messageAttachments?.length ? { attachments: messageAttachments } : {}),
       };
-      // When forcing a new session, start fresh — don't carry over old messages
+      // При принудительном запуске новой сессии не переносим старые сообщения.
       const newMessages = forceNewSession ? [userMessage] : [...messages, userMessage];
 
-      // Register active stream
+      // Регистрируем активный поток ответа.
       if (!effectiveSessionId) {
         conversationIdForNoSession.current = newConversationId;
       }
@@ -357,8 +354,8 @@ export function useChat(
 
         if (result.sessionId) {
           const resolvedId = result.sessionId;
-          // Move stream-scoped state to the resolved key regardless of which
-          // session the user is viewing — WS events still need to match.
+          // Переносим состояние потока на подтверждённый ключ,
+          // чтобы входящие WS-события продолжали корректно сопоставляться.
           if (streamKey !== resolvedId) {
             const state = sessionStreamsRef.current.get(streamKey);
             if (state) {
@@ -368,29 +365,29 @@ export function useChat(
             activeStreamsRef.current.set(newConversationId, resolvedId);
           }
 
-          // Only rebind the viewed session to the resolved id when the user is
-          // still on this stream. Otherwise a background run finishing would
-          // silently yank their view back to the originating session.
+          // Перепривязываем отображаемую сессию только если пользователь
+          // всё ещё в этом потоке, иначе фоновое завершение уведёт его на другую сессию.
           if (isCurrentStream(streamKey)) {
             currentSessionIdRef.current = resolvedId;
             if (resolvedId !== effectiveSessionId) {
               onSessionResolved?.(resolvedId);
             }
           }
-          // Sidebar notification is view-agnostic.
+          // Обновление боковой панели не зависит от текущего просмотра.
           window.dispatchEvent(
             new CustomEvent("chat:session_created", { detail: { id: resolvedId } }),
           );
         }
 
-        // Update user message attachments with server-resolved paths (for download links)
+        // Обновляем вложения пользовательского сообщения путями,
+        // подтверждёнными сервером (для ссылок скачивания).
         if (result.attachments?.length) {
           const resolvedAttachments = result.attachments;
           const activeStreamKey = activeStreamsRef.current.get(newConversationId) ?? streamKey;
           const state = sessionStreamsRef.current.get(activeStreamKey);
           if (state) {
-            // Also update in-flight stream state so restoring the session
-            // after a switch-away keeps the upgraded attachments.
+            // Также обновляем промежуточное состояние потока,
+            // чтобы при возврате в сессию вложения остались актуальными.
             state.messages = state.messages.map((m) =>
               m.role === "user" &&
               m.content === userMessage.content &&
@@ -435,9 +432,8 @@ export function useChat(
             state.messages = [...state.messages, { role: "assistant", content: assistantMessage }];
             activeStreamsRef.current.delete(newConversationId);
             sessionStreamsRef.current.delete(activeStreamKey);
-            // Only mutate UI state when the viewed session owns this stream.
-            // Otherwise a background session finishing would set the active
-            // session's transcript to someone else's messages.
+            // Меняем UI только для просматриваемой сессии,
+            // иначе фоновая сессия может подменить текущий транскрипт.
             if (isCurrentStream(activeStreamKey)) {
               setMessages(state.messages);
               setIsStreaming(false);
@@ -488,11 +484,9 @@ export function useChat(
             : null;
         const isAbortedError = abortData?.code === "aborted";
 
-        // If the server aborted the run but already created a DB session, promote
-        // it so the fresh "new chat" doesn't lose its thread in the sidebar.
-        // Only switch the viewed session when the user is still on this stream —
-        // otherwise a background abort would yank them away from the session
-        // they're currently reading.
+        // Если сервер прервал запуск, но уже создал сессию в БД,
+        // продвигаем её в интерфейс, чтобы новая ветка чата не потерялась.
+        // Переключение видимой сессии выполняется только для текущего потока.
         if (isAbortedError && abortData?.sessionId) {
           const resolvedId = abortData.sessionId;
           const shouldPromoteView = isCurrentStream(streamKey);
@@ -510,7 +504,7 @@ export function useChat(
               onSessionResolved?.(resolvedId);
             }
           }
-          // Sidebar update is view-agnostic — always surface the new session.
+          // Боковая панель обновляется всегда, независимо от текущего просмотра.
           window.dispatchEvent(
             new CustomEvent("chat:session_created", { detail: { id: resolvedId } }),
           );
@@ -523,16 +517,15 @@ export function useChat(
         const shouldRollbackOptimisticFirstTurn =
           isAbortedError && !abortData?.sessionId && !effectiveSessionId;
 
-        // On abort, apply server-resolved data to the stream-scoped state before
-        // deleting it. Guards below then decide whether to mirror the changes
-        // into React state for the viewed session.
+        // При abort сначала переносим серверные данные в состояние потока,
+        // затем удаляем поток и отдельно решаем, отражать ли изменения в React state.
         let patchedUserAttachments: ChatMessageAttachment[] | undefined;
         let appendedPartialAssistant: string | null = null;
         if (isAbortedError) {
           if (abortData?.attachments?.length) {
             const resolvedAttachments = abortData.attachments;
-            // Patch in-flight stream state only when it survived the WS race —
-            // needed so a later session switch restores the upgraded chips.
+            // Обновляем промежуточное состояние потока только если оно ещё живо,
+            // чтобы при позднем переключении сессии восстановить обновлённые вложения.
             if (state) {
               state.messages = state.messages.map((m) =>
                 m.role === "user" &&
@@ -543,9 +536,8 @@ export function useChat(
                   : m,
               );
             }
-            // Always mirror to React state: if WS `chat:error` raced ahead and
-            // cleared the stream state, the bubble would otherwise stay without
-            // its download link until the user reloads the session.
+            // Всегда дублируем обновление в React state: если WS `chat:error`
+            // уже очистил поток, без этого у сообщения не появится ссылка скачивания.
             patchedUserAttachments = resolvedAttachments;
           }
           if (
@@ -566,14 +558,13 @@ export function useChat(
         sessionStreamsRef.current.delete(activeStreamKey);
 
         const wsHandled = handledErrorConversationsRef.current.has(newConversationId);
-        // All UI state mutations below end the run for the viewed session —
-        // gate them on isCurrentStream so a background conversation terminating
-        // can't hide Stop / flip the banner / inject messages into session B
-        // while the user is watching it.
+        // Ниже идут изменения UI, завершающие запуск.
+        // Они применяются только к текущему потоку, чтобы фоновые завершения
+        // не ломали видимую пользователю сессию.
         if (isCurrentStream(activeStreamKey)) {
           if (shouldRollbackOptimisticFirstTurn) {
-            // First message in a brand-new chat was never persisted server-side.
-            // Roll back the optimistic bubble to avoid an orphan transcript.
+            // Первое сообщение в новом чате ещё не было сохранено сервером.
+            // Откатываем оптимистичную вставку, чтобы не оставить сиротский транскрипт.
             setMessages([]);
             conversationIdForNoSession.current = null;
           } else {
@@ -597,7 +588,7 @@ export function useChat(
             abortData?.runtimeLimitSnapshot ?? errorData?.runtimeLimitSnapshot ?? null,
           );
           if (isAbortedError) {
-            // Abort is surfaced via the banner only — no phantom bubble.
+            // Abort показываем только через banner, без искусственного сообщения.
             setChatErrorCode("aborted");
           } else if (!errorHandled && !wsHandled) {
             const message =
@@ -623,9 +614,9 @@ export function useChat(
   );
 
   const abortStream = useCallback(async () => {
-    // Pick the conversation whose streamKey matches the currently viewed session
-    // (or the pending new-chat conversation), so switching sessions while
-    // multiple runs are in flight doesn't abort the wrong one.
+    // Выбираем conversationId по streamKey текущей видимой сессии
+    // (или ожидаемой новой), чтобы при параллельных запусках
+    // не прервать чужой поток.
     const targetKey = currentSessionIdRef.current ?? conversationIdForNoSession.current;
     if (!targetKey) return;
     let conversationId: string | null = null;

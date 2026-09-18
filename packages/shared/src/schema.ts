@@ -1,3 +1,19 @@
+// Схема базы данных (SQLite через drizzle-orm).
+//
+// Здесь описаны все таблицы приложения и типы строк, выведенные из них. Схема -
+// источник истины по структуре хранения: миграции в db.ts приводят уже существующие
+// базы к этому виду, а слой доступа (@aif/data) строит на ней запросы.
+//
+// Соглашения:
+// - имена колонок в базе в snake_case, поля объектов - в camelCase;
+// - идентификаторы - UUID, генерируются приложением, а не базой;
+// - временные метки - строки ISO-8601 в UTC;
+// - структурированные данные (вложения, снимки, состояния) лежат JSON-текстом в
+//   колонках с суффиксом Json: отдельного типа JSON у SQLite нет.
+//
+// Внешние ключи описаны обычными текстовыми колонками: SQLite не форсирует их по
+// умолчанию, поэтому целостность обеспечивают код и триггеры каскадного удаления.
+
 import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type {
@@ -10,6 +26,8 @@ import type {
   TaskStatus,
 } from "./types.js";
 
+// Проект: корневой каталог на диске плюс настройки автоматизации (параллельное
+// исполнение, профили рантайма по умолчанию, привязка к VCS).
 export const projects = sqliteTable("projects", {
   id: text("id")
     .primaryKey()
@@ -43,6 +61,8 @@ export const projects = sqliteTable("projects", {
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
 
+// Глобальные настройки приложения. Таблица-синглтон: в ней всегда ровно одна строка,
+// поэтому чтение и обновление не требуют идентификатора.
 export const appSettings = sqliteTable("app_settings", {
   id: integer("id").primaryKey().notNull().default(1),
   defaultTaskRuntimeProfileId: text("default_task_runtime_profile_id"),
@@ -60,6 +80,9 @@ export const appSettings = sqliteTable("app_settings", {
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type NewAppSettingsRow = typeof appSettings.$inferInsert;
 
+// Участники (режим Participants Mode): учётные записи, роли и признак активности.
+// Имя хранится в двух видах - исходное и нормализованное, чтобы проверять
+// уникальность без учёта регистра.
 export const participants = sqliteTable("participants", {
   id: text("id")
     .primaryKey()
@@ -82,6 +105,8 @@ export const participants = sqliteTable("participants", {
 export type ParticipantRow = typeof participants.$inferSelect;
 export type NewParticipantRow = typeof participants.$inferInsert;
 
+// Сессии участников. В базе лежит дайджест токена, а не сам токен: утечка таблицы не
+// даёт возможности войти в систему. CSRF-секрет привязан к сессии.
 export const participantSessions = sqliteTable("participant_sessions", {
   id: text("id")
     .primaryKey()
@@ -102,6 +127,11 @@ export const participantSessions = sqliteTable("participant_sessions", {
 export type ParticipantSessionRow = typeof participantSessions.$inferSelect;
 export type NewParticipantSessionRow = typeof participantSessions.$inferInsert;
 
+// Задачи - центральная таблица. Одна строка содержит и бизнес-поля (заголовок, план,
+// статус), и служебные: прогресс этапа, блокировки параллельного исполнения,
+// выбранный рантайм, состояние гейтов автоматизации. Флаги режима дублируются здесь
+// на момент запуска задачи, чтобы изменение настроек проекта не меняло ход уже
+// начатой работы.
 export const tasks = sqliteTable("tasks", {
   id: text("id")
     .primaryKey()
@@ -111,6 +141,9 @@ export const tasks = sqliteTable("tasks", {
   description: text("description").notNull().default(""),
   attachments: text("attachments").notNull().default("[]"),
   autoMode: integer("auto_mode", { mode: "boolean" }).notNull().default(true),
+  // Владелец задачи и ревизия владения. Ревизия увеличивается при каждой передаче
+  // владения и служит оптимистичной проверкой: исполнитель меняет задачу только
+  // зная актуальную ревизию, иначе он работал бы по устаревшему состоянию.
   executionOwner: text("execution_owner").$type<ExecutionOwner>().notNull().default("ai"),
   ownershipRevision: integer("ownership_revision").notNull().default(0),
   isFix: integer("is_fix", { mode: "boolean" }).notNull().default(false),
@@ -132,12 +165,16 @@ export const tasks = sqliteTable("tasks", {
     .default("idle"),
   status: text("status").$type<TaskStatus>().notNull().default("backlog"),
   priority: integer("priority").notNull().default(0),
+  // Разрежённая позиция в колонке: шаг 1000 оставляет место для вставки между соседями
+  // без переписывания всей колонки.
   position: real("position").notNull().default(1000.0),
   plan: text("plan"),
   implementationLog: text("implementation_log"),
   reviewComments: text("review_comments"),
   agentActivityLog: text("agent_activity_log"),
   blockedReason: text("blocked_reason"),
+  // Статус, из которого задача была заблокирована: после разблокировки возврат идёт
+  // именно туда, а не в начало цикла.
   blockedFromStatus: text("blocked_from_status").$type<TaskStatus | null>(),
   retryAfter: text("retry_after"),
   retryCount: integer("retry_count").notNull().default(0),
@@ -153,6 +190,7 @@ export const tasks = sqliteTable("tasks", {
   manualReviewRequired: integer("manual_review_required", { mode: "boolean" })
     .notNull()
     .default(false),
+  // Снимок состояния авто-ревью: стратегия, число попыток и найденные замечания.
   autoReviewStateJson: text("auto_review_state_json"),
   paused: integer("paused", { mode: "boolean" }).notNull().default(false),
   lastHeartbeatAt: text("last_heartbeat_at"),
@@ -162,11 +200,15 @@ export const tasks = sqliteTable("tasks", {
   runtimeProfileId: text("runtime_profile_id"),
   modelOverride: text("model_override"),
   runtimeOptionsJson: text("runtime_options_json"),
+  // Идентификатор сессии рантайма и статус, под который она поднята. Нужны, чтобы
+  // продолжить прерванный этап в той же сессии, а не начинать работу заново.
   sessionId: text("session_id"),
   activeRuntimeStatus: text("active_runtime_status").$type<TaskStatus | null>(),
   activeRuntimeSelectionJson: text("active_runtime_selection_json"),
   runtimeLimitSnapshotJson: text("runtime_limit_snapshot_json"),
   runtimeLimitUpdatedAt: text("runtime_limit_updated_at"),
+  // Блокировка для параллельного исполнения: задачу захватывает один воркер, а
+  // lockedUntil не даёт зависшей блокировке остаться навсегда.
   lockedBy: text("locked_by"),
   lockedUntil: text("locked_until"),
   scheduledAt: text("scheduled_at"),
@@ -177,11 +219,14 @@ export const tasks = sqliteTable("tasks", {
   commitSha: text("commit_sha"),
   autoQueueCommitError: text("auto_queue_commit_error"),
   autoQueueCommitCompletedAt: text("auto_queue_commit_completed_at"),
+  // Состояние гейта ревью плана: план публикуется отдельным PR/MR и ждёт решения
+  // человека, поэтому прогресс фиксируется здесь, а не только в статусе задачи.
   planReviewState: text("plan_review_state").$type<PlanReviewState | null>(),
   planReviewCommitSha: text("plan_review_commit_sha"),
   planReviewPublishedAt: text("plan_review_published_at"),
   planReviewApprovedAt: text("plan_review_approved_at"),
   planReviewFeedback: text("plan_review_feedback"),
+  // Время ставит база, а не приложение: единый источник времени для всех процессов.
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
@@ -190,9 +235,14 @@ export const tasks = sqliteTable("tasks", {
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
 });
 
+// Типы строк выводятся из таблиц: Row описывает прочитанную строку, NewRow - данные для
+// вставки, где поля со значением по умолчанию становятся необязательными. Приём
+// повторяется для каждой таблицы и не требует ручной синхронизации с колонками.
 export type TaskRow = typeof tasks.$inferSelect;
 export type NewTaskRow = typeof tasks.$inferInsert;
 
+// Комментарии к задачам. Вложения лежат JSON-текстом в отдельной колонке: у SQLite
+// нет отдельного типа для списков.
 export const taskComments = sqliteTable("task_comments", {
   id: text("id")
     .primaryKey()
@@ -212,6 +262,8 @@ export const taskComments = sqliteTable("task_comments", {
 export type TaskCommentRow = typeof taskComments.$inferSelect;
 export type NewTaskCommentRow = typeof taskComments.$inferInsert;
 
+// Назначения участников на задачи. Составной первичный ключ запрещает дублирование
+// пары задача-участник, а признак active позволяет снять назначение, не теряя историю.
 export const taskAssignments = sqliteTable(
   "task_assignments",
   {
@@ -234,6 +286,8 @@ export const taskAssignments = sqliteTable(
 export type TaskAssignmentRow = typeof taskAssignments.$inferSelect;
 export type NewTaskAssignmentRow = typeof taskAssignments.$inferInsert;
 
+// История исполнителей по ревизиям владения: кто и на какой ревизии получил задачу.
+// Вместе с журналом аудита это след, по которому восстанавливается картина передач.
 export const taskExecutorHistory = sqliteTable("task_executor_history", {
   id: text("id")
     .primaryKey()
@@ -256,6 +310,9 @@ export const taskExecutorHistory = sqliteTable("task_executor_history", {
 export type TaskExecutorHistoryRow = typeof taskExecutorHistory.$inferSelect;
 export type NewTaskExecutorHistoryRow = typeof taskExecutorHistory.$inferInsert;
 
+// Журнал аудита: append-only таблица событий со снимками состояния задачи. Снимки
+// денормализованы намеренно - история должна читаться без обращения к живым таблицам,
+// которые могли измениться или быть удалены.
 export const auditEvents = sqliteTable("audit_events", {
   id: text("id")
     .primaryKey()
@@ -283,6 +340,8 @@ export const auditEvents = sqliteTable("audit_events", {
 export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NewAuditEventRow = typeof auditEvents.$inferInsert;
 
+// Связь проекта с репозиторием GitHub: адрес, состояние подготовки и синхронизации.
+// Одна строка на проект в рамках провайдера.
 export const githubRepositories = sqliteTable("github_repositories", {
   projectId: text("project_id")
     .primaryKey()
@@ -308,6 +367,9 @@ export const githubRepositories = sqliteTable("github_repositories", {
 export type GitHubRepositoryRow = typeof githubRepositories.$inferSelect;
 export type NewGitHubRepositoryRow = typeof githubRepositories.$inferInsert;
 
+// Связь задачи с issue и pull request на GitHub: номера, состояние проверок, состояние
+// ревью и отметка последнего обработанного комментария ревью (защита от повторной
+// обработки одного и того же решения).
 export const githubIssues = sqliteTable(
   "github_issues",
   {
@@ -346,6 +408,8 @@ export const githubIssues = sqliteTable(
 export type GitHubIssueRow = typeof githubIssues.$inferSelect;
 export type NewGitHubIssueRow = typeof githubIssues.$inferInsert;
 
+// Зеркало githubRepositories для GitLab: та же структура и те же инварианты, чтобы код
+// обоих провайдеров оставался симметричным.
 export const gitlabRepositories = sqliteTable("gitlab_repositories", {
   projectId: text("project_id")
     .primaryKey()
@@ -371,6 +435,7 @@ export const gitlabRepositories = sqliteTable("gitlab_repositories", {
 export type GitLabRepositoryRow = typeof gitlabRepositories.$inferSelect;
 export type NewGitLabRepositoryRow = typeof gitlabRepositories.$inferInsert;
 
+// Зеркало githubIssues для GitLab: issue плюс merge request.
 export const gitlabIssues = sqliteTable(
   "gitlab_issues",
   {
@@ -409,6 +474,9 @@ export const gitlabIssues = sqliteTable(
 export type GitLabIssueRow = typeof gitlabIssues.$inferSelect;
 export type NewGitLabIssueRow = typeof gitlabIssues.$inferInsert;
 
+// Профили рантайма: рантайм, провайдер, транспорт, модель и заголовки запросов. Профиль
+// принадлежит проекту или является глобальным; снимок лимитов хранится здесь же,
+// чтобы интерфейс показывал остаток без обращения к провайдеру.
 export const runtimeProfiles = sqliteTable("runtime_profiles", {
   id: text("id")
     .primaryKey()
@@ -437,6 +505,9 @@ export const runtimeProfiles = sqliteTable("runtime_profiles", {
 export type RuntimeProfileRow = typeof runtimeProfiles.$inferSelect;
 export type NewRuntimeProfileRow = typeof runtimeProfiles.$inferInsert;
 
+// Чат-сессии: переписка пользователя с рантаймом вне контекста задачи. Сессия
+// привязана к профилю рантайма и может нести идентификатор сессии провайдера
+// для продолжения диалога после перезапуска.
 export const chatSessions = sqliteTable("chat_sessions", {
   id: text("id")
     .primaryKey()
@@ -461,6 +532,7 @@ export const chatSessions = sqliteTable("chat_sessions", {
 export type ChatSessionRow = typeof chatSessions.$inferSelect;
 export type NewChatSessionRow = typeof chatSessions.$inferInsert;
 
+// Сообщения чат-сессии в порядке добавления. Вложения - JSON-текст.
 export const chatMessages = sqliteTable("chat_messages", {
   id: text("id")
     .primaryKey()
@@ -478,13 +550,14 @@ export type ChatMessageRow = typeof chatMessages.$inferSelect;
 export type NewChatMessageRow = typeof chatMessages.$inferInsert;
 
 /**
- * Append-only token usage log. Every successful LLM call that flows through
- * the runtime registry wrapper produces one row here. Per-entity aggregate
- * counters (on tasks / projects / chat_sessions) are updated in the same
- * transaction so reads stay cheap, but this table is the source of truth for
- * auditing and per-source breakdowns. Scope fields are nullable — a chat run
- * has a `chat_session_id` but no `task_id`, a subagent run has `task_id` but
- * no `chat_session_id`, a commit run has only `project_id`, and so on.
+ * Журнал расхода токенов только с дозаписью. Каждый успешный вызов LLM,
+ * проходящий через обёртку реестра runtime, оставляет здесь одну строку.
+ * Агрегатные счётчики по сущностям (в tasks / projects / chat_sessions)
+ * обновляются в той же транзакции, чтобы чтения оставались дешёвыми, но
+ * источником истины для аудита и разбивки по источникам является эта таблица.
+ * Поля области могут быть null: у запуска чата есть `chat_session_id`, но нет
+ * `task_id`, у запуска сабагента есть `task_id`, но нет `chat_session_id`, у
+ * коммита — только `project_id`, и так далее.
  */
 export const usageEvents = sqliteTable("usage_events", {
   id: text("id")
@@ -515,9 +588,9 @@ export type NewUsageEventRow = typeof usageEvents.$inferInsert;
 export type RuntimeWarmupSessionStatus = "creating" | "ready" | "failed" | "cleared" | "expired";
 
 /**
- * Reusable seed sessions created ahead of task execution. A ready row can be
- * forked by compatible runtimes until its TTL expires or a newer warmup
- * clears it for the same runtime/profile/model scope.
+ * Переиспользуемые стартовые сессии, создаваемые до начала выполнения задачи.
+ * Готовую строку могут форкнуть совместимые runtime, пока не истечёт её TTL
+ * или пока более новый разогрев не очистит её в той же области runtime/профиля/модели.
  */
 export const runtimeWarmupSessions = sqliteTable("runtime_warmup_sessions", {
   id: text("id")
@@ -547,8 +620,8 @@ export type RuntimeWarmupSessionRow = typeof runtimeWarmupSessions.$inferSelect;
 export type NewRuntimeWarmupSessionRow = typeof runtimeWarmupSessions.$inferInsert;
 
 /**
- * Rebuildable Codex session index used by hot request paths.
- * Source of truth stays on disk (~/.codex/sessions/*.jsonl).
+ * Восстанавливаемый индекс сессий Codex для горячих путей запросов.
+ * Источником истины остаются файлы на диске (~/.codex/sessions/*.jsonl).
  */
 export const codexSessions = sqliteTable("codex_sessions", {
   sessionId: text("session_id").primaryKey(),
@@ -575,7 +648,7 @@ export type CodexSessionRow = typeof codexSessions.$inferSelect;
 export type NewCodexSessionRow = typeof codexSessions.$inferInsert;
 
 /**
- * Tracks file-level dirtiness/cursors for Codex session reconcile passes.
+ * Отслеживает «грязность» и курсоры на уровне файлов для проходов сверки сессий Codex.
  */
 export const codexSessionFiles = sqliteTable("codex_session_files", {
   filePath: text("file_path").primaryKey(),
@@ -599,7 +672,7 @@ export type CodexSessionFileRow = typeof codexSessionFiles.$inferSelect;
 export type NewCodexSessionFileRow = typeof codexSessionFiles.$inferInsert;
 
 /**
- * Latest known Codex usage-limit snapshot per account/project/limit scope.
+ * Последний известный снапшот лимитов использования Codex по области аккаунт/проект/лимит.
  */
 export const codexLimitHeads = sqliteTable("codex_limit_heads", {
   headKey: text("head_key").primaryKey(),
@@ -624,7 +697,7 @@ export type CodexLimitHeadRow = typeof codexLimitHeads.$inferSelect;
 export type NewCodexLimitHeadRow = typeof codexLimitHeads.$inferInsert;
 
 /**
- * Bounded recent Codex limit snapshots used for diagnostics/history.
+ * Ограниченный набор последних снапшотов лимитов Codex для диагностики и истории.
  */
 export const codexLimitHistory = sqliteTable("codex_limit_history", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -646,7 +719,7 @@ export type CodexLimitHistoryRow = typeof codexLimitHistory.$inferSelect;
 export type NewCodexLimitHistoryRow = typeof codexLimitHistory.$inferInsert;
 
 /**
- * Generic index cursor/watermark state for Codex reconcile pipeline.
+ * Общее состояние курсора/водораздела индекса для конвейера сверки Codex.
  */
 export const codexIndexCursors = sqliteTable("codex_index_cursors", {
   cursorKey: text("cursor_key").primaryKey(),

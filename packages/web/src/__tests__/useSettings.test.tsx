@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { PropsWithChildren } from "react";
 
-// Mock api module
+// Мок модуля api
 const mockGetSettings = vi.fn();
 const mockGetProjectDefaults = vi.fn();
 
@@ -101,7 +101,7 @@ describe("useProjectDefaults", () => {
       wrapper: createWrapper(),
     });
 
-    // Give it a tick to ensure no fetch is triggered
+    // Даём тик, чтобы убедиться: запрос не запускается
     await new Promise((r) => setTimeout(r, 50));
     expect(result.current.isFetching).toBe(false);
     expect(mockGetProjectDefaults).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe("useUsageLimitsEnabled", () => {
     });
 
     const { result } = renderHook(() => useUsageLimitsEnabled());
-    // Initial render is the optimistic default so UI does not flicker on first paint.
+    // Первый рендер — оптимистичный дефолт, чтобы UI не мерцал при первой отрисовке.
     expect(result.current).toBe(true);
     await waitFor(() => expect(result.current).toBe(false));
     expect(mockGetSettings).toHaveBeenCalledTimes(1);
@@ -176,7 +176,7 @@ describe("useQaPipelineEnabled", () => {
       qaPipelineEnabled: true,
     });
 
-    // No QueryClientProvider — the hook uses a module-level store, like usage-limits.
+    // Без QueryClientProvider — хук использует store уровня модуля, как usage-limits.
     const { result } = renderHook(() => useQaPipelineEnabled());
 
     expect(result.current).toBe(false);

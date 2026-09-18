@@ -37,7 +37,7 @@ describe("buildToolUseEvents", () => {
     expect((events[0].data as { interactive: boolean }).interactive).toBe(true);
     expect(events[1].type).toBe("tool:question");
     expect(events[1].data).toBe(payload);
-    // Both events share the same timestamp so consumers can correlate them.
+    // Оба события имеют один timestamp, чтобы consumers могли их сопоставить.
     expect(events[0].timestamp).toBe(events[1].timestamp);
   });
 

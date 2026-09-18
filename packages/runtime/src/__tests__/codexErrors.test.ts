@@ -48,7 +48,7 @@ describe("codex error classification", () => {
     expect(classified.category).toBe("rate_limit");
   });
 
-  // HTTP status classification
+  // Классификация по HTTP status
   it("classifies by HTTP status 429 as rate_limit", () => {
     const classified = classifyCodexRuntimeError(new Error("response body"), 429);
     expect(classified.adapterCode).toBe("CODEX_RATE_LIMIT");

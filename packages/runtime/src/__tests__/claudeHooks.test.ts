@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildClaudeHooks } from "../adapters/claude/hooks.js";
 
-/** Call a hook with loose input (tests pass raw objects, SDK types are strict). */
+/** Вызывает hook с нестрогим input (тесты передают сырые объекты, типы SDK строги). */
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 const call = (hook: Function, input: unknown) => hook(input, undefined, undefined);
 
@@ -32,7 +32,7 @@ describe("buildClaudeHooks", () => {
 
     expect(result?.PostToolUse).toHaveLength(1);
 
-    // Call the bridge hook with Claude SDK-shaped input
+    // Вызов bridge-hook с input в форме Claude SDK
     const bridgeHook = result!.PostToolUse![0].hooks[0];
     await call(bridgeHook, { tool_name: "Bash", tool_input: { command: "ls -la" } });
 

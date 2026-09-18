@@ -1,3 +1,21 @@
+/**
+ * Генерация коммита по запросу UI: fire-and-forget прогон runtime-адаптера,
+ * который сам выполняет git commit внутри проекта.
+ *
+ * Почему fire-and-forget: вызов идёт из HTTP-хендлера, который должен ответить
+ * пользователю быстро, а генерация сообщения и сам git-коммит занимают секунды.
+ * Функция поэтому никогда не бросает: результат возвращается структурой и
+ * транслируется клиенту через WebSocket.
+ *
+ * Самые важные инварианты:
+ * - Коммит обязан попасть на persisted-ветку задачи или упасть явно: перед
+ *   запуском ветка восстанавливается, после - проверяется, потому что субагент
+ *   вызывает git напрямую и мог уехать на другой HEAD.
+ * - Задачи с executionOwner === "human" не получают AI-коммит; проверка
+ *   делается дважды (до try и внутри), так как владелец мог смениться.
+ * - Неизвестный проект - не исключение, а ok: false с текстом ошибки.
+ */
+
 import {
   assertCurrentBranch,
   buildCommitPrompt,
@@ -12,6 +30,8 @@ import { runApiRuntimeOneShot } from "./runtime.js";
 
 const log = logger("commit-generation");
 
+// Явный запрет выходить за корень проекта: адаптеры без песочницы иначе могут
+// сканировать весь монорепозиторий - это и медленно, и небезопасно.
 const PROJECT_SCOPE_APPEND =
   "Project scope rule: work strictly inside the current working directory (project root). " +
   "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
@@ -20,6 +40,8 @@ const PROJECT_SCOPE_APPEND =
 export interface RunCommitQueryResult {
   ok: boolean;
   error?: string;
+  // Код для бизнес-отказа, а не технической ошибки: клиент по нему решает
+  // показать подсказку "передайте задачу ИИ", а не общий текст о сбое.
   code?: "ai_handoff_required";
 }
 
@@ -29,22 +51,22 @@ export interface RunCommitQueryInput {
 }
 
 /**
- * Build the explicit instruction prompt for the commit run.
+ * Строит явный инструктивный промпт для прогона коммита.
  *
- * Background: the previous implementation sent the bare string `"/aif-commit"`
- * as the prompt, relying on Claude Code to resolve it as a slash command /
- * skill. In `-p` (print) mode that resolution is unreliable — the model would
- * often respond with text and never actually run `git commit`. This prompt
- * spells the full procedure out in English so ANY runtime adapter can execute
- * it. We still pass the slash command as a fallback hint for adapters that DO
- * support skill resolution.
+ * Предыстория: прошлая реализация отправляла голое `"/aif-commit"` как промпт,
+ * полагаясь на то, что Claude Code разрешит его как slash-команду / скилл. В
+ * режиме `-p` (print) такое разрешение ненадёжно — модель часто отвечала
+ * текстом и так и не выполняла `git commit`. Здесь вся процедура расписана
+ * словами, чтобы её мог выполнить ЛЮБОЙ runtime-адаптер. Slash-команду всё
+ * равно передаём как резервную подсказку для адаптеров, которые реально
+ * поддерживают разрешение скиллов.
  */
 export { buildCommitPrompt } from "@aif/shared";
 
 /**
- * Fire-and-forget entry point: run the commit workflow via the shared runtime
- * in the project root. Returns a structured result so the caller can broadcast
- * success/failure over WS. Never throws.
+ * Точка входа fire-and-forget: выполняет рабочий процесс коммита через общий
+ * runtime в корне проекта. Возвращает структурированный результат, чтобы
+ * вызывающий мог разослать успех/ошибку по WS. Никогда не бросает.
  */
 export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
   const { projectId, taskId = null } = input;
@@ -67,16 +89,20 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
       error: "The task must be handed to AI before commit generation can run",
     };
   }
+  // Работаем в worktree задачи, если он есть: коммит должен лечь в изолированное
+  // дерево, а не в общий клон проекта, который могут смотреть другие процессы.
   const executionRoot = task?.worktreePath ?? project.rootPath;
+  // isFix-задачи живут без собственной ветки, поэтому проверка изоляции
+  // применяется только к обычным задачам с зафиксированным branchName.
   if (task?.branchName && !task.isFix) {
-    // task.branchName is a source-of-truth contract: commit MUST land on the
-    // persisted branch or fail loud. `ensureFeatureBranch({switchOnly:true})`
-    // can return `skipped` for `git.enabled=false` / non-git projectRoot —
-    // letting the commit run on whatever HEAD happens to be. The post-run
-    // assertion would catch the drift, but the commit may already have
-    // landed by then. Use `restorePersistedBranch` instead, which throws
+    // task.branchName — контракт источника истины: коммит ДОЛЖЕН попасть на
+    // сохранённую ветку или громогласно упасть. `ensureFeatureBranch({switchOnly:true})`
+    // может вернуть `skipped` при `git.enabled=false` / не-git projectRoot —
+    // и коммит уйдёт на какой окажется HEAD. Пост-проверка поймает расхождение,
+    // но коммит к тому моменту уже может быть записан. Вместо неё используем
+    // `restorePersistedBranch`, который бросает
     // `git_disabled_with_persisted_branch` / `not_a_repo_with_persisted_branch`
-    // before any runtime call.
+    // до любого вызова runtime.
     try {
       restorePersistedBranch({
         projectRoot: executionRoot,
@@ -97,7 +123,11 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
     }
   }
 
+  // Конфиг читаем из executionRoot, а не из project.rootPath: у worktree может
+  // быть собственный набор настроек, и push должен решаться по нему.
   const { git } = getProjectConfig(executionRoot);
+  // Push гасится либо выключенным git, либо явным флагом проекта; от этого
+  // зависит текст промпта, поэтому решение принимается до сборки промпта.
   const shouldPush = git.enabled && !git.skip_push_after_commit;
   const prompt = buildCommitPrompt(shouldPush);
 
@@ -115,6 +145,9 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
   );
 
   try {
+    // Задачу перечитываем непосредственно перед вызовом runtime: между стартом
+    // обработки и запуском владелец мог смениться на человека, и коммит
+    // сгенерировал бы ИИ у задачи, которая уже передана человеку.
     const executionBoundaryTask = taskId ? findTaskById(taskId) : null;
     if (executionBoundaryTask?.executionOwner === "human") {
       return {
@@ -123,6 +156,8 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
         error: "The task must be handed to AI before commit generation can run",
       };
     }
+    // usageContext.source помечает расход токенов как COMMIT: иначе он смешался
+    // бы с расходами этапов пайплайна в отчётах.
     const { result } = await runApiRuntimeOneShot({
       projectId,
       projectRoot: executionRoot,
@@ -134,10 +169,10 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
       usageContext: { source: UsageSource.COMMIT },
     });
 
-    // Post-run drift check: the commit subagent runs git directly, so a
-    // mid-run `git checkout` (rogue skill, bad fallback) would land the
-    // commit on the wrong branch. Surface the drift instead of silently
-    // returning ok.
+    // Пост-проверка расхождения: сабагент коммита вызывает git напрямую, поэтому
+    // `git checkout` посреди прогона (незваный скилл, неверный резервный путь)
+    // мог записать коммит не в ту ветку. Показываем расхождение, а не молча
+    // возвращаем ok.
     if (task?.branchName && !task.isFix) {
       try {
         assertCurrentBranch(executionRoot, task.branchName);
@@ -166,6 +201,8 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
     );
     return { ok: true };
   } catch (err) {
+    // Сюда попадают ошибки рантайма и транспорта; текст уже сформирован
+    // адаптером, поэтому пробрасываем его без дополнительной обёртки.
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err, projectId, taskId }, "Commit runtime error");
     return { ok: false, error: message };

@@ -42,8 +42,8 @@ export function MetricsDialog({
   project,
   aggregateTotals,
 }: MetricsDialogProps) {
-  // Project-level totals include ALL sources (tasks + chat + commit + roadmap).
-  // When no project is selected, prefer aggregated sums across all projects; fall back to task-only totals.
+  // Итоги уровня проекта включают ВСЕ источники (задачи + чат + коммит + roadmap).
+  // Когда проект не выбран, предпочтительны агрегированные суммы по всем проектам; иначе — только задачи.
   const projectTokenTotal =
     project?.tokenTotal ?? aggregateTotals?.tokenTotal ?? taskMetrics.totalTokenTotal;
   const projectTokenInput =

@@ -1,10 +1,18 @@
-// Browser-safe pure utility functions for plan path generation.
-// No Node.js dependencies — safe to import from browser bundles.
+/**
+ * Генерация пути к файлу плана и получение slug из заголовка задачи.
+ *
+ * Файл намеренно НЕ зависит от Node.js (нет node:path и node:fs): он импортируется и
+ * браузерной сборкой через browser.ts, где Node-модулей быть не должно. Поэтому пути
+ * склеиваются строками, а не через path.join.
+ */
 
+// Полный план - отдельный файл на задачу, быстрый - общий единый PLAN.md, который
+// переиспользуется между задачами.
 const DEFAULT_PLANS_DIR = ".ai-factory/plans/";
 const DEFAULT_PLAN_PATH = ".ai-factory/PLAN.md";
 
-// Cyrillic-to-Latin transliteration table built from char codes to avoid Non-ASCII warnings.
+// Таблица транслитерации кириллицы строится из кодов символов, чтобы избежать
+// предупреждений о не-ASCII символах в исходнике.
 // prettier-ignore
 const TRANSLIT_PAIRS: [number, string][] = [
   [0x430, "a"],  [0x431, "b"],    [0x432, "v"],    [0x433, "g"],
@@ -18,6 +26,8 @@ const TRANSLIT_PAIRS: [number, string][] = [
   [0x44f, "ya"],
 ];
 
+// Таблица собирается в Map один раз при загрузке модуля: транслитерация вызывается
+// при каждом создании плана, и линейный поиск по массиву пар был бы лишней работой.
 const TRANSLIT_MAP = new Map<string, string>(
   TRANSLIT_PAIRS.map(([code, latin]) => [String.fromCharCode(code), latin]),
 );
@@ -30,11 +40,14 @@ function transliterate(text: string): string {
 }
 
 /**
- * Convert a title string into a URL/filesystem-safe slug.
- * Transliterates Cyrillic to Latin, lowercases, replaces non-alphanumeric
- * with hyphens, collapses consecutive hyphens, trims, and truncates to 60 chars.
+ * Превращает заголовок в безопасный для URL и файловой системы slug: транслитерация
+ * кириллицы в латиницу, приведение к нижнему регистру, замена всего постороннего на дефисы,
+ * сжатие подряд идущих дефисов, обрезка краёв и усечение до 60 символов.
  */
 export function slugify(title: string): string {
+  // Порядок замен важен: сначала всё неподходящее превращается в дефис, затем
+  // сжимаются подряд идущие дефисы, и только потом срезаются края. Обратный порядок
+  // оставил бы дефис на границе строки.
   const slug = transliterate(title.toLowerCase())
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-{2,}/g, "-")
@@ -43,6 +56,8 @@ export function slugify(title: string): string {
 
   if (slug) return slug;
 
+  // Заголовок может не содержать ни букв, ни цифр (например, только знаки
+  // пунктуации). Имя всё равно должно быть непустым и уникальным - берём время.
   return `plan-${Date.now()}`;
 }
 
@@ -52,9 +67,9 @@ export interface GeneratePlanPathOptions {
 }
 
 /**
- * Generate a plan file path based on the planner mode and task title.
- * - "full" mode: returns `<plansDir>/<slug>.md`
- * - "fast" mode (or any other): returns `<defaultPlanPath>`
+ * Строит путь к файлу плана по режиму планировщика и заголовку задачи.
+ * - режим "full": возвращается `<plansDir>/<slug>.md`
+ * - режим "fast" (и любой другой): возвращается `<defaultPlanPath>`
  */
 export function generatePlanPath(
   title: string,
@@ -64,6 +79,8 @@ export function generatePlanPath(
   if (mode === "full") {
     const plansDir = options?.plansDir ?? DEFAULT_PLANS_DIR;
     const slug = slugify(title);
+    // Слэш дописывается, если его нет: путь склеивается строками, а path.join здесь
+    // недоступен, потому что модуль браузер-безопасный.
     const dir = plansDir.endsWith("/") ? plansDir : `${plansDir}/`;
     return `${dir}${slug}.md`;
   }

@@ -117,7 +117,7 @@ export function CommandPalette({
     );
   }, [actions, query]);
 
-  // Scroll selected item into view
+  // Прокрутка выбранного элемента в зону видимости
   useEffect(() => {
     const selectedItem = itemsRef.current[selectedIndex];
     if (selectedItem) {

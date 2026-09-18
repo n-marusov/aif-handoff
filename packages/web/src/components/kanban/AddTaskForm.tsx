@@ -59,8 +59,8 @@ export function AddTaskForm({ projectId }: Props) {
       ? [session.participant]
       : [];
 
-  // Track whether the user has manually edited the plan path field.
-  // When true, the auto-set effect will not overwrite their edit.
+  // Отслеживает, редактировал ли пользователь путь к плану вручную.
+  // Если true, автозаполнение не перезапишет его правку.
   const userOverride = useRef(false);
 
   const { data: settings } = useSettings();
@@ -86,7 +86,7 @@ export function AddTaskForm({ projectId }: Props) {
     ? runtimes.find((runtime) => runtime.id === selectedRuntimeProfile.runtimeId)
     : null;
 
-  // Derive defaults from server data (no setState in effects)
+  // Дефолты берутся из серверных данных (без setState в эффектах)
   const useSubagentsDefault = settings?.useSubagents ?? false;
   const maxReviewIterationsDefault = settings?.maxReviewIterations ?? 3;
   const defaultPlanPath = defaults?.paths?.plan ?? DEFAULT_PLAN_PATH;
@@ -102,7 +102,7 @@ export function AddTaskForm({ projectId }: Props) {
     setRuntimeProfileId("");
     setModelOverride("");
     setPriority(0);
-    // Apply mode-driven flag defaults; isParallel forces full mode defaults.
+    // Применяет дефолты флагов по режиму; isParallel форсит дефолты полного режима.
     const seededMode = isParallel ? "full" : plannerMode;
     const flags = defaultsForMode(seededMode);
     setSkipReview(flags.skipReview);
@@ -141,18 +141,18 @@ export function AddTaskForm({ projectId }: Props) {
     setIsOpen(true);
   }, [syncServerDefaultsIntoForm]);
 
-  // Listen for global task:create event (Ctrl+N)
+  // Слушает глобальное событие task:create (Ctrl+N)
   useEffect(() => {
     window.addEventListener("task:create", openForm);
     return () => window.removeEventListener("task:create", openForm);
   }, [openForm]);
 
-  // Close form on Escape key
+  // Закрытие формы по клавише Escape
   const closeForm = useCallback(() => setIsOpen(false), []);
   useKeyboardShortcut({ key: "Escape", enabled: isOpen }, closeForm);
 
-  // Auto-update planPath when title or mode changes (unless user manually edited the field).
-  // Called from onChange handlers rather than useEffect to avoid cascading renders.
+  // Автообновление planPath при смене названия или режима (если поле не правилось вручную).
+  // Вызывается из onChange-обработчиков, а не useEffect, чтобы избежать каскадных рендеров.
   const syncPlanPath = (nextTitle: string, nextMode: "full" | "fast") => {
     if (userOverride.current) return;
     const path = generatePlanPath(nextTitle.trim(), nextMode, {
@@ -179,7 +179,7 @@ export function AddTaskForm({ projectId }: Props) {
     setPlanTests(flags.planTests);
   };
 
-  // Effective values: parallel projects force full mode
+  // Эффективные значения: параллельные проекты форсят полный режим
   const effectiveMode = isParallel ? "full" : plannerMode;
   const effectivePlanPath = isParallel
     ? generatePlanPath(title.trim(), "full", { plansDir, defaultPlanPath })

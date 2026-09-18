@@ -1,10 +1,26 @@
+/**
+ * Выбор стратегии выполнения подагентов под Codex.
+ *
+ * У Codex два принципиально разных способа запускать подагентов. native — через нативные
+ * агентские определения (.codex/agents/*.toml), которые тянет сам Codex; isolated — через наши
+ * изолированные агенты вне CLI. Какой режим доступен, зависит от того, положил ли в проект
+ * файлы-ассеты ai-factory >=2.11.0, поэтому здесь есть и проверка готовности проекта.
+ *
+ * Функция resolve... намеренно не бросает исключений: любое невалидное значение опции
+ * (опечатка, устаревшее имя) трактуется как откат к isolated, а причина возвращается текстом
+ * в поле reason — её удобно логировать и показывать в диагностике.
+ */
+
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { RuntimeWorkflowKind } from "../../workflowSpec.js";
 import { asRecord, readString } from "../../utils.js";
 
+// Ключ опции в runtimeOptions: одна константа вместо строкового литерала во всех местах.
 export const CODEX_SUBAGENT_STRATEGY_OPTION = "codexSubagentStrategy";
 
+// Значения перечислены и как объект, и как union-тип ниже — так они доступны и в рантайме,
+// и в системе типов без дублирования строк в двух местах.
 export const CODEX_SUBAGENT_STRATEGIES = {
   native: "native",
   isolated: "isolated",
@@ -13,6 +29,8 @@ export const CODEX_SUBAGENT_STRATEGIES = {
 export type CodexSubagentStrategy =
   (typeof CODEX_SUBAGENT_STRATEGIES)[keyof typeof CODEX_SUBAGENT_STRATEGIES];
 
+// reason — машиночитаемое объяснение выбора. Он нужен, чтобы в логах было видно,
+// почему включился тот или иной режим, не парся при этом текст сообщений.
 export type CodexSubagentStrategyResolutionReason =
   | "non_codex"
   | "default_native"
@@ -22,13 +40,17 @@ export type CodexSubagentStrategyResolutionReason =
   | "disabled_by_env";
 
 export interface CodexSubagentStrategyResolution {
+  // null означает "не применимо" (не Codex), а не ошибку: вызывающий отличает этот случай
+  // от валидной стратегии и не считает его провалом.
   strategy: CodexSubagentStrategy | null;
   reason: CodexSubagentStrategyResolutionReason;
   configuredValue?: string;
   nativeSubagentsEnabled: boolean;
 }
 
-// Keep this list in lockstep with the Codex assets materialized by ai-factory >=2.11.0.
+// Держите этот список синхронно с ассетами Codex, материализуемыми ai-factory >=2.11.0.
+// Список жёстко зашит, потому что готовность native-режима — это наличие ровно этих файлов.
+// При обновлении ассетов ai-factory список надо дополнять, иначе readiness даст ложное true.
 const CODEX_NATIVE_AGENT_FILES = [
   "best-practices-sidecar.toml",
   "commit-preparer.toml",
@@ -46,11 +68,15 @@ export interface CodexNativeSubagentReadiness {
   missingPaths: string[];
 }
 
+// Разрешённая стратегия + причина. Приоритет источников — от самого явного к неявным:
+// явная опция isolated, затем невалидное значение (откат), затем флаг доступности native,
+// и только в конце — дефолт.
 export function resolveCodexSubagentStrategy(
   runtimeId: string,
   runtimeOptions?: Record<string, unknown>,
   options?: { nativeSubagentsEnabled?: boolean },
 ): CodexSubagentStrategyResolution {
+  // Ранний выход для других рантаймов: не навязываем им codex-специфичную опцию.
   if (runtimeId !== "codex") {
     return {
       strategy: null,
@@ -59,6 +85,8 @@ export function resolveCodexSubagentStrategy(
     };
   }
 
+  // readString + asRecord вместо прямого доступа: runtimeOptions приходит из JSON
+  // произвольной формы, и нестроковое значение должно трактоваться как "не задано".
   const configured = readString(asRecord(runtimeOptions)[CODEX_SUBAGENT_STRATEGY_OPTION]);
   if (configured === CODEX_SUBAGENT_STRATEGIES.isolated) {
     return {
@@ -69,6 +97,8 @@ export function resolveCodexSubagentStrategy(
     };
   }
 
+  // Значение задано, но не равно ни одному известному: откатываемся на isolated,
+  // потому что он не требует внешних ассетов и гарантированно работает.
   if (configured && configured !== CODEX_SUBAGENT_STRATEGIES.native) {
     return {
       strategy: CODEX_SUBAGENT_STRATEGIES.isolated,
@@ -78,10 +108,14 @@ export function resolveCodexSubagentStrategy(
     };
   }
 
+  // Пользователь хотел native (или не указал ничего), но фича выключена окружением:
+  // reason disabled_by_env отделяет этот случай от явного выбора isolated.
   if (!options?.nativeSubagentsEnabled) {
     return {
       strategy: CODEX_SUBAGENT_STRATEGIES.isolated,
       reason: "disabled_by_env",
+      // configured ?? undefined вместо null: поле опциональное, и undefined означает
+      // "значение не задавалось", что семантически точнее явного null.
       configuredValue: configured ?? undefined,
       nativeSubagentsEnabled: false,
     };
@@ -89,15 +123,21 @@ export function resolveCodexSubagentStrategy(
 
   return {
     strategy: CODEX_SUBAGENT_STRATEGIES.native,
+    // Различаем явный выбор пользователя и дефолт: это важно для аналитики и отладки.
     reason: configured ? "explicit_native" : "default_native",
     configuredValue: configured ?? undefined,
     nativeSubagentsEnabled: true,
   };
 }
 
+// Проверка готовности проекта к native-режиму: есть ли на месте .codex/config.toml
+// и все ожидаемые файлы агентов. Возвращаем список отсутствующего, а не просто false:
+// по нему можно показать пользователю, что именно нужно доложить.
 export function resolveCodexNativeSubagentReadiness(
   projectRoot?: string | null,
 ): CodexNativeSubagentReadiness {
+  // projectRoot может быть null (проект ещё не выбран) — тогда готовности нет по
+  // определению, и путь для проверки не с чем склеивать.
   if (!projectRoot) {
     return {
       ready: false,
@@ -106,21 +146,28 @@ export function resolveCodexNativeSubagentReadiness(
   }
 
   const missingPaths = [
+    // filter + map вместо цикла: собираем отсутствующие файлы в человекочитаемые пути,
+    // сразу в том виде, в котором их покажет диагностика.
     ...CODEX_NATIVE_AGENT_FILES.filter(
       (fileName) => !existsSync(join(projectRoot, ".codex", "agents", fileName)),
     ).map((fileName) => `.codex/agents/${fileName}`),
   ];
 
+  // Путь не подошёл — добавляем config.toml в конец списка отдельно,
+  // так как это не файл агента и в CODEX_NATIVE_AGENT_FILES его нет.
   if (!existsSync(join(projectRoot, ".codex", "config.toml"))) {
     missingPaths.push(".codex/config.toml");
   }
 
   return {
+    // ready только при пустом списке пропаж: частичная готовность считается неготовностью.
     ready: missingPaths.length === 0,
     missingPaths,
   };
 }
 
+// Подсказки для промпта по видам workflow: Partial<Record<...>> допускает, что не для
+// каждого вида есть специфичная инструкция — для остальных сработает дефолт ниже.
 const NATIVE_SUBAGENT_WORKFLOW_GUIDANCE: Partial<Record<RuntimeWorkflowKind, string>> = {
   planner:
     'Use "plan-polisher" for bounded critique/refinement passes when helpful, then return the final implementation-ready plan in the parent thread.',
@@ -131,6 +178,8 @@ const NATIVE_SUBAGENT_WORKFLOW_GUIDANCE: Partial<Record<RuntimeWorkflowKind, str
     'Return only the consolidated findings from the delegated "security-sidecar" run.',
 };
 
+// Вызывающий получает строку всегда: дефолт не даёт промпту остаться без инструкции,
+// если для нового вида workflow подсказку забыли добавить.
 export function getNativeSubagentWorkflowGuidance(workflowKind: RuntimeWorkflowKind): string {
   return (
     NATIVE_SUBAGENT_WORKFLOW_GUIDANCE[workflowKind] ??

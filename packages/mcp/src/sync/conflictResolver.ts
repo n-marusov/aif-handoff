@@ -10,17 +10,17 @@ export interface ConflictCheckInput {
 }
 
 /**
- * Last-write-wins conflict resolution.
- * Compares source timestamp against target (Handoff task's updatedAt).
+ * Разрешение конфликтов: побеждает последняя запись.
+ * Сравнивает исходную метку времени с целевой (updatedAt задачи Handoff).
  */
 export function resolveConflict(input: ConflictCheckInput): ConflictResolution {
   let sourceTime = new Date(input.sourceTimestamp).getTime();
   const targetTime = new Date(input.targetTimestamp).getTime();
 
-  // Guard: if sourceTimestamp is truly invalid (NaN or epoch zero — e.g. a midnight
-  // placeholder from an LLM that approximated "now"), fall back to server time.
-  // A merely-older-but-valid source timestamp should NOT trigger the fallback;
-  // instead the target should win the conflict normally.
+  // Защита: если sourceTimestamp действительно невалиден (NaN или нулевая эпоха — например,
+  // полуночный заполнитель от LLM, округлившей «now»), берём время сервера.
+  // Просто более старый, но валидный источник НЕ должен включать резерв;
+  // вместо этого цель должна победить в конфликте обычным порядком.
   const EPOCH_ZERO = 0;
   if (Number.isNaN(sourceTime) || sourceTime === EPOCH_ZERO) {
     const now = Date.now();

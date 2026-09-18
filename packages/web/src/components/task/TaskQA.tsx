@@ -68,7 +68,7 @@ export function TaskQA({ task, onRunQa, isRunning }: TaskQAProps) {
     { title: "Test Cases", content: task.qaTestCases },
   ];
 
-  // Re-running overwrites existing artifacts, so confirm first when any exist.
+  // Повторный запуск перезаписывает артефакты, поэтому при их наличии сначала подтверждаем.
   const hasArtifacts = artifacts.some((a) => a.content?.trim());
   const handleRunClick = () => {
     if (hasArtifacts) {

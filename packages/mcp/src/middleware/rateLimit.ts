@@ -8,15 +8,15 @@ interface TokenBucket {
 }
 
 export interface RateLimiterConfig {
-  /** Maximum requests per minute */
+  /** Максимум запросов в минуту */
   rpm: number;
-  /** Maximum burst size (bucket capacity) */
+  /** Максимальный размер всплеска (ёмкость корзины) */
   burst: number;
 }
 
 /**
- * Token bucket rate limiter for MCP tools.
- * Each tool category (read/write) has its own bucket.
+ * Ограничитель частоты на токеной корзине для MCP-инструментов.
+ * У каждой категории инструментов (read/write) своя корзина.
  */
 export class RateLimiter {
   private buckets = new Map<string, TokenBucket>();
@@ -29,7 +29,7 @@ export class RateLimiter {
   }
 
   /**
-   * Check if a tool call is allowed. Returns true if allowed, false if rate limited.
+   * Проверяет, разрешён ли вызов инструмента. true — разрешён, false — лимит исчерпан.
    */
   check(toolName: string, category: "read" | "write"): boolean {
     const config = category === "read" ? this.readConfig : this.writeConfig;
@@ -42,7 +42,7 @@ export class RateLimiter {
       this.buckets.set(key, bucket);
     }
 
-    // Refill tokens based on elapsed time
+    // Пополняем токены исходя из истёкшего времени
     const elapsed = now - bucket.lastRefill;
     const tokensToAdd = (elapsed / 60_000) * config.rpm;
     bucket.tokens = Math.min(config.burst, bucket.tokens + tokensToAdd);

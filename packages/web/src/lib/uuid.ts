@@ -1,28 +1,25 @@
 /**
- * Generate an RFC 4122 v4 UUID that also works in non-secure browsing contexts.
+ * Генерирует UUID v4 (RFC 4122), который работает и в небезопасных контекстах браузера.
  *
- * `crypto.randomUUID()` is only exposed in a *secure context* — HTTPS or
- * `http://localhost`. When the app is served over plain HTTP from a non-localhost
- * origin (e.g. a LAN IP such as `http://10.10.100.29`), `crypto.randomUUID` is
- * `undefined`, and calling it throws
- * `TypeError: crypto.randomUUID is not a function`.
+ * `crypto.randomUUID()` доступен только в безопасном контексте (HTTPS или
+ * `http://localhost`). При обычном HTTP на внешнем хосте функция может быть
+ * `undefined` и вызов бросит `TypeError`.
  *
- * `crypto.getRandomValues()` is available in insecure contexts too, so we fall
- * back to deriving the UUID from it — keeping cryptographically strong randomness
- * without requiring HTTPS.
+ * Поэтому используется резерв: `crypto.getRandomValues()` с ручной сборкой UUID,
+ * чтобы сохранить криптостойкую случайность без обязательного HTTPS.
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID#secure_context
  */
 export function randomUUID(): string {
   const cryptoObj = globalThis.crypto as Crypto | undefined;
 
-  // Secure context (https / localhost): use the native implementation.
+  // Безопасный контекст (https / localhost): используем нативную реализацию.
   if (typeof cryptoObj?.randomUUID === "function") {
     return cryptoObj.randomUUID();
   }
 
-  // Insecure context (plain http on a non-localhost host): getRandomValues is
-  // still available — derive an RFC 4122 v4 UUID from 16 random bytes.
+  // Небезопасный контекст (обычный http на внешнем хосте):
+  // если доступен getRandomValues, собираем UUID v4 из 16 случайных байт.
   if (typeof cryptoObj?.getRandomValues === "function") {
     const bytes = cryptoObj.getRandomValues(new Uint8Array(16));
     bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
@@ -31,10 +28,8 @@ export function randomUUID(): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  // Last resort (no Web Crypto at all — practically never in a browser): a
-  // non-cryptographic v4 UUID. These ids are used as chat/stream keys, which do
-  // not require crypto-grade randomness, so this is an acceptable degradation
-  // over throwing.
+  // Крайний резерв (Web Crypto недоступен): не криптостойкий UUID v4.
+  // Для ключей чата/потока этого достаточно и лучше, чем аварийный сбой.
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
     const r = (Math.random() * 16) | 0;
     return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);

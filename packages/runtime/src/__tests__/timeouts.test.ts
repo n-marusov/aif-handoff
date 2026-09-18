@@ -13,10 +13,10 @@ import {
 import { RuntimeExecutionError } from "../errors.js";
 
 /* ------------------------------------------------------------------ */
-/*  Test helpers                                                      */
+/*  Тестовые помощники                                                 */
 /* ------------------------------------------------------------------ */
 
-/** Create a controllable async iterator for testing. */
+/** Создаёт управляемый async-итератор для тестов. */
 function createMockIterator<T>(): {
   iterator: AsyncIterableIterator<T>;
   push: (value: T) => void;
@@ -87,7 +87,7 @@ function createMockIterator<T>(): {
   };
 }
 
-/** Create a minimal mock ChildProcess for testing. */
+/** Создаёт минимальный мок ChildProcess для тестов. */
 function createMockChild(): ChildProcess & {
   emitStdout: (data: string) => void;
   emitStderr: (data: string) => void;
@@ -138,7 +138,7 @@ describe("withStreamTimeouts", () => {
     const mock = createMockIterator<string>();
     const wrapped = withStreamTimeouts(mock.iterator, { startTimeoutMs: 500 });
 
-    // Push value immediately — before timeout
+    // Значение пушится сразу — до истечения таймаута
     mock.push("first");
     mock.end();
 
@@ -172,16 +172,16 @@ describe("withStreamTimeouts", () => {
       const abort = new AbortController();
       const wrapped = withStreamTimeouts(mock.iterator, { runTimeoutMs: 200 }, abort);
 
-      // First value arrives OK
+      // Первое значение приходит штатно
       mock.push("first");
       const first = await wrapped.next();
       expect(first.value).toBe("first");
 
-      // Now the run timeout fires while waiting for the next value
+      // Теперь run timeout срабатывает в ожидании следующего значения
       const nextPromise = wrapped.next();
       vi.advanceTimersByTime(200);
 
-      // The abort should signal — mock iterator needs to reject on abort
+      // abort должен сигнализировать — mock-итератор обязан reject'нуть по abort
       mock.error(new Error("aborted"));
 
       await expect(nextPromise).rejects.toThrow("Run timeout");
@@ -199,10 +199,10 @@ describe("withStreamTimeouts", () => {
         runTimeoutMs: 500,
       });
 
-      // Calling return before any next() should clean up
+      // Вызов return до любого next() обязан почистить таймеры
       await wrapped.return!();
 
-      // Advancing timers should not cause issues
+      // Перемотка таймеров не должна создавать проблем
       vi.advanceTimersByTime(600);
     } finally {
       vi.useRealTimers();
@@ -234,7 +234,7 @@ describe("withProcessTimeouts", () => {
       const child = createMockChild();
       const result = withProcessTimeouts(child, { startTimeoutMs: 200 });
 
-      // Output arrives at 50ms
+      // Вывод приходит на 50 мс
       vi.advanceTimersByTime(50);
       child.emitStdout("hello");
 
@@ -271,7 +271,7 @@ describe("withProcessTimeouts", () => {
       const child = createMockChild();
       const result = withProcessTimeouts(child, { runTimeoutMs: 300 });
 
-      // Output arrives, so no start timeout
+      // Вывод был — start timeout не срабатывает
       child.emitStdout("ok");
 
       vi.advanceTimersByTime(300);
@@ -333,7 +333,7 @@ describe("withProcessTimeouts", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Error helpers                                                     */
+/*  Функции работы с ошибками                                          */
 /* ------------------------------------------------------------------ */
 
 describe("isRetriableTimeoutError", () => {

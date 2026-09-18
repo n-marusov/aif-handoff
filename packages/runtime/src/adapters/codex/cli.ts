@@ -1,3 +1,27 @@
+/**
+ * Транспорт Codex CLI: запускает бинарник `codex` как дочерний процесс, подаёт
+ * промпт через stdin и превращает поток `stream-json` (JSONL) в единый формат
+ * рантайма — RuntimeEvent/RuntimeRunResult.
+ *
+ * Зачем CLI, если есть SDK-транспорт (sdk.ts)? CLI переиспользует уже
+ * выполненную OAuth-сессию (`codex login`), не требует API-ключа и через
+ * escape-hatch `codexCliArgs` в профиле позволяет полностью переопределить
+ * форму команды. Плата за это — все подводные камни дочерних процессов; файл
+ * во многом — каталог защит от них:
+ *  - промпт идёт в stdin, а не в argv: аргументы видны всем процессам ОС,
+ *    ограничены длиной (~32k символов у CreateProcess) и требуют экранирования
+ *    кавычек;
+ *  - stdout разбирается построчно из буфера: границы чанков 'data' не совпадают
+ *    с границами строк JSONL;
+ *  - окружение собирается allowlist'ом: третьестороннему бинарнику не отдаётся
+ *    весь process.env, чтобы не утекли посторонние секреты;
+ *  - каждое поле вывода CLI — `unknown`, с проверкой типа и явным `| null`
+ *    перед доступом (Nullable Cast Rule);
+ *  - ошибки классифицируются единой точкой входа — classifyCodexRuntimeError —
+ *    и дальше различаются по структурированной категории, а не по тексту;
+ *  - жизненный цикл завязан на 'close', а не 'exit': stdio должно отдать
+ *    данные до конца, иначе потеряется последняя строка потока.
+ */
 import { spawn, execFileSync } from "node:child_process";
 import type { RuntimeEvent, RuntimeRunInput, RuntimeRunResult, RuntimeUsage } from "../../types.js";
 import { buildRuntimeLimitEvent } from "../../limitEvents.js";
@@ -22,8 +46,15 @@ import {
 import { PROXY_ENV_VARS } from "../../proxyEnv.js";
 import { CODEX_MODEL_EFFORT_LEVELS, resolveModelEffortOption } from "../../modelEffort.js";
 
+// На Windows голое "codex" — это .cmd-шим от npm, который нельзя запустить
+// напрямую: либо shell:true, либо ручной cmd.exe /c с собственным экранированием
+// (см. spawnCliWindows).
 const IS_WINDOWS = process.platform === "win32";
 
+// Минимальный «структурный» контракт логгера: адаптер не зависит от pino или
+// конкретной реализации — достаточно объекта, умеющего часть этих методов.
+// Всё опционально: тому, кому логи не нужны, проще передать undefined, чем
+// noop-заглушку.
 export interface CodexCliLogger {
   debug?(context: Record<string, unknown>, message: string): void;
   info?(context: Record<string, unknown>, message: string): void;
@@ -31,8 +62,16 @@ export interface CodexCliLogger {
   error?(context: Record<string, unknown>, message: string): void;
 }
 
+// Троттлинг опроса лимитов сессии: снапшот полезно перечитывать, но не на
+// каждую разобранную JSONL-строку — это файловое I/O впустую, новых данных там
+// ещё нет.
 const CODEX_SESSION_LIMIT_POLL_INTERVAL_MS = 1_000;
 
+// Сужение типов для недоверенных данных: payload'ы из JSON.parse потока
+// дочернего процесса — всегда `unknown`. asRecord не возвращает null (пустой
+// объект — безвредная заготовка), а readString — возвращает, и вызывающий
+// обязан обрабатывать это явно, а не прятать опциональность за слепым кастом:
+// так требует правило Nullable Cast Rule.
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -44,24 +83,25 @@ function readString(value: unknown): string | null {
 }
 
 /**
- * Resolve the effective approval policy and sandbox mode for a Codex CLI run.
+ * Определяет эффективные approval policy и sandbox mode для запуска Codex CLI.
  *
- * Three-layer precedence:
- *   1. explicit profile options (`options.approvalPolicy` / `options.sandboxMode`)
- *   2. bypass defaults (when `execution.bypassPermissions=true`)
- *   3. stable non-bypass defaults (`on-request` + `workspace-write`)
+ * Трёхслойный приоритет:
+ *   1. явные опции профиля (`options.approvalPolicy` / `options.sandboxMode`)
+ *   2. дефолты bypass (когда `execution.bypassPermissions=true`)
+ *   3. стабильные не-bypass дефолты (`on-request` + `workspace-write`)
  *
- * The non-bypass defaults keep behaviour consistent across hosts regardless
- * of the user's ~/.codex/config.toml — prior to the bypass-permissions
- * refactor these defaults were set by a Codex-specific hook factory in the
- * API layer; the logic now lives inside the adapter so api/agent/runtime all
- * share the same contract.
+ * Не-bypass дефолты держат поведение одинаковым на всех хостах независимо
+ * от ~/.codex/config.toml пользователя — до рефакторинга
+ * bypass-permissions эти дефолты задавала Codex-специфичная фабрика хуков
+ * в слое api; теперь логика живёт внутри адаптера,
+ * и api/agent/runtime делят один контракт.
  *
- * Values are always non-null — the caller always emits the corresponding
- * `-c approval_policy="..."` / `-c sandbox_mode="..."` override. Routing
- * through `-c` rather than `--sandbox` / the atomic
- * `--dangerously-bypass-approvals-and-sandbox` flag is required because the
- * `codex exec resume` subcommand rejects `--sandbox` outright.
+ * Значения всегда ненулевые — вызывающий всегда эмитит соответствующий
+ * `-c approval_policy="..."` / `-c sandbox_mode="..."` override. Маршрутизация
+ * через `-c`, а не `--sandbox` / атомарный флаг
+ * `--dangerously-bypass-approvals-and-sandbox`, обязательна потому, что
+ * подкоманда `codex exec resume` наотрез отвергает
+ * `--sandbox`.
  */
 function resolveCodexPermissionOverrides(
   input: RuntimeRunInput,
@@ -77,6 +117,9 @@ function resolveCodexPermissionOverrides(
   const explicitSandbox = normalizeCodexSandboxMode(rawSandbox);
   const bypass = input.execution?.bypassPermissions === true;
 
+  // Неверное значение не роняет запуск, а предупреждает: опечатка в профиле
+  // не должна ломать задачу — значение нормализуется к безопасному дефолту, но
+  // в логе остаётся след, кто и что накосячил.
   warnOnInvalidCodexPermissionOverride({
     logger,
     runtimeId: input.runtimeId,
@@ -94,6 +137,9 @@ function resolveCodexPermissionOverrides(
     normalizedValue: explicitSandbox,
   });
 
+  // bypass меняет пару значений сразу: "never" (не спрашивать подтверждений) +
+  // "danger-full-access" (отключить песочницу). Либо оба, либо ни одного:
+  // частичный bypass дал бы не автоматизацию, а ложное ощущение разрешений.
   const resolved = {
     approvalPolicy: explicitApproval ?? (bypass ? "never" : "on-request"),
     sandboxMode: explicitSandbox ?? (bypass ? "danger-full-access" : "workspace-write"),
@@ -112,9 +158,14 @@ function resolveCodexPermissionOverrides(
     "Resolved Codex CLI approval and sandbox settings",
   );
 
+  // Значения всегда не null: вызывающий безусловно подставляет `-c`-флаги,
+  // поэтому «не задано» превращается в дефолт здесь, а не у вызывающего.
   return resolved;
 }
 
+// Результат намеренно null-явный: пустой массив и отсутствующая настройка —
+// для вызывающего одно и то же (значит, дефолтные аргументы), и `null` говорит
+// об этом честнее, чем проверка длины.
 function readStringArray(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const parsed = value.filter((entry): entry is string => typeof entry === "string");
@@ -124,11 +175,11 @@ function readStringArray(value: unknown): string[] | null {
 interface NormalizedCliArgs {
   args: string[];
   /**
-   * True when the configured custom `codexCliArgs` embedded the prompt via a
-   * `{prompt}` placeholder anywhere in any arg (including composite shapes
-   * like `--payload=prefix {prompt} suffix`). Tracked pre-substitution — the
-   * literal `{prompt}` token is gone from `args` after `normalizeCliArgs()`
-   * returns, so the flag is the only reliable signal for the stdin suppressor.
+   * True, когда кастомные `codexCliArgs` встроили промпт плейсхолдером
+   * `{prompt}` в любое место любого аргумента (включая составные формы вида
+   * `--payload=prefix {prompt} suffix`). Отслеживается до подстановки — после
+   * возврата `normalizeCliArgs()` литеральный токен `{prompt}` исчезает из
+   * `args`, поэтому флаг — единственный надёжный сигнал для подавления stdin.
    */
   usesPromptPlaceholder: boolean;
 }
@@ -141,14 +192,17 @@ function normalizeCliArgs(
   const options = asRecord(input.options);
   const configured = readStringArray(options.codexCliArgs);
 
-  // Custom args — apply template substitutions.
+  // Кастомные аргументы — применяем шаблонные подстановки.
   //
-  // `effectivePrompt` already carries `execution.systemPromptAppend`
-  // prepended by `composePrompt()` so the registry's language directive
-  // (and any other cross-cutting append) reaches the model via the
-  // `{prompt}` placeholder too — not only through the default stdin path.
+  // `effectivePrompt` уже несёт `execution.systemPromptAppend`, prepended
+  // функцией `composePrompt()`, поэтому языковая директива реестра (и любые
+  // другие сквозные добавки) доходит до модели и через плейсхолдер `{prompt}` —
+  // не только по обычному пути stdin.
   if (configured) {
     let usesPromptPlaceholder = false;
+    // Подстановка закрывает ровно три плейсхолдера, остальной текст аргумента
+    // идёт как есть: неизвестный токен остаётся видимым в команде и всплывает
+    // ошибкой CLI, а не тихо подменяется пустой строкой.
     const args = configured.map((arg) => {
       if (arg.includes("{prompt}")) {
         usesPromptPlaceholder = true;
@@ -161,15 +215,24 @@ function normalizeCliArgs(
     return { args, usesPromptPlaceholder };
   }
 
-  // Default args — resume session or fresh exec
+  // Аргументы по умолчанию — resume сессии или свежий exec
+  // "exec" — неинтерактивный подкомандный режим CLI: без TTY, вывод для
+  // скрипта, а не для человека.
   const args: string[] = ["exec"];
+  // Resume без sessionId ошибкой не считается: тихий откат к свежему запуску
+  // предпочтительнее битой команды — потеря контекста видна сразу, а сбой нет.
   if (input.resume && input.sessionId) {
     args.push("resume", input.sessionId);
   }
+  // `--json` переводит CLI в режим stream-json: машиночитаемый JSONL вместо
+  // human-разметки с ANSI-украшениями — именно его ожидает парсер ниже.
   args.push("--json");
   if (input.model) {
     args.push("--model", input.model);
   }
+  // Reasoning effort передаётся TOML-оверрайдом, а не флагом: набор флагов у
+  // `exec` и `exec resume` различается, а `-c` работает в обоих. JSON.stringify
+  // даёт кавычки, которые требует TOML-синтаксис строкового значения.
   const effort = resolveModelEffortOption(
     options,
     "modelReasoningEffort",
@@ -179,29 +242,39 @@ function normalizeCliArgs(
     args.push("-c", `model_reasoning_effort=${JSON.stringify(effort)}`);
   }
 
-  // Skip git repo check — opt-in via profile for non-git working directories
+  // Пропуск проверки git-репозитория — включается профилем для не-git каталогов
   if (options.skipGitRepoCheck === true) {
     args.push("--skip-git-repo-check");
   }
 
-  // Approval policy and sandbox mode. Always emitted so behaviour stays
-  // stable across hosts regardless of the user's ~/.codex/config.toml.
+  // Approval policy и sandbox mode. Эмитятся всегда, чтобы поведение оставалось
+  // стабильным на всех хостах независимо от ~/.codex/config.toml пользователя.
   //
-  //   bypass=false, no profile override → "on-request" + "workspace-write"
-  //   bypass=true,  no profile override → "never"      + "danger-full-access"
-  //   explicit `options.approvalPolicy` / `options.sandboxMode` always win
+  //   bypass=false, без override профиля → "on-request" + "workspace-write"
+  //   bypass=true,  без override профиля → "never"      + "danger-full-access"
+  //   явные `options.approvalPolicy` / `options.sandboxMode` всегда главнее
   //
-  // Routed via `-c` rather than `--sandbox` or the atomic
-  // `--dangerously-bypass-approvals-and-sandbox` flag — `codex exec resume`
-  // rejects `--sandbox`, and `-c` overrides work uniformly across both the
-  // fresh exec and resume paths.
+  // Маршрутизация через `-c`, а не `--sandbox` или атомарный флаг
+  // `--dangerously-bypass-approvals-and-sandbox`: `codex exec resume`
+  // отвергает `--sandbox`, а overrides через `-c` одинаково работают и на
+  // свежем exec, и на resume.
+  // Кавычки внутри значения — часть TOML-синтаксиса: голое `never` было бы
+  // разобрано не как строка.
   const { approvalPolicy, sandboxMode } = resolveCodexPermissionOverrides(input, logger);
   args.push("-c", `approval_policy="${approvalPolicy}"`);
   args.push("-c", `sandbox_mode="${sandboxMode}"`);
 
+  // Дефолтный путь промпт в аргументах не несёт — он уходит в stdin, поэтому
+  // флаг-подавитель здесь false по построению, а не потому, что про него забыли.
   return { args, usesPromptPlaceholder: false };
 }
 
+// Allowlist вместо блок-листа: process.env напичкан одноразовыми секретами
+// (токены CI, пароли к БД), а CLI нужен лишь малый набор. Новая переменная по
+// умолчанию «не проходит» — это безопаснее, чем забыть её заблокировать.
+// Группы: настройки провайдера (OPENAI_/CODEX_), маркеры самого приложения
+// (AIF_/HANDOFF_), локаль (LANG/LC_), поиск и временные файлы (PATH/TMPDIR/
+// SHELL/TERM), цвет и время (FORCE_COLOR/NO_COLOR/TZ) и прокси (PROXY_ENV_VARS).
 const ALLOWED_ENV_PREFIXES = [
   "OPENAI_",
   "CODEX_",
@@ -224,20 +297,23 @@ const ALLOWED_ENV_PREFIXES = [
 ];
 
 /**
- * Env vars that must NOT be forwarded to the Codex CLI by default, even if they
- * match an allowed prefix. They are blocked unless API-key auth is explicitly
- * opted into via profile `apiKeyEnvVar`/`apiKey` (handled before this set is
- * consulted — see `buildCuratedEnv`).
+ * Переменные окружения, которые нельзя пробрасывать в Codex CLI по умолчанию,
+ * даже если они подходят под разрешённый префикс. Они блокируются, пока
+ * API-key авторизация явно не включена через `apiKeyEnvVar`/`apiKey` профиля
+ * (решается до обращения к этому набору — см. `buildCuratedEnv`).
  *
- * - `OPENAI_API_KEY` — a placeholder/ambient key would otherwise hijack an
- *   OAuth-backed `codex login` session and force the run into API-key auth.
- * - `OPENAI_BASE_URL` — deprecated by the Codex CLI; it causes a WebSocket
- *   endpoint mis-derivation (`wss://.../v1/responses`) and 500 errors. The CLI
- *   reads `openai_base_url` from `config.toml` instead.
+ * - `OPENAI_API_KEY` — иначе placeholder/внешний ключ перехватил бы
+ *   OAuth-сессию `codex login` и силой перевёл запуск на API-key авторизацию.
+ * - `OPENAI_BASE_URL` — устарела для Codex CLI: ломает производную WebSocket
+ *   эндпоинта (`wss://.../v1/responses`) и даёт 500. CLI вместо этого читает
+ *   `openai_base_url` из `config.toml`.
  *
- * Mirrors the SDK transport's blocklist (`adapters/codex/sdk.ts`) so all three
- * local Codex transports isolate ambient OpenAI auth env identically.
+ * Зеркалирует блок-лист SDK-транспорта (`adapters/codex/sdk.ts`), чтобы все три
+ * локальных Codex-транспорта одинаково изолировали внешний OpenAI-auth env.
  */
+// Блок-лист внутри allowlist — не случайность: обе переменные подходят под
+// разрешённый префикс OPENAI_ и прошли бы фильтрацию, если бы не исключение.
+// Без него фоновый placeholder-ключ перехватывал бы OAuth-сессию пользователя.
 const BLOCKED_ENV_KEYS = new Set(["OPENAI_API_KEY", "OPENAI_BASE_URL"]);
 
 interface CuratedEnvResult {
@@ -250,10 +326,10 @@ interface CuratedEnvResult {
 
 interface BuildCuratedEnvOptions {
   /**
-   * Whether API-key auth was explicitly opted into for this run (profile
-   * `apiKeyEnvVar`/`apiKey`). When false, an ambient `OPENAI_API_KEY` — and a
-   * custom `apiKeyEnvVar` — are blocked so a placeholder key cannot hijack an
-   * OAuth-backed `codex login` session.
+   * Была ли для этого запуска явно включена API-key авторизация (`apiKeyEnvVar`/
+   * `apiKey` профиля). Когда false, внешние `OPENAI_API_KEY` и кастомный
+   * `apiKeyEnvVar` блокируются, чтобы placeholder-ключ не перехватил
+   * OAuth-сессию `codex login`.
    */
   allowApiKey: boolean;
 }
@@ -263,24 +339,27 @@ function buildCuratedEnv(apiKeyEnvVar: string, opts: BuildCuratedEnvOptions): Cu
   let forwardedCount = 0;
   let filteredCount = 0;
   let blockedCount = 0;
+  // Счётчики — не украшение: по ним итоговый лог runCodexCli показывает,
+  // что нужная переменная «молча» не дошла до дочернего процесса из-за
+  // отсутствующего префикса в allowlist.
   const droppedDisallowedPrefixKeys = new Set<string>();
   for (const [key, value] of Object.entries(process.env)) {
     if (value == null) continue;
-    // Explicit API-key opt-in: forward the configured key var (which may be
-    // OPENAI_API_KEY) before the blocklist, so API-key auth still works when a
-    // profile requests it.
+    // Явное включение API-key: пробрасываем настроенную ключевую переменную
+    // (ей может быть OPENAI_API_KEY) до блок-листа, чтобы API-key авторизация
+    // работала, когда профиль её запрашивает.
     if (key === apiKeyEnvVar && opts.allowApiKey) {
       env[key] = value;
       forwardedCount += 1;
       continue;
     }
-    // The configured key var without an opt-in must not leak into the child.
+    // Настроенная ключевая переменная без явного включения не должна утечь в дочерний процесс.
     if (key === apiKeyEnvVar) {
       blockedCount += 1;
       continue;
     }
-    // Ambient OpenAI auth env (OPENAI_API_KEY / OPENAI_BASE_URL) is blocked by
-    // default so a placeholder key cannot hijack an OAuth-backed `codex login`.
+    // Внешние OpenAI-auth переменные (OPENAI_API_KEY / OPENAI_BASE_URL) блокируются
+    // по умолчанию, чтобы placeholder-ключ не перехватил OAuth-сессию `codex login`.
     if (BLOCKED_ENV_KEYS.has(key)) {
       blockedCount += 1;
       continue;
@@ -290,6 +369,9 @@ function buildCuratedEnv(apiKeyEnvVar: string, opts: BuildCuratedEnvOptions): Cu
       forwardedCount += 1;
     } else {
       filteredCount += 1;
+      // По именам запоминаются только npm_*: это обвязка npm-скриптов, их
+      // массовое выпадение — норма, а не баг. Перечислять все отфильтрованные
+      // переменные было бы шумом в warn-логе.
       if (key.startsWith("npm_")) {
         droppedDisallowedPrefixKeys.add(key);
       }
@@ -304,16 +386,25 @@ function buildCuratedEnv(apiKeyEnvVar: string, opts: BuildCuratedEnvOptions): Cu
   };
 }
 
+// Приоритет: профиль > env > голое имя. Голое имя разрешается через PATH —
+// так обычно и находится глобально установленный CLI.
 function resolveCliPath(input: RuntimeRunInput): string {
   const options = asRecord(input.options);
   return readString(options.codexCliPath) ?? readString(process.env.CODEX_CLI_PATH) ?? "codex";
 }
 
 /**
- * Probe whether the Codex CLI is actually reachable by running `codex --version`.
- * On Windows bare command names like `"codex"` need `shell: true` to resolve `.cmd`.
+ * Проверяет доступность Codex CLI запуском `codex --version`.
+ * В Windows голое имя команды вроде `"codex"` требует `shell: true` для резолва `.cmd`.
  */
 export function probeCodexCli(cliPath: string): { ok: boolean; version?: string; error?: string } {
+  // execFileSync, а не spawn: проба готовности обязана быть синхронной и
+  // ограниченной по времени (timeout). stderr игнорируется: предупреждения CLI
+  // не признак неработоспособности, а вот ENOENT при спавне — признак. Отказ
+  // возвращается как ok:false, а не бросается: «не готов» — штатный результат.
+  // На Windows shell:true — вынужденное зло (.cmd-шим), поэтому путь сначала
+  // проходит assertSafeWindowsShellExecutablePath: в строку cmd.exe не должен
+  // протиснуться ничего похожего на инъекцию.
   try {
     if (IS_WINDOWS) {
       assertSafeWindowsShellExecutablePath(cliPath, "Codex CLI path");
@@ -330,6 +421,9 @@ export function probeCodexCli(cliPath: string): { ok: boolean; version?: string;
   }
 }
 
+// 120 секунд — осознанный дефолт: хватает на средний поворот, но зависший
+// процесс не блокирует целый этап пайплайна надолго. Number.isFinite отсекает
+// NaN/Infinity, которые могут прийти из конфигурации.
 function resolveTimeoutMs(input: RuntimeRunInput): number {
   const exec = input.execution;
   if (
@@ -342,11 +436,18 @@ function resolveTimeoutMs(input: RuntimeRunInput): number {
   return 120_000;
 }
 
-/* v8 ignore start -- Windows-only spawn logic, untestable in macOS/Linux CI */
+/* v8 ignore start -- логика spawn только для Windows, нетестируемо в macOS/Linux CI */
+// Ручное экранирование для cmd.exe: автоматическое недоступно из-за
+// windowsVerbatimArguments ниже. Кавычки надеваются только при пробелах или
+// кавычках внутри аргумента — чистые токены остаются чистыми.
 function quoteIfNeeded(arg: string): string {
   return arg.includes(" ") || arg.includes('"') ? `"${arg.replace(/"/g, '\\"')}"` : arg;
 }
 
+// Запуск через cmd.exe: /d отключает AutoRun-команды из реестра, /c исполняет
+// команду и завершает shell. Ключевой момент — windowsVerbatimArguments:true:
+// он запрещает Node переэкранировать уже собранную нами строку, иначе кавычки
+// Node столкнутся с правилами cmd.exe и аргументы с пробелами развалятся.
 function spawnCliWindows(
   cliPath: string,
   args: string[],
@@ -366,9 +467,18 @@ function spawnCliWindows(
 /* v8 ignore stop */
 
 // ---------------------------------------------------------------------------
-// stream-json (JSONL) line processor
+// Обработчик строк stream-json (JSONL)
 // ---------------------------------------------------------------------------
 
+// Фрейминг JSONL: по одному JSON-объекту на строку. Беда в том, что поток
+// дочернего процесса приходит «data»-чанками с произвольными границами: в
+// чанке может быть несколько строк или половина строки. Поэтому буфер и
+// flushCompleteLines: обрабатываем только строки, чей завершающий \n уже успел
+// прийти.
+
+// Все поля опциональны: схема JSONL у CLI растёт от версии к версии, и код не
+// должен падать на отсутствующих полях — отсюда индексная сигнатура и typeof-
+// проверки в каждом месте доступа.
 interface CodexItem {
   id?: string;
   type?: string;
@@ -393,7 +503,7 @@ interface CodexStreamMessage {
   };
   total_cost_usd?: number;
   cost_usd?: number;
-  // Legacy single-blob fields used by custom `codexCliArgs` integrations
+  // Legacy-поля одинокого блоба, используемые кастомными интеграциями `codexCliArgs`
   outputText?: string;
   result?: string;
   sessionId?: string;
@@ -406,12 +516,14 @@ interface CodexCliStreamState {
   usage: RuntimeUsage | null;
   events: RuntimeEvent[];
   plainTextFallback: string;
-  /** Raw parsed JSONL events — preserved in `raw` for compatibility. */
+  /** Разобранные сырые JSONL-события — сохраняются в `raw` для совместимости. */
   rawEvents: Array<Record<string, unknown>>;
-  /** True once we have seen any JSONL line that was successfully parsed. */
+  /** True, когда хоть одна строка JSONL разобралась успешно. */
   sawAnyJsonLine: boolean;
 }
 
+// fallbackSessionId — собственный id сессии для resume; свежий запуск узнает
+// настоящий thread_id из события thread.started и перезапишет его.
 function createCodexStreamState(fallbackSessionId: string | null): CodexCliStreamState {
   return {
     sessionId: fallbackSessionId,
@@ -424,6 +536,10 @@ function createCodexStreamState(fallbackSessionId: string | null): CodexCliStrea
   };
 }
 
+// Обрезка — про размер потока: события активности идут в UI по WebSocket, и
+// один cat большого файла не должен забивать канал. Пустая строка при сбое —
+// сознательный выбор: ронять из-за косметической детали весь поток событий
+// не за чем.
 function summarizeToolInput(input: unknown): string {
   if (input == null) return "";
   if (typeof input === "string") {
@@ -439,8 +555,8 @@ function summarizeToolInput(input: unknown): string {
 }
 
 function displayNameForCodexTool(itemType: string): string {
-  // Map internal codex item types to friendlier activity names that match
-  // the Claude convention where possible, so the UI shows "Bash ls" etc.
+  // Маппим внутренние типы элементов codex на более понятные имена активности,
+  // где возможно следуя конвенции Claude, чтобы UI показывал "Bash ls" и т.п.
   switch (itemType) {
     case "command_execution":
       return "Bash";
@@ -455,6 +571,9 @@ function displayNameForCodexTool(itemType: string): string {
   }
 }
 
+// Двойная запись: в state для воспроизведения в итоге и в колбэк для live-
+// стриминга. UI и активность агента видят событие сразу, не дожидаясь выхода
+// процесса.
 function emitCodexEvent(
   state: CodexCliStreamState,
   execution: RuntimeRunInput["execution"],
@@ -468,11 +587,18 @@ function accumulateCodexUsage(state: CodexCliStreamState, message: CodexStreamMe
   const usage = message.usage;
   if (!usage) return;
   const rawInput = usage.input_tokens ?? 0;
+  // cached_input_tokens суммируются с input: поля Codex разделяют промахи и
+  // попадания кэша, а потреблённый контекст — их сумма; иначе rate limit
+  // получал бы занижённую цифру и «свободное место», которого нет.
   const cached = usage.cached_input_tokens ?? 0;
   const inputTokens = rawInput + cached;
   const outputTokens = usage.output_tokens ?? 0;
   const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
+  // Полей стоимости два по историческим причинам: новое total_cost_usd и
+  // legacy cost_usd, которое ещё шлют кастомные интеграции.
   const costRaw = message.total_cost_usd ?? message.cost_usd;
+  // За долгий прогон turn.completed бывает несколько (мульти-тёрн), поэтому
+  // значение дополняется, а не перезаписывается последним.
   if (state.usage) {
     state.usage = {
       inputTokens: state.usage.inputTokens + inputTokens,
@@ -497,12 +623,20 @@ function processCodexJsonLine(
   execution: RuntimeRunInput["execution"],
 ): void {
   const trimmed = line.trim();
+  // Пустые строки — законные разделители в потоке: пропускать их обязательно,
+  // иначе JSON.parse на пустоте засорит plainTextFallback.
   if (!trimmed) return;
 
   let message: CodexStreamMessage;
+  // JSON.parse бросает на обычной текстовой строке — это норма: в stdout CLI
+  // попадают предупреждения о деприкации. Такие строки копятся в
+  // plainTextFallback и спасают вывод прогона, если JSON в поток не пришёл
+  // вообще ни один.
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (!parsed || typeof parsed !== "object") {
+      // Перенос добавляется в начало, а не в конец: первая строка фолбэка не
+      // должна начинаться с пустой.
       state.plainTextFallback += (state.plainTextFallback ? "\n" : "") + trimmed;
       return;
     }
@@ -512,12 +646,22 @@ function processCodexJsonLine(
     return;
   }
 
+  // Флаг различает два разных исхода: «поток JSONL, но ни одно событие не
+  // распознано» (вывод действительно пуст) и «CLI говорил текстом» (тут
+  // спасает фолбэк).
   state.sawAnyJsonLine = true;
+  // Сырые события хранятся как есть: они уходят в raw итогового результата для
+  // обратной совместимости и разбора инцидентов — парсер их не переписывает.
   state.rawEvents.push(message as unknown as Record<string, unknown>);
 
+  // Отсутствующий или нестроковый type ошибкой не считается: такой объект не
+  // совпадёт ни с одной веткой и будет просто проигнорирован — так новая схема
+  // CLI не ломает старый код.
   const type = typeof message.type === "string" ? message.type : "";
   const nowIso = new Date().toISOString();
 
+  // thread.started — источник истины для id сессии: CLI сообщает его сам, и
+  // дальше id уходит в итоговый результат и в опрос лимитов.
   if (type === "thread.started") {
     if (typeof message.thread_id === "string" && message.thread_id.length > 0) {
       state.sessionId = message.thread_id;
@@ -535,10 +679,12 @@ function processCodexJsonLine(
   if (type === "item.started" && message.item) {
     const item = message.item;
     const itemType = typeof item.type === "string" ? item.type : "";
+    // agent_message пропускается на started: текст ещё не готов, показывать
+    // пустую «инструмент-активность» смысла нет — он придёт целиком в completed.
     if (itemType && itemType !== "agent_message") {
       const displayName = displayNameForCodexTool(itemType);
-      // Prefer the `command` field for shell tools, otherwise summarize the
-      // whole item object so the activity line carries meaningful context.
+      // Для shell-инструментов предпочитаем поле `command`, иначе суммаризируем
+      // весь объект item, чтобы строка активности несла осмысленный контекст.
       const detailSource: unknown =
         typeof item.command === "string"
           ? item.command
@@ -561,6 +707,8 @@ function processCodexJsonLine(
     const item = message.item;
     const itemType = typeof item.type === "string" ? item.type : "";
     if (itemType === "agent_message" && typeof item.text === "string") {
+      // Мульти-тёрн: каждый завершённый агентский текст добавляется к
+      // накопленному, пустая строка между ними — визуальный разделитель тёрнов.
       if (state.outputText) state.outputText += "\n\n";
       state.outputText += item.text;
       emitCodexEvent(state, execution, {
@@ -571,13 +719,13 @@ function processCodexJsonLine(
         data: { text: item.text },
       });
     }
-    // Tool-complete events are intentionally not re-surfaced — the
-    // `item.started` already emitted tool:use, and re-emitting on completion
-    // would double-log in agent activity.
+    // События завершения инструмента намеренно не повторяем —
+    // `item.started` уже выдал tool:use, а повтор на завершении
+    // удвоил бы журнал в agent activity.
     return;
   }
 
-  // Legacy "message" event (older codex CLI format)
+  // Legacy-событие "message" (старый формат codex CLI)
   if (type === "message" && typeof message.text === "string") {
     if (state.outputText) state.outputText += "\n\n";
     state.outputText += message.text;
@@ -591,6 +739,8 @@ function processCodexJsonLine(
     return;
   }
 
+  // turn.completed — единственный носитель usage в потоке, поэтому счётчик
+  // обновляется ровно здесь, а не в каждом событии.
   if (type === "turn.completed") {
     accumulateCodexUsage(state, message);
     emitCodexEvent(state, execution, {
@@ -603,22 +753,27 @@ function processCodexJsonLine(
     return;
   }
 
-  // Other event types (turn.started, rate limit, etc.) are ignored.
+  // Прочие типы событий (turn.started, rate limit и т.п.) игнорируются.
+  // Неизвестные типы — штатное будущее растущей схемы: игнорировать их
+  // безопаснее, чем падать на незнакомом событии после обновления CLI.
 }
 
 function finalizeCodexResult(
   state: CodexCliStreamState,
   fallbackSessionId: string | null,
 ): RuntimeRunResult {
-  // Backwards-compat: if custom `codexCliArgs` integrations emit a single
-  // AIF-specific JSON blob (with outputText/result/sessionId/usage/events),
-  // we will have parsed it as a single message in rawEvents but none of the
-  // streaming handlers matched. Recover that shape here.
+  // Обратная совместимость: если кастомные интеграции `codexCliArgs` выдают один
+  // AIF-специфичный JSON-блоб (с outputText/result/sessionId/usage/events),
+  // мы разобрали его как одно сообщение в rawEvents, но ни один
+  // стриминговый обработчик не совпал. Восстанавливаем эту форму здесь.
   if (
     state.rawEvents.length === 1 &&
     !state.outputText &&
     (state.rawEvents[0].outputText != null || state.rawEvents[0].result != null)
   ) {
+    // Каждый каст ниже предваряется typeof/Array.isArray-проверкой: каст без
+    // проверки молча снял бы `| null` с типа и уронил прогон на реальном
+    // битом payload'е (Nullable Cast Rule).
     const parsed = state.rawEvents[0] as CodexStreamMessage & {
       usage?: Record<string, number>;
     };
@@ -637,6 +792,8 @@ function finalizeCodexResult(
         typeof (parsed as Record<string, unknown>).sessionId === "string"
           ? ((parsed as Record<string, unknown>).sessionId as string)
           : fallbackSessionId,
+      // `null` в usage — явное «не измерено», в отличие от нулей: UI и лимиты
+      // различают неизвестное и пустое.
       usage: usageRaw
         ? {
             inputTokens: usageRaw.inputTokens ?? usageRaw.input_tokens ?? 0,
@@ -654,7 +811,9 @@ function finalizeCodexResult(
     };
   }
 
-  // No JSONL events parsed at all — expose raw stdout as plain text.
+  // JSONL-события не разобрались вообще — наружу идёт сырой stdout как plain text.
+  // Единственный случай, где plainTextFallback доходит до результата: без
+  // этого прогон выглядел бы успешно-пустым вместо честного текста CLI.
   if (!state.sawAnyJsonLine) {
     const raw = state.plainTextFallback;
     return {
@@ -665,6 +824,9 @@ function finalizeCodexResult(
     };
   }
 
+  // Обычный путь: то, что накопили обработчики. id из потока приоритетнее
+  // переданного снаружи — CLI источник истины, fallback нужен лишь если
+  // thread.started так и не пришёл.
   return {
     outputText: state.outputText,
     sessionId: state.sessionId ?? fallbackSessionId,
@@ -674,6 +836,11 @@ function finalizeCodexResult(
   };
 }
 
+// Снапшот сравнивается по сериализованному виду: это маленький plain-объект
+// со стабильным порядком ключей, и JSON.stringify служит дешёвым «отпечатком
+// содержимого». Цель — не задублировать runtime:limit, если CLI сам прислал
+// идентичный снапшот в своём потоке. Отсутствие events — не ошибка, а
+// текстовый результат: отсюда ?? false в конце цепочки.
 function hasRuntimeLimitSnapshotSignature(
   events: RuntimeEvent[] | null | undefined,
   signature: string,
@@ -688,8 +855,13 @@ function hasRuntimeLimitSnapshotSignature(
   );
 }
 
+// Финальное снятие лимитов по состоянию сессии, уже после выхода процесса.
+// Отсутствующий снапшот — не ошибка: функция возвращает результат как есть.
+// Rate limit — телеметрия, она не имеет права валить уже успешный прогон.
 async function appendCodexSessionLimitEvent(input: RuntimeRunInput, result: RuntimeRunResult) {
   const sessionId = result.sessionId ?? null;
+  // Без id сессии читать нечего: снапшот лимитов живёт в состоянии сессии, а
+  // прогон мог вовсе не завести поток (упал до thread.started).
   if (!sessionId) {
     return result;
   }
@@ -700,6 +872,8 @@ async function appendCodexSessionLimitEvent(input: RuntimeRunInput, result: Runt
     providerId: input.providerId ?? "openai",
     profileId: input.profileId ?? null,
   });
+  // Отсутствие снапшота — штатная ситуация (сессия не пишет состояние или файл
+  // ещё не появился): результат возвращается как есть, без события.
   if (!snapshot) {
     return result;
   }
@@ -710,6 +884,8 @@ async function appendCodexSessionLimitEvent(input: RuntimeRunInput, result: Runt
   }
 
   const limitEvent = buildRuntimeLimitEvent(snapshot, "token_count");
+  // Новый массив вместо мутации: result уже мог уйти подписчикам, и дописывание
+  // в старый events перерисовало бы уже отправленные данные.
   const nextEvents = [...(result.events ?? []), limitEvent];
   input.execution?.onEvent?.(limitEvent);
 
@@ -719,6 +895,9 @@ async function appendCodexSessionLimitEvent(input: RuntimeRunInput, result: Runt
   };
 }
 
+// Память наблюдателя за лимитами, живёт между опросами внутри одной попытки.
+// lastCheckedAtMs реализует троттлинг (не читать снапшот слишком часто),
+// lastSignature — дедупликацию (не эмитить один и тот же лимит дважды).
 interface CodexSessionLimitObserverState {
   lastCheckedAtMs: number;
   lastSignature: string | null;
@@ -733,11 +912,17 @@ async function maybeEmitCodexSessionLimitEvent(input: {
   force?: boolean;
 }): Promise<void> {
   const sessionId = input.sessionId;
+  // Пока CLI не прислал thread.started, id ещё не известен — опрашивать нечего.
   if (!sessionId) {
     return;
   }
 
   const nowMs = Date.now();
+  // Троттлинг + дедупликация по сигнатуре: опрос вызывается после каждой
+  // разобранной JSONL-строки, и без обоих фильтров состояние сессии читалось
+  // бы в tight-loop, а событие пересылалось при каждом чтении. Нулевой
+  // lastCheckedAtMs означает «ещё не проверяли» — первый опрос проходит без
+  // троттлинга.
   if (
     input.force !== true &&
     input.observerState.lastCheckedAtMs > 0 &&
@@ -753,6 +938,8 @@ async function maybeEmitCodexSessionLimitEvent(input: {
     providerId: input.runtimeInput.providerId ?? "openai",
     profileId: input.runtimeInput.profileId ?? null,
   });
+  // Нет снапшота — нет и события: молчание наблюдателя не должно выглядеть в UI
+  // как «лимиты в порядке», поэтому не эмитится вообще ничего.
   if (!snapshot) {
     return;
   }
@@ -764,6 +951,8 @@ async function maybeEmitCodexSessionLimitEvent(input: {
   input.observerState.lastSignature = signature;
 
   const limitEvent = buildRuntimeLimitEvent(snapshot, "token_count");
+  // Тот же двойной путь, что и у остальных событий: в state — для итогового
+  // результата, в колбэк — чтобы UI увидел лимит, не дожидаясь конца прогона.
   emitCodexEvent(input.state, input.runtimeInput.execution, limitEvent);
   input.logger?.debug?.(
     {
@@ -778,15 +967,15 @@ async function maybeEmitCodexSessionLimitEvent(input: {
 }
 
 /**
- * Compose the prompt that actually reaches the model: `systemPromptAppend`
- * (registry-injected language directive + any other cross-cutting appends)
- * prepended to `input.prompt`, separated by a blank line.
+ * Собирает промпт, который реально доходит до модели: `systemPromptAppend`
+ * (языковая директива реестра + прочие сквозные добавки) в начале `input.prompt`,
+ * разделённые пустой строкой.
  *
- * The Codex CLI has no dedicated system-prompt slot, so this is the only way
- * to deliver `execution.systemPromptAppend` to the model. Computing it once
- * at the top of the run and threading it through both template substitution
- * and stdin write keeps delivery guarantees uniform across the default path
- * AND custom `codexCliArgs` escape hatches that use `{prompt}`.
+ * У Codex CLI нет отдельного слота под system prompt, поэтому это единственный
+ * способ донести `execution.systemPromptAppend` до модели. Вычисление один раз
+ * на верху запуска и сквозная передача и в шаблонную подстановку, и в запись
+ * stdin держат гарантию доставки одинаковой на обычном пути И на кастомных
+ * escape-hatch `codexCliArgs`, использующих `{prompt}`.
  */
 function composePrompt(input: RuntimeRunInput): string {
   const append = input.execution?.systemPromptAppend?.trim();
@@ -794,33 +983,45 @@ function composePrompt(input: RuntimeRunInput): string {
 }
 
 function shouldWritePromptToStdin(args: string[], usesPromptPlaceholder: boolean): boolean {
-  // Any custom arg that embedded `{prompt}` already carries the composed
-  // prompt after substitution — including composite shapes like
-  // `--payload=prefix {prompt} suffix` that the `--prompt`/`--prompt=*` check
-  // below would not catch. `usesPromptPlaceholder` captures that signal
-  // pre-substitution, so we can suppress stdin uniformly.
+  // Любой кастомный аргумент, содержавший `{prompt}`, уже несёт составной
+  // промпт после подстановки — включая составные формы вида
+  // `--payload=prefix {prompt} suffix`, которые проверка `--prompt`/`--prompt=*`
+  // ниже не поймала бы. `usesPromptPlaceholder` ловит этот сигнал до
+  // подстановки, поэтому stdin подавляется единообразно.
   //
-  // A prior `args.includes(prompt)` branch was intentionally removed: the
-  // default-path `args` always carry generic tokens like `exec`, `--json`, or
-  // the model id, so a user prompt that happens to equal one of those would
-  // be false-positive-matched and never delivered. The placeholder flag plus
-  // the explicit `--prompt` check cover every legitimate embed path already.
+  // Прежняя ветка `args.includes(prompt)` намеренно удалена: `args` обычного
+  // пути всегда содержат вспомогательные токены вроде `exec`, `--json` или id
+  // модели, поэтому пользовательский промпт, случайно совпавший с таким
+  // токеном, дал бы ложное срабатывание и не был бы доставлен. Флаг
+  // плейсхолдера плюс явная проверка `--prompt` покрывают все легитимные
+  // пути встраивания.
   if (usesPromptPlaceholder) return false;
   return !args.some((arg) => arg === "--prompt" || arg.startsWith("--prompt="));
 }
 
+// Единый шов платформенного разветвления: ниже — POSIX-spawn со stdio "pipe".
+// Windows-ветка вынесена в spawnCliWindows и закрыта v8 ignore: её нельзя
+// проверить в CI на Linux/macOS, и маркер честнее фантомного падения покрытия.
 function spawnCodexProcess(
   input: RuntimeRunInput,
   cliPath: string,
   args: string[],
   env: Record<string, string>,
 ): ReturnType<typeof spawn> {
-  /* v8 ignore next 2 -- Windows branch */
+  // stdio:"pipe" обязателен: в stdin уходит промпт, из stdout читается JSONL,
+  // stderr копится для диагностики. cwd — каталог задачи, если задан, иначе
+  // корень проекта: относительные пути CLI должен видеть от проекта.
+  /* v8 ignore next 2 -- ветка Windows */
   return IS_WINDOWS
     ? spawnCliWindows(cliPath, args, input.cwd ?? input.projectRoot, env)
     : spawn(cliPath, args, { cwd: input.cwd ?? input.projectRoot, env, stdio: "pipe" });
 }
 
+// Одна попытка запуска: собрать потоки, подписаться на события, вернуть
+// результат. Кортеж различает два исхода: обычный результат и «процесс молчал
+// до стартового таймаута». Во втором случае result бессмыслен, а решение о
+// ретрае принимает вызывающий. Все прочие отказы уходят через reject — уже
+// классифицированными.
 function runCodexCliAttempt(
   input: RuntimeRunInput,
   cliPath: string,
@@ -833,12 +1034,20 @@ function runCodexCliAttempt(
   const execution = input.execution;
   const child = spawnCodexProcess(input, cliPath, args, env);
 
-  // Attach shared timeout utilities
+  // Подключаем общие утилиты таймаутов
+  // Два независимых таймера внутри хелпера: start (дочерний процесс молчит и
+  // не пишет ни в stdout, ни в stderr) и run (жёсткий потолок всего
+  // исполнения). Адаптер лишь потребляет два флага, а cleanup() снимает
+  // таймеры при любом исходе, чтобы живой setTimeout не удерживал event loop
+  // после смерти процесса — та же логика, что и у unref в shared/withTimeout.
   const timeouts = withProcessTimeouts(child, {
     startTimeoutMs: execution?.startTimeoutMs,
     runTimeoutMs: execution?.runTimeoutMs ?? resolveTimeoutMs(input),
   });
 
+  // Состояние потока и состояние наблюдателя разделены: первое — бухгалтерия
+  // вывода прогона, второе — служебный мемо опросов (троттлинг и последняя
+  // сигнатура). Смешивать их незачем: природа данных разная.
   const state = createCodexStreamState(input.sessionId ?? null);
   const limitObserverState: CodexSessionLimitObserverState = {
     lastCheckedAtMs: 0,
@@ -846,8 +1055,15 @@ function runCodexCliAttempt(
   };
   let stdoutBuffer = "";
   let stderr = "";
+  // Цепочка сериализует асинхронные опросы: они стартуют часто, а завершаются
+  // не гарантированно в том же порядке. Без сериализации устаревший ответ мог
+  // бы затереть lastSignature, и дедупликация приняла бы уже отправленные
+  // данные за свежие.
   let limitPollChain = Promise.resolve();
 
+  // .catch в хвосте держит цепочку живой: необработанное отклонение убило бы
+  // её, и все последующие опросы повисли бы на мёртвом промисе. Наблюдение за
+  // лимитами не имеет права ронять полезную работу.
   const scheduleLimitPoll = (force = false): void => {
     limitPollChain = limitPollChain
       .then(() =>
@@ -873,6 +1089,8 @@ function runCodexCliAttempt(
       });
   };
 
+  // while, а не if: один чанк может содержать несколько полных строк —
+  // буфер вычерпывается целиком, иначе события отстали бы от потока.
   const flushCompleteLines = (): void => {
     let newlineIdx = stdoutBuffer.indexOf("\n");
     while (newlineIdx !== -1) {
@@ -884,6 +1102,11 @@ function runCodexCliAttempt(
     }
   };
 
+  // Восклицательные знаки здесь честны: stdio:"pipe" гарантирует наличие
+  // потоков, а null-union у spawn.stdout — защита от других режимов stdio, а не
+  // реальная опасность в этом коде. try/catch обрамляет весь flush, а не разбор
+  // отдельной строки: исключение на одной строке не должно съедать остальной
+  // буфер и вешать подписку 'data'.
   child.stdout!.on("data", (chunk: Buffer | string) => {
     stdoutBuffer += String(chunk);
     try {
@@ -896,13 +1119,21 @@ function runCodexCliAttempt(
     }
   });
 
+  // Весь stderr копится в одну строку: он нужен ровно один раз — как
+  // диагностика в сообщении при ненулевом коде выхода. Кольцевого буфера,
+  // как в agent/stderrCollector, здесь нет: прогон ограничен таймером run,
+  // и болтливый CLI всё равно не успеет раздуть память до бесконечности.
   child.stderr!.on("data", (chunk: Buffer | string) => {
     const text = String(chunk);
     stderr += text;
     execution?.onStderr?.(text);
   });
 
-  // If abort is requested, kill the child
+  // Если запрошен abort — убиваем дочерний процесс
+  // SIGTERM — просьба завершиться штатно: CLI успеет дозаписать вывод. В
+  // противовес таймаутам: withProcessTimeouts добивает зависший процесс
+  // SIGKILL'ом, потому что ждать вежливости от зависшего бессмысленно.
+  // { once: true } — иначе слушатель протекал бы при переиспользовании сигнала.
   if (execution?.abortController) {
     execution.abortController.signal.addEventListener(
       "abort",
@@ -913,35 +1144,57 @@ function runCodexCliAttempt(
     );
   }
 
+  // Без этого обработчика EPIPE при записи упал бы весь процесс Node: у
+  // стримов ошибка без слушателя выбрасывается наружу. Молчание безопасно:
+  // если ребёнок умер, не прочитав промпт, настоящая причина придёт через
+  // 'close' с ненулевым кодом.
   child.stdin!.on("error", () => {
-    // Ignore broken-pipe errors — the child may exit before stdin is fully written
+    // Ошибки broken-pipe игнорируются — процесс может завершиться до записи всего stdin
   });
-  // `composedPrompt` already includes `execution.systemPromptAppend`
-  // prepended to the user prompt (see `composePrompt()`). When custom
-  // `codexCliArgs` embed the prompt via `{prompt}` or `--prompt`, the same
-  // value was substituted into `args`, so `shouldWritePromptToStdin()` skips
-  // stdin here to avoid sending the prompt twice.
+  // `composedPrompt` уже содержит `execution.systemPromptAppend`,
+  // пристыкованный к пользовательскому промпту (см. `composePrompt()`). Когда
+  // кастомные `codexCliArgs` встраивают промпт через `{prompt}` или `--prompt`,
+  // то же значение подставлено в `args`, поэтому `shouldWritePromptToStdin()`
+  // здесь пропускает stdin, чтобы не отправить промпт дважды.
+  // Промпт пишется в stdin, а не в argv: аргументы командной строки видны
+  // любым процессам в списке ОС, упираются в лимит длины командной строки и
+  // требуют экранирования кавычек. У канала этих трёх проблем нет. end() закрывает
+  // stdin: CLI читает промпт до EOF, без полузакрытия он ждал бы ввода вечно.
   if (shouldWritePromptToStdin(args, usesPromptPlaceholder)) {
     child.stdin!.write(composedPrompt);
   }
   child.stdin!.end();
 
+  // Исход связывают с 'close', а не с 'exit': exit срабатывает в момент
+  // смерти процесса, но в буферах stdio ещё могут оставаться неотданные
+  // строки — ждать их дренажа критично, иначе потеряется последний тёрн.
   return new Promise((resolve, reject) => {
+    // Сбой спавна (ENOENT — нет бинарника) приходит асинхронным событием
+    // 'error', а не исключением из spawn(). classifyCodexRuntimeError —
+    // единственная разрешённая точка классификации: наружу уходит ошибка со
+    // структурированной категорией, по ней и ветвятся, а не по тексту.
     child.on("error", (error) => {
       timeouts.cleanup();
       reject(classifyCodexRuntimeError(error));
     });
 
+    // Обработчик асинхронный, и это ловушка: исключение внутри async-колбэка не
+    // попадёт в этот Promise, а всплывёт как unhandledRejection. Поэтому
+    // опасные шаги обёрнуты в try, а await limitPollChain безопасен — каждое
+    // звено цепочки уже имеет свой .catch.
     child.on("close", async (code) => {
       timeouts.cleanup();
 
-      // Flush any trailing buffer content as a final line.
+      // Сбрасываем остаток буфера как финальную строку.
+      // Хвост без завершающего \n — норма для оборвавшегося потока: после
+      // смерти процесса данных больше не будет, поэтому остаток буфера считают
+      // полной строкой.
       if (stdoutBuffer.length > 0) {
         try {
           processCodexJsonLine(stdoutBuffer, state, execution);
           scheduleLimitPoll();
         } catch {
-          /* ignore tail processing errors */
+          /* игнорируем ошибки обработки хвоста */
         }
         stdoutBuffer = "";
       }
@@ -956,16 +1209,27 @@ function runCodexCliAttempt(
           { runtimeId: input.runtimeId, startTimeoutMs: execution?.startTimeoutMs },
           "Codex CLI start timeout — process produced no output",
         );
+        // `null as unknown as RuntimeRunResult` — сознательный sentinel, а не
+        // случайность: результат на этой ветке бессмыслен, а честный тип
+        // заставил бы всех вызывающих проверять null. Контракт держится на
+        // флаге startTimedOut — его читают первым.
         resolve({ result: null as unknown as RuntimeRunResult, startTimedOut: true });
         return;
       }
 
+      // Потолок исполнения обеспечивает сам withProcessTimeouts (SIGKILL),
+      // поэтому здесь остаётся только превратить факт таймаута в
+      // структурированную ошибку вместо ожидания «особого» кода выхода.
       if (timeouts.runTimedOut) {
         const runMs = execution?.runTimeoutMs ?? resolveTimeoutMs(input);
         reject(makeProcessRunTimeoutError(runMs));
         return;
       }
 
+      // Ненулевой код сам по себе безлик, поэтому в сообщение тянут stderr,
+      // а при его пустоте — текст модели. Дальше ошибка проходит через
+      // классификатор: наружу уходит структурированная категория, текст служит
+      // только человеку (Project rule: ветвление по category, не по message).
       if (code !== 0) {
         const tail = state.outputText || state.plainTextFallback || "unknown error";
         const message = `Codex CLI exited with code ${code}: ${stderr || tail}`;
@@ -985,27 +1249,32 @@ function runCodexCliAttempt(
   });
 }
 
+// Публичная точка входа одного прогона почти не содержит логики — она
+// выстраивает этапы в порядке: композиция промпта, аргументы, окружение,
+// попытка (с одним ретраем на start-timeout), финальное снятие лимитов.
 export async function runCodexCli(
   input: RuntimeRunInput,
   logger?: CodexCliLogger,
 ): Promise<RuntimeRunResult> {
   const cliPath = resolveCliPath(input);
-  // Compose once so the same prompt (systemPromptAppend + user prompt) is
-  // used for both template substitution in `codexCliArgs` and the stdin
-  // fallback — otherwise a custom `--prompt={prompt}` would silently drop
-  // the language directive the registry attached via `systemPromptAppend`.
+  // Составляем один раз, чтобы один и тот же промпт (systemPromptAppend +
+  // промпт пользователя) шёл и в шаблонную подстановку `codexCliArgs`, и в
+  // stdin-резерв — иначе кастомный `--prompt={prompt}` молча потерял бы
+  // языковую директиву, которую реестр пристыковал через `systemPromptAppend`.
   const composedPrompt = composePrompt(input);
   const { args, usesPromptPlaceholder } = normalizeCliArgs(input, composedPrompt, logger);
   const options = asRecord(input.options);
   const explicitApiKeyEnvVar = readString(options.apiKeyEnvVar);
   const explicitApiKey = readString(options.apiKey);
   const allowApiKey = Boolean(explicitApiKeyEnvVar) || Boolean(explicitApiKey);
+  // Дефолтное имя совпадает с тем, что ищет сам Codex CLI: профиль может
+  // переопределить переменную, но по умолчанию нужен именно OPENAI_API_KEY.
   const apiKeyEnvVar = explicitApiKeyEnvVar ?? "OPENAI_API_KEY";
 
-  // For a custom base URL (OpenAI-compatible gateway like router.ai), the Codex
-  // CLI reads the endpoint from ~/.codex/config.toml (it ignores OPENAI_BASE_URL
-  // / CODEX_BASE_URL env vars). Ensure the provider block exists before spawn so
-  // the CLI reaches the configured gateway instead of api.openai.com.
+  // Для кастомного base URL (OpenAI-совместимый шлюз вроде router.ai) Codex CLI
+  // читает эндпоинт из ~/.codex/config.toml (env OPENAI_BASE_URL /
+  // CODEX_BASE_URL он игнорирует). Гарантируем наличие блока провайдера до
+  // spawn, чтобы CLI шёл в настроенный шлюз, а не в api.openai.com.
   const baseUrl =
     readString(options.baseUrl) ??
     readString(options.agentApiBaseUrl) ??
@@ -1023,11 +1292,14 @@ export async function runCodexCli(
     );
   }
 
+  // Allowlist строится раньше, чем в env попадает явный apiKey: ключ из профиля
+  // никогда не приезжает из process.env, так что случайная переменная с тем же
+  // именем не имеет шансов просочиться в ребёнка незаметно от аудита.
   const curatedEnv = buildCuratedEnv(apiKeyEnvVar, { allowApiKey });
   const env = curatedEnv.env;
-  // An explicitly configured literal apiKey is injected directly (it is never
-  // forwarded from process.env). Mirror it onto OPENAI_API_KEY so the Codex CLI
-  // picks it up regardless of the custom env var name.
+  // Явно заданный литеральный apiKey внедряется напрямую (он никогда не
+  // приезжает из process.env). Зеркалируем его в OPENAI_API_KEY, чтобы Codex CLI
+  // подхватил ключ независимо от имени кастомной переменной.
   if (explicitApiKey) {
     env[apiKeyEnvVar] = explicitApiKey;
     env.OPENAI_API_KEY = explicitApiKey;
@@ -1054,6 +1326,9 @@ export async function runCodexCli(
     );
   }
 
+  // Логируется число аргументов, а не сами args: после подстановок внутрь
+  // аргументов мог попасть промпт — пользовательский контент не должен утекать
+  // в логи рантайма.
   logger?.info?.(
     {
       runtimeId: input.runtimeId,
@@ -1076,7 +1351,13 @@ export async function runCodexCli(
     logger,
   );
 
+  // Ровно один повтор и ровно на start-timeout: этот симптом похож на
+  // преходящее состояние (бинарник завис при старте, холодный контейнер не
+  // прогрет). Повторный сбой означает проблему конфигурации — дальнейшие
+  // попытки лишь удлинят прогон.
   if (startTimedOut) {
+    // Пауза берётся из execution-intent, а не хардкодится: политикой backoff
+    // распоряжается вызывающий, адаптер лишь исполняет её.
     const retryDelayMs = resolveRetryDelay(input.execution ?? {});
     logger?.warn?.(
       { runtimeId: input.runtimeId, retryDelayMs },
@@ -1094,6 +1375,8 @@ export async function runCodexCli(
       logger,
     );
     if (retry.startTimedOut) {
+      // Структурированная ошибка: категория и длительность внутри исключения, так
+      // что вызывающий различает сбои по полям, а не разбором сообщения.
       throw makeProcessStartTimeoutError(input.execution?.startTimeoutMs ?? 0);
     }
     return appendCodexSessionLimitEvent(input, retry.result);

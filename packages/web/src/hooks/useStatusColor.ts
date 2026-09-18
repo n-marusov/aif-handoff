@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { STATUS_CONFIG, type TaskStatus } from "@aif/shared/browser";
 
 /**
- * Returns inline styles for a status badge: semi-transparent bg, border, and text color.
+ * Возвращает inline-стили для бейджа статуса: полупрозрачный фон, рамка и цвет текста.
  */
 export function statusColorStyle(status: TaskStatus): CSSProperties {
   const color = STATUS_CONFIG[status].color;
@@ -14,7 +14,7 @@ export function statusColorStyle(status: TaskStatus): CSSProperties {
 }
 
 /**
- * Returns the hex color for a given status.
+ * Возвращает hex-цвет для заданного статуса.
  */
 export function statusHex(status: TaskStatus): string {
   return STATUS_CONFIG[status].color;
@@ -41,7 +41,7 @@ const DEFAULT_KIND_BADGE = {
 };
 
 /**
- * Maps an activity kind to a badge label + className.
+ * Сопоставляет вид активности подписи бейджа + className.
  */
 export function kindBadgeStyle(kind: string): {
   label: string;

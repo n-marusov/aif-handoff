@@ -1,10 +1,11 @@
 import http from "k6/http";
 import { BASE_URL, okStatus, tag } from "./common.js";
 
-// Stampede scenario for /runtime-profiles: 20 virtual users hit the endpoint
-// concurrently so the server-side cache has to serve all of them from a single
-// expensive scan. This is the regression we just fixed — 14s cold pre-fix, so
-// the thresholds here assume the capped-scan + 60s snapshot cache are live.
+// Сценарий «топота» для /runtime-profiles: 20 виртуальных пользователей бьют по
+// эндпоинту одновременно, так что серверный кеш обязан обслужить всех с одного
+// дорогого сканирования. Это ровно та регрессия, которую мы починили: до правки
+// холодный ответ был 14с, поэтому пороги исходят из ограниченного скана и
+// снапшот-кеша на 60с.
 export const options = {
   scenarios: {
     stampede: {

@@ -61,31 +61,31 @@ function failureMessage(
 }
 
 /**
- * Guided wizard for `codex login --device-auth` running inside the agent
- * container. The CLI prints a fixed verification URL plus a one-time code;
- * the user opens the URL in the host browser, enters the code, and the CLI
- * exits when ChatGPT confirms. The status query polls the broker until the
- * child process exits.
+ * Пошаговый мастер для `codex login --device-auth`, запускаемого внутри
+ * контейнера агента. CLI печатает фиксированный verification URL и одноразовый
+ * код; пользователь открывает URL в браузере хоста, вводит код, и CLI
+ * завершается после подтверждения ChatGPT. Запрос статуса опрашивает брокера
+ * до выхода дочернего процесса.
  *
- * Composed of existing UI primitives only — never add new primitives without
- * a matching Pencil design sync.
+ * Собран только из существующих UI-примитивов — не добавляй новые примитивы
+ * без синхронизации с дизайном Pencil.
  */
 export function CodexLoginCard() {
   const [view, setView] = useState<ViewState>(INITIAL_VIEW);
   const [codeCopied, setCodeCopied] = useState(false);
-  // Tracks whether the polling status query has reported an active session
-  // for the current wizard run. Without this gate, the initial inactive
-  // status response would race with the optimistic `awaiting_completion`
-  // transition from `handleStart` and immediately flip the wizard to
-  // success — even though the user has not yet completed the flow.
+  // Отслеживает, сообщал ли опрашиваемый статус об активной сессии
+  // для текущего запуска мастера. Без этой защиты начальный неактивный
+  // ответ статуса вступил бы в гонку с оптимистичным переходом
+  // `awaiting_completion` из `handleStart` и сразу переключил мастер в
+  // success — хотя пользователь ещё не прошёл флоу.
   const sawActiveRef = useRef(false);
 
   const capabilities = useCodexLoginCapabilities();
-  // Initial fetch fires once when the card first enters idle/awaiting_completion
-  // (to adopt any pre-existing session). After success/error the query is
-  // disabled. Interval polling only runs during awaiting_completion. Without
-  // these gates the broker would be hit on every StrictMode remount, every
-  // window focus, every reconnect — and once per second while idle.
+  // Начальная загрузка выполняется один раз, когда карточка впервые входит в
+  // idle/awaiting_completion (чтобы подхватить существующую сессию). После
+  // success/error запрос отключён. Опрос по интервалу идёт только в
+  // awaiting_completion. Без этих защит брокер получал бы запросы на каждый
+  // ремант StrictMode, на фокус окна, на реконнект — и раз в секунду в простое.
   const statusQuery = useCodexLoginStatus({
     enabled: view.step === "idle" || view.step === "awaiting_completion",
     pollIntervalMs: view.step === "awaiting_completion" ? 1_000 : false,
@@ -93,13 +93,13 @@ export function CodexLoginCard() {
   const startMutation = useStartCodexLogin();
   const cancelMutation = useCancelCodexLogin();
 
-  // Adopt any pre-existing session the broker reports (user refreshed the page),
-  // and detect terminal status (success / non-zero exit / signal / timeout /
-  // cancel) when an active session goes inactive. Success is gated on the
-  // broker's explicit `lastResult.ok === true` — we never infer success from
-  // the mere absence of an active child, because codex `--device-auth` can
-  // exit non-zero (network failure, user cancel in browser, etc.) and the UI
-  // must not lie to the user about authentication state.
+  // Подхватывает любую существующую сессию, о которой сообщает брокер (пользователь
+  // перезагрузил страницу), и определяет терминальный статус (success / ненулевой
+  // код выхода / сигнал / timeout / cancel), когда активная сессия становится
+  // неактивной. Success требует явного `lastResult.ok === true` от брокера — мы
+  // никогда не выводим успех из простого отсутствия активного дочернего процесса,
+  // потому что codex `--device-auth` может завершиться с ошибкой (сбой сети,
+  // отмена в браузере и т.п.), и UI не должен врать о состоянии аутентификации.
   useEffect(() => {
     const data = statusQuery.data;
     if (!data) return;
@@ -119,7 +119,7 @@ export function CodexLoginCard() {
     }
     if (view.step !== "awaiting_completion" || !sawActiveRef.current) return;
     const result = data.lastResult;
-    // Stale lastResult (different session) — keep waiting; ignore.
+    // Устаревший lastResult (другая сессия) — игнорируем, продолжаем ждать.
     if (result && view.sessionId !== null && result.sessionId !== view.sessionId) return;
     sawActiveRef.current = false;
     if (result?.ok) {
@@ -148,10 +148,10 @@ export function CodexLoginCard() {
     setView(INITIAL_VIEW);
     try {
       const res = await startMutation.mutateAsync();
-      // Don't set sawActiveRef here — the polling status query is the
-      // authoritative signal that the broker has an active child. If the
-      // query has not yet confirmed active=true and we already see
-      // active=false, that's noise from a stale snapshot, not a completion.
+      // Не ставим sawActiveRef здесь — авторитетный сигнал о том, что у брокера
+      // есть активный дочерний процесс, даёт только опрос статуса. Если запрос
+      // ещё не подтвердил active=true, а мы уже видим active=false, — это шум
+      // из устаревшего снапшота, а не завершение.
       setView({
         step: "awaiting_completion",
         verificationUrl: res.verificationUrl,
@@ -160,7 +160,7 @@ export function CodexLoginCard() {
         error: null,
       });
     } catch (err) {
-      // 409 = broker already has an active session (e.g. after a page reload).
+      // 409 = у брокера уже есть активная сессия (например, после перезагрузки страницы).
       if (err instanceof ApiError && err.status === 409) {
         const body = err.data as
           | { sessionId?: string; verificationUrl?: string; userCode?: string }
@@ -191,7 +191,7 @@ export function CodexLoginCard() {
       setCodeCopied(true);
       setTimeout(() => setCodeCopied(false), 1500);
     } catch {
-      // ignore — user can still copy manually from the displayed code
+      // игнорируем — пользователь может скопировать код вручную с экрана
     }
   };
 
@@ -199,7 +199,7 @@ export function CodexLoginCard() {
     try {
       await cancelMutation.mutateAsync();
     } catch {
-      // Even if cancel fails, the UI resets so the user can retry.
+      // Даже если отмена не удалась, UI сбрасывается, чтобы пользователь мог повторить.
     }
     sawActiveRef.current = false;
     setView(INITIAL_VIEW);

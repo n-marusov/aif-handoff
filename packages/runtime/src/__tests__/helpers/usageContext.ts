@@ -1,10 +1,10 @@
 import { UsageSource, type RuntimeUsageContext } from "../../types.js";
 
 /**
- * Shared test-only usage context. Lets test fixtures build valid
- * `RuntimeRunInput` objects without repeating the boilerplate in every file.
+ * Общий usage context только для тестов: позволяет фикстурам строить валидные
+ * `RuntimeRunInput` без бойлерплейта в каждом файле.
  *
- * Use as:
+ * Пример использования:
  * ```ts
  * const input: RuntimeRunInput = {
  *   runtimeId: "claude",

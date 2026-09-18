@@ -1,3 +1,22 @@
+/**
+ * Универсальная точка запуска субагента: прогоняет промпт через выбранный
+ * runtime-адаптер и приводит результат к единому виду для всех стадий пайплайна
+ * (planner, implementer, verifier, reviewer).
+ *
+ * Ключевые инварианты, из-за которых модуль устроен именно так:
+ * - Резолвинг контекста выполнения (профиль, транспорт, модель, промпт) вынесен
+ *   в отдельную фазу resolveExecutionContext. К моменту старта адаптера все
+ *   решения уже приняты, а сам запуск остается максимально простым.
+ * - Два независимых кэша лимитов (state и broadcast) гасят лишние записи в БД
+ *   и лишние WebSocket-рассылки: провайдеры шлют лимиты пачками, а подписчику
+ *   интересна только смена состояния.
+ * - Любая ошибка наружу отдается обезличенной (buildSanitizedSubagentError):
+ *   сырой текст провайдера может содержать ключи и промпты, поэтому он остается
+ *   в логах, а в БД и UI уходит только безопасная причина.
+ * - Warmup-форк сессии намеренно допускает отказ: это оптимизация холодного
+ *   старта, и при любой неопределенности она отключается, а не роняет прогон.
+ */
+
 import {
   clearRuntimeProfileLimitSnapshot,
   createDbUsageSink,
@@ -75,8 +94,13 @@ import {
   notifyTaskUsageBroadcast,
 } from "./notifier.js";
 
+// Именованный логгер модуля: сообщения субагента нужно легко вычленять из
+// общего потока координатора при разборе инцидентов.
 const log = logger("subagent-query");
 
+// Задача, отданная человеку, не должна исполняться агентом: это признак гонки
+// между ручным вмешательством и автоочередью. Ошибка типизирована, потому что
+// вызывающий код различает "задачу забрали" и "рантайм упал".
 export class AiHandoffRequiredError extends Error {
   readonly code = "ai_handoff_required" as const;
 
@@ -86,9 +110,13 @@ export class AiHandoffRequiredError extends Error {
   }
 }
 
-// Loop-guard error (defined in loopGuard.ts to avoid a circular import).
+// Ошибка loop-guard (определена в loopGuard.ts, чтобы избежать циклического импорта).
 export { AiLoopDetectedError, type LoopDetectedReason } from "./loopGuard.js";
 
+// Проверка владения вызывается дважды: до резолвинга контекста и
+// непосредственно перед запуском адаптера. Между этими точками проходит
+// разрешение профиля и походы в кэш, за которые задачу могли успеть вернуть
+// человеку, поэтому одной проверки в начале недостаточно.
 function assertAiExecutionOwner(taskId: string): void {
   const task = findTaskById(taskId);
   if (task?.executionOwner === "human") {
@@ -100,13 +128,24 @@ function assertAiExecutionOwner(taskId: string): void {
   }
 }
 
+// Heartbeat одновременно продлевает claim координатора, поэтому интервал
+// должен быть заметно меньше срока аренды (см. getLockRenewalMs).
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
+// Строковый маркер вместо флага: он попадает в reason у AbortController и
+// позже сравнивается адаптерами при разборе причины прерывания.
 const FIRST_ACTIVITY_TIMEOUT_ERROR = "first_activity_timeout";
+// Одна повторная попытка сверх первой, плюс отдельный общий лимит ниже.
 const FIRST_ACTIVITY_MAX_RETRIES = 2;
+// Два кэша решают две разные задачи: state гасит повторные записи в БД,
+// broadcast - повторные рассылки лимитов в UI. Ключи у них разные
+// (profileId против projectId+taskId+profileId), объединять их нельзя.
 const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 const runtimeLimitBroadcastCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 
+// Единая точка оповещения после записи usage: сначала адресное событие по
+// задаче, затем сброс лимитов на уровне проекта. Оба уведомления
+// fire-and-forget - сбой рассылки не должен ломать уже успешный запрос.
 function notifyRuntimeUsageRefresh(input: {
   projectId?: string | null;
   runtimeProfileId?: string | null;
@@ -129,6 +168,10 @@ function notifyRuntimeUsageRefresh(input: {
   });
 }
 
+// Ошибки адаптеров часто оборачиваются по пути, поэтому причина ищется по
+// цепочке cause. Возвращается именно RuntimeExecutionError: только у него есть
+// структурированные поля category, adapterCode и limitSnapshot, по которым
+// принимаются решения выше по стеку (классификация ошибок по строке запрещена).
 function findRuntimeExecutionError(error: unknown): RuntimeExecutionError | null {
   if (error instanceof RuntimeExecutionError) {
     return error;
@@ -139,6 +182,9 @@ function findRuntimeExecutionError(error: unknown): RuntimeExecutionError | null
   return null;
 }
 
+// Наружу отдается новая ошибка с безопасным текстом, но с сохранением всех
+// структурированных признаков исходной. Терять их нельзя: выше по стеку именно
+// по category и limitSnapshot решается, повторять ли запрос и с какой задержкой.
 function buildSanitizedSubagentError(
   error: unknown,
   safeReason: ReturnType<typeof mapSafeRuntimeErrorReason>,
@@ -169,6 +215,9 @@ function buildSanitizedSubagentError(
   });
 }
 
+// Кэш снимается только если подпись не успела смениться: иначе можно затереть
+// ключ, уже записанный более свежим состоянием, и спровоцировать повторную
+// рассылку устаревших данных.
 function clearRuntimeLimitBroadcastCacheKeyIfUnchanged(
   broadcastCacheKey: string,
   signature: string,
@@ -178,6 +227,9 @@ function clearRuntimeLimitBroadcastCacheKeyIfUnchanged(
   }
 }
 
+// Синхронизирует состояние лимитов между адаптером, БД и UI. Функция
+// сознательно не пробрасывает исключения: это фоновое обслуживание, и его сбой
+// не должен превращать успешный прогон агента в ошибку стадии.
 function refreshRuntimeProfileLimitState(input: {
   runtimeProfileId?: string | null;
   runtimeId?: string | null;
@@ -188,6 +240,9 @@ function refreshRuntimeProfileLimitState(input: {
   workflowKind?: string | null;
   reason: string;
 }): void {
+  // Снимок нормализуется сразу: и сравнение подписей, и запись в БД должны
+  // идти по канонической форме, иначе один и тот же лимит будет выглядеть как
+  // новое состояние и вызовет лишний UPDATE и лишнее событие в UI.
   const normalizedSnapshot = input.snapshot ? normalizeRuntimeLimitSnapshot(input.snapshot) : null;
   const runtimeProfileId = input.runtimeProfileId ?? normalizedSnapshot?.profileId ?? null;
   if (!runtimeProfileId) {
@@ -223,6 +278,8 @@ function refreshRuntimeProfileLimitState(input: {
     return;
   }
 
+  // Подпись - дешевый ключ дедупликации: сравнивать сами снимки было бы
+  // дороже и хрупче, а TTL кэша ограничивает окно доверия к этой памяти.
   const cachedSignature = runtimeLimitStateCache.get(runtimeProfileId);
   const shouldPersist = cachedSignature !== signature;
   if (!shouldPersist) {
@@ -239,6 +296,8 @@ function refreshRuntimeProfileLimitState(input: {
     );
   }
 
+  // Одна метка времени на запись и рассылку: строка в БД и событие в UI должны
+  // ссылаться на один и тот же момент, иначе состояние выглядит рассинхронным.
   const persistedAt = new Date().toISOString();
   const taskRow = findTaskById(input.taskId);
   const projectId = taskRow?.projectId ?? null;
@@ -250,6 +309,8 @@ function refreshRuntimeProfileLimitState(input: {
   const cachedBroadcastSignature = broadcastCacheKey
     ? runtimeLimitBroadcastCache.get(broadcastCacheKey)
     : null;
+  // Рассылка дедуплицируется отдельным ключом: сброс кэша state (например, при
+  // смене профиля) не должен порождать дубль события в UI.
   const shouldBroadcast = Boolean(broadcastCacheKey) && cachedBroadcastSignature !== signature;
 
   try {
@@ -330,24 +391,30 @@ function refreshRuntimeProfileLimitState(input: {
   }
 }
 
+// Аренда координатора продлевается с запасом: таймаут стадии плюс пять минут,
+// чтобы долгий прогон не потерял claim между двумя heartbeat.
 function getLockRenewalMs(): number {
   return Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
 }
 
 /**
- * First-activity watchdog: aborts the agent if no runtime activity
- * arrives within AGENT_FIRST_ACTIVITY_TIMEOUT_MS after "started".
- * Detects hung agents early (~60s) instead of waiting for the 90-min stale timeout.
+ * Сторож первой активности: прерывает агента, если за AGENT_FIRST_ACTIVITY_TIMEOUT_MS
+ * после «started» не приходит никакой активности runtime.
+ * Ловит зависших агентов рано (~60 с) вместо ожидания 90-минутного stale-таймаута.
  */
 function createFirstActivityWatchdog(
   timeoutMs: number,
   abortController: AbortController | undefined,
   onStall: () => void,
 ): { clear: () => void; markActivity: () => void; didFire: boolean } {
+  // Нулевой таймаут означает "сторож выключен", а не "сработать немедленно":
+  // так транспорт без инкрементального стрима просто отключает механизм.
   if (timeoutMs <= 0) {
     return { clear: () => {}, markActivity: () => {}, didFire: false };
   }
 
+  // Два независимых флага: fired фиксирует факт срабатывания (его читает
+  // retry-цикл), cleared - что таймер уже снят и повторно стрелять нечем.
   let fired = false;
   let cleared = false;
 
@@ -370,6 +437,8 @@ function createFirstActivityWatchdog(
         clearTimeout(timer);
       }
     },
+    // markActivity одноразовый: первое же событие от рантайма снимает сторож
+    // навсегда, чтобы таймер не выстрелил в середине долгого ответа.
     markActivity() {
       if (!fired && !cleared) {
         cleared = true;
@@ -379,6 +448,8 @@ function createFirstActivityWatchdog(
   };
 }
 
+// Синглтон в виде промиса, а не готового значения: параллельные стадии должны
+// разделить один bootstrap, а не поднять по реестру на каждую.
 let runtimeRegistryPromise: Promise<RuntimeRegistry> | null = null;
 
 export interface SubagentQueryOptions {
@@ -387,39 +458,39 @@ export interface SubagentQueryOptions {
   agentName: string;
   prompt: string;
   maxBudgetUsd?: number | null;
-  /** Preferred agent definition name. Runtime prompt policy may fallback to slash strategy. */
+  /** Предпочтительное имя agent definition. Prompt-политика runtime может откатиться к слэш-стратегии. */
   agent?: string;
-  /** Optional slash command fallback used when agent definitions are unavailable. */
+  /** Запасной слэш-команд, используемый, когда agent definitions недоступны. */
   fallbackSlashCommand?: string;
-  /** Runtime profile resolution mode — determines which project default is used. */
+  /** Режим разрешения runtime-профиля — определяет, какой проектный дефолт используется. */
   profileMode?: "task" | "plan" | "review";
-  /** Whether to skip code review stage (implementing → done instead of implementing → review). */
+  /** Пропускать ли стадию ревью кода (implementing → done вместо implementing → review). */
   skipReview?: boolean;
-  /** Optional override for tests/tuning: timeout waiting for first message from query stream. */
+  /** Необязательное переопределение для тестов/настройки: таймаут ожидания первого сообщения из потока запроса. */
   queryStartTimeoutMs?: number;
-  /** Optional override for tests/tuning: delay before retrying after query_start_timeout. */
+  /** Необязательное переопределение для тестов/настройки: задержка перед повтором после query_start_timeout. */
   queryStartRetryDelayMs?: number;
-  /** AbortController for cancelling a running query from outside (e.g. stage timeout). */
+  /** AbortController для отмены выполняемого запроса извне (например, таймаут стадии). */
   abortController?: AbortController;
-  /** Optional explicit workflow spec. If omitted, a default one is generated from options. */
+  /** Необязательная явная спецификация workflow. Если пропущена, генерируется дефолтная из опций. */
   workflowSpec?: RuntimeWorkflowSpec;
-  /** Optional workflow kind used when auto-generating workflow spec. */
+  /** Необязательный вид workflow при автогенерации спецификации. */
   workflowKind?: string;
-  /** Required capabilities for this workflow. */
+  /** Обязательные возможности для этого workflow. */
   requiredCapabilities?: RuntimeCapabilityName[];
-  /** Session reuse policy for this workflow. */
+  /** Политика переиспользования сессий для этого workflow. */
   sessionReusePolicy?: RuntimeSessionReusePolicy;
-  /** Runtime-level model override for this invocation. */
+  /** Переопределение модели уровня runtime для этого вызова. */
   modelOverride?: string | null;
-  /** Disable task/profile model fallback and force adapter invocation without model. */
+  /** Отключает запасную модель задачи/профиля и вызывает адаптер без модели. */
   suppressModelFallback?: boolean;
-  /** Optional custom system append for the runtime workflow. */
+  /** Необязательная собственная системная добавка для runtime workflow. */
   systemPromptAppend?: string;
-  /** Optional partial-message stream mode (chat-like workflows). */
+  /** Необязательный режим потока частичных сообщений (чатоподобные workflow). */
   includePartialMessages?: boolean;
-  /** Optional max turns for runtime adapters that support it. */
+  /** Необязательный максимум ходов для runtime-адаптеров, которые его поддерживают. */
   maxTurns?: number;
-  /** Usage accounting source. Coordinator stages default to SUBAGENT. */
+  /** Источник учёта использования. Стадии Координатора по умолчанию — SUBAGENT. */
   usageSource?: UsageSource;
 }
 
@@ -427,6 +498,9 @@ export interface SubagentQueryResult {
   resultText: string;
 }
 
+// Настройки рантайма лежат в БД JSON-строкой, которую писал UI. Любая
+// некорректность здесь не ошибка выполнения: считаем, что переопределений нет,
+// и работаем на настройках профиля.
 function parseRuntimeOptions(raw: string | null | undefined): Record<string, unknown> | null {
   if (!raw) return null;
   try {
@@ -440,6 +514,8 @@ function parseRuntimeOptions(raw: string | null | undefined): Record<string, unk
   }
 }
 
+// Причины отказа от warmup-форка пишутся в лог: по ним видно, была ли это
+// осознанная политика (фича выключена) или несовпадение профиля с прогревом.
 type WarmupSkipReason =
   | "feature_disabled"
   | "workflow_not_enabled"
@@ -449,14 +525,16 @@ type WarmupSkipReason =
   | "missing_adapter_method"
   | "runtime_mismatch";
 
+// В логи уходит только хвост идентификатора: полный sessionId ничего не дает
+// при чтении и является чувствительной строкой подключения к провайдеру.
 function sessionIdSuffix(sessionId: string | null | undefined): string | null {
   if (!sessionId) return null;
   return sessionId.slice(-8);
 }
 
-// Reasoning-effort key per runtime: claude/openrouter use `effort`,
-// codex uses `modelReasoningEffort`, opencode uses `reasoningEffort`.
-// Mirrors MANAGED_OPTION_KEYS in packages/web/src/components/settings/RuntimeProfileForm.tsx.
+// Ключ reasoning-effort для каждого runtime: claude/openrouter используют `effort`,
+// codex — `modelReasoningEffort`, opencode — `reasoningEffort`.
+// Повторяет MANAGED_OPTION_KEYS из packages/web/src/components/settings/RuntimeProfileForm.tsx.
 const EFFORT_OPTION_KEYS = ["effort", "modelReasoningEffort", "reasoningEffort"] as const;
 
 function pickEffort(options: Record<string, unknown>): string | null {
@@ -473,6 +551,11 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return trimmed.length > 0 ? trimmed : null;
 }
 
+// Пин действителен только пока профиль совпадает с ним по всем значимым полям.
+// Заголовки и options сравниваются через JSON: это дешево и покрывает вложенные
+// структуры, а порядок ключей в форме настроек стабилен. Любое расхождение
+// трактуется как "профиль отредактировали" - пин снимается, чтобы задача не ушла
+// в рантайм с устаревшей моделью или ключом.
 function isPinnedRuntimeProfileCurrent(
   selection: ReturnType<typeof getTaskActiveRuntimeSelection>,
   taskProjectId: string | null | undefined,
@@ -487,6 +570,8 @@ function isPinnedRuntimeProfileCurrent(
       return false;
     let profileHeaders: Record<string, string>;
     let profileOptions: Record<string, unknown>;
+    // Битый JSON в профиле означает неработоспособный пин: молча считаем его
+    // устаревшим, а не роняем резолвинг контекста прямо здесь.
     try {
       profileHeaders = JSON.parse(profile.headersJson) as Record<string, string>;
       profileOptions = JSON.parse(profile.optionsJson) as Record<string, unknown>;
@@ -507,6 +592,8 @@ function isPinnedRuntimeProfileCurrent(
   return selection != null;
 }
 
+// Пин хранит лишь снимок профиля, поэтому секрет достается из окружения по
+// имени переменной: сам API-ключ в БД не попадает - это осознанное решение.
 function hydratePinnedRuntimeProfile(
   selection: ReturnType<typeof getTaskActiveRuntimeSelection>,
   workflow: RuntimeWorkflowSpec,
@@ -531,6 +618,8 @@ function hydratePinnedRuntimeProfile(
   };
 }
 
+// Логгер реестра выносит контекст отдельным объектом, а не склеивает его в
+// строку: pino должен сохранить структурные поля для фильтрации по логам.
 function createRuntimeRegistryLogger(): RuntimeRegistryLogger {
   return {
     debug(context, message) {
@@ -563,6 +652,9 @@ async function getRuntimeRegistry(): Promise<RuntimeRegistry> {
         });
       },
     }),
+    // Сброс синглтона при ошибке: иначе единственный сбой инициализации
+    // закэшировался бы навсегда и каждая следующая стадия падала бы с той же
+    // ошибкой, даже когда причина уже исчезла.
   }).catch((error) => {
     runtimeRegistryPromise = null;
     throw error;
@@ -572,10 +664,10 @@ async function getRuntimeRegistry(): Promise<RuntimeRegistry> {
 }
 
 /**
- * Resolve the RuntimeAdapter that would handle a given task.
- * Useful for reading adapter metadata (e.g. lightModel) without running a query.
- * This helper is intentionally limited to task-stage modes; chat resolution
- * goes through the API runtime service instead.
+ * Разрешает RuntimeAdapter, который обработал бы данную задачу.
+ * Полезно для чтения метаданных адаптера (например lightModel) без запуска запроса.
+ * Помощник намеренно ограничен режимами стадий задач; разрешение для чата
+ * идёт через сервис runtime в API.
  */
 export async function resolveAdapterForTask(
   taskId: string,
@@ -602,6 +694,9 @@ export async function resolveAdapterForTask(
 function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
   if (options.workflowSpec) {
     const workflow = options.workflowSpec;
+    // Явный workflow spec и fallback-команда приходят разными путями и могут
+    // не знать друг о друге. Сохраняем fallback: без него рантайм без поддержки
+    // agent definitions останется без запасного пути и упадет на старте.
     const fallbackSlashCommand = options.fallbackSlashCommand?.trim();
     if (fallbackSlashCommand && !workflow.promptInput.fallbackSlashCommand?.trim()) {
       log.debug(
@@ -625,6 +720,8 @@ function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
     return workflow;
   }
 
+  // Без явного spec он синтезируется из опций: вид workflow по умолчанию
+  // совпадает с именем агента, а scope-преамбула подставляется всегда.
   return createRuntimeWorkflowSpec({
     workflowKind: options.workflowKind ?? options.agentName,
     prompt: options.prompt,
@@ -636,6 +733,8 @@ function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
   });
 }
 
+// Редактирование воркспейса нужно только реализатору, и только если выбранный
+// рантайм заявляет такую возможность в своих capabilities.
 function needsWorkspaceTools(workflow: RuntimeWorkflowSpec): boolean {
   return (
     workflow.workflowKind === "implementer" &&
@@ -651,6 +750,8 @@ async function fallbackToWorkspaceToolRuntime(input: {
 }): Promise<{ resolved: ResolvedRuntimeProfile; capabilities: RuntimeCapabilities }> {
   const adapter = input.registry.resolveRuntime(input.resolved.runtimeId);
   const capabilities = resolveAdapterCapabilities(adapter, input.resolved.transport);
+  // Поддержки вызова инструментов достаточно: адаптер со своим циклом
+  // tool-calls сам решит, как применить правки в воркспейсе.
   if (
     !needsWorkspaceTools(input.workflow) ||
     capabilities.supportsWorkspaceTools === true ||
@@ -659,9 +760,9 @@ async function fallbackToWorkspaceToolRuntime(input: {
     return { resolved: input.resolved, capabilities };
   }
 
-  // A runtime profile selected in the GUI is authoritative. Never replace it
-  // with an adapter discovered in the registry: registration is not proof that
-  // the runtime is configured, authenticated, or approved for this project.
+  // Runtime-профиль, выбранный в GUI, авторитетен. Никогда не подменяйте его
+  // адаптером из реестра: регистрация не доказывает, что runtime настроен,
+  // аутентифицирован или одобрен для этого проекта.
   log.warn(
     {
       taskId: input.options.taskId,
@@ -678,11 +779,17 @@ async function fallbackToWorkspaceToolRuntime(input: {
     "Agent",
     `[FIX] Selected implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace. Configure a workspace-capable GUI runtime profile or enable API tool execution.`,
   );
+  // Падаем громко и с понятной причиной: пытаться писать код рантаймом,
+  // который этого не умеет, хуже, чем остановить стадию до запуска.
   throw new RuntimeCapabilityError(
     `Selected runtime "${input.resolved.runtimeId}" does not support workspace tools for workflow "${input.workflow.workflowKind}"`,
   );
 }
 
+// Резолвинг идет тремя фазами: выбрать профиль (пин или обычный порядок
+// задача -> проект -> система), проверить его пригодность для workflow и только
+// потом собрать промпт с политикой fallback на slash-команду. К концу функции
+// все решения приняты, и запуск адаптера становится тривиальным.
 async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   workflow: RuntimeWorkflowSpec;
   runtimeId: string;
@@ -707,6 +814,9 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   const env = getEnv();
   const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId(profileMode);
   const workflow = buildWorkflowSpec(options);
+  // Пин стадии существует потому, что стадии одной задачи идут подолгу: если
+  // посреди пайплайна сменить дефолтный профиль проекта, вторая половина задачи
+  // уехала бы в другой рантайм, а резюм сессии стал бы невозможен.
   const stageRuntimePinEnabled = env.AIF_STAGE_RUNTIME_PIN_ENABLED;
   const pinnedSelection =
     stageRuntimePinEnabled && task ? getTaskActiveRuntimeSelection(options.taskId) : null;
@@ -715,6 +825,9 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     task?.status != null &&
     pinnedSelection.status === task.status &&
     pinnedSelection.profileMode === profileMode;
+  // Устаревший или недоступный пин снимаем, но только если он действительно был
+  // бы использован на этом шаге: иначе можно случайно стереть валидный пин
+  // другой стадии, просто заглянув в контекст.
   if (!isPinnedRuntimeProfileCurrent(pinnedSelection, task?.projectId)) {
     if (canUsePinnedSelection) {
       log.warn(
@@ -729,6 +842,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       ? hydratePinnedRuntimeProfile(pinnedSelection, workflow)
       : null;
 
+  // Пина нет или он отброшен - идем обычным порядком приоритетов: сначала
+  // настройка задачи, затем дефолт проекта, затем системный дефолт.
   if (!resolved) {
     const effective = resolveEffectiveRuntimeProfile({
       taskId: options.taskId,
@@ -764,6 +879,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       },
     });
 
+    // Фиксируем результат сразу, чтобы следующая стадия той же задачи взяла
+    // ровно этот профиль и могла резюмировать уже начатую сессию.
     if (stageRuntimePinEnabled && task?.status) {
       saveTaskActiveRuntimeSelection(options.taskId, {
         status: task.status,
@@ -797,6 +914,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   const suppressModelFallback = options.suppressModelFallback === true;
 
   const registry = await getRuntimeRegistry();
+  // Пригодность проверяется уже после пина, и подмена рантайма не проходит
+  // молча: факт смены фиксируется, чтобы результат попал в лог и в новый пин.
   const runtimeSelection = await fallbackToWorkspaceToolRuntime({
     options,
     workflow,
@@ -810,6 +929,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   resolved = runtimeSelection.resolved;
   const capabilities = runtimeSelection.capabilities;
 
+  // Если проверка пригодности подменила рантайм, пин нужно перезаписать: иначе
+  // следующая стадия снова возьмет непригодный профиль из БД и упадет так же.
   if (stageRuntimePinEnabled && task?.status && (!canUsePinnedSelection || selectionChanged)) {
     saveTaskActiveRuntimeSelection(options.taskId, {
       status: task.status,
@@ -828,8 +949,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     });
   }
 
-  // Assert hard requirements, but exclude supportsAgentDefinitions —
-  // promptPolicy handles fallback to slash commands when agent defs are unsupported.
+  // Проверяем жёсткие требования, но исключаем supportsAgentDefinitions —
+  // promptPolicy сам откатывается к слэш-командам, когда agent defs не поддерживаются.
   const hardRequired = workflow.requiredCapabilities.filter(
     (cap) =>
       cap !== "supportsAgentDefinitions" &&
@@ -870,14 +991,17 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     },
   });
 
-  // Review-stage subagents (review-sidecar, security-sidecar) must only audit
-  // the current task's diff, not the full codebase. Inject the scope rule here
-  // so every review-mode query gets it regardless of the agent definition file.
+  // Сабагенты стадии Review (review-sidecar, security-sidecar) должны аудировать
+  // только диф текущей задачи, а не всю кодовую базу. Правило scope внедряется
+  // здесь, чтобы его получил каждый review-запрос независимо от файла agent definition.
   const effectiveSystemPromptAppend =
     (options.profileMode ?? "task") === "review"
       ? `${promptPolicy.systemPromptAppend}\n\n${REVIEW_DIFF_SCOPE_SYSTEM_APPEND}`.trim()
       : promptPolicy.systemPromptAppend;
 
+  // Резюм - это и экономия контекста, и источник утечек: стратегии изолированной
+  // skill-команды и нативного субагента подразумевают чистую сессию, иначе
+  // изоляция ломается и агент видит лишнюю историю предыдущих стадий.
   const baseCanResume =
     workflow.sessionReusePolicy === "resume_if_available" && capabilities.supportsResume;
   const requiresFreshSession =
@@ -911,6 +1035,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     "Resolved runtime execution context for subagent query",
   );
 
+  // CLI-транспорты аутентифицируются собственным логином на машине, поэтому
+  // отсутствие ключа в окружении для них - норма, а не повод для предупреждения.
   if (!resolved.apiKey && resolved.transport !== "cli") {
     log.warn(
       {
@@ -932,6 +1058,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     model: resolved.model,
     effort: pickEffort(resolved.options),
     headers: resolved.headers,
+    // Плоские поля профиля подмешиваются в options: адаптеры читают только
+    // options и не должны знать устройство ResolvedRuntimeProfile.
     options: {
       ...resolved.options,
       ...(resolved.baseUrl ? { baseUrl: resolved.baseUrl } : {}),
@@ -948,6 +1076,9 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   };
 }
 
+// Собирает изменяемые настройки запуска в один объект, который адаптеры читают,
+// но не переопределяют: таймауты, окружение, guard на зацикливание и колбэки
+// активности. Какие поля адаптеру понятны, решает сам адаптер.
 function buildExecutionIntent(
   options: SubagentQueryOptions,
   systemPromptAppend: string,
@@ -955,14 +1086,23 @@ function buildExecutionIntent(
   stderr: (chunk: string) => void,
 ): import("@aif/runtime").RuntimeExecutionIntent {
   const env = getEnv();
+  // Обход подтверждений включается только из окружения и работает в паре с
+  // trust-токеном ниже: адаптеры принимают его как доказательство, что вызов
+  // пришел из доверенного координатора, а не от внешнего клиента.
   const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
+  // Guard создается на каждый запрос: счетчики не должны переноситься между
+  // стадиями, иначе лимит израсходуется уже на второй задаче.
   const loopGuard = new LoopGuard({
     maxToolCalls: env.AGENT_MAX_TOOL_CALLS_PER_STAGE,
     readOnlyBurst: env.AGENT_LOOP_READ_ONLY_BURST,
   });
+  // Явный контроллер от вызывающего кода важнее стадийного: вызывающий вправе
+  // отменять только часть работы внутри одной стадии.
   const explicitAbort =
     options.abortController ?? getActiveStageAbortController(options.taskId) ?? undefined;
   const task = findTaskById(options.taskId);
+  // Ветка передается в целевой проект переменными окружения: у хуков и команд
+  // проекта нет другого способа узнать, куда именно подготовлен checkout.
   const branchEnvironment: Record<string, string> = task?.branchName
     ? {
         HANDOFF_BRANCH_PREPARED: "1",
@@ -980,6 +1120,8 @@ function buildExecutionIntent(
     agentDefinitionName,
     systemPromptAppend,
     bypassPermissions,
+    // Флаги режима и идентификатор задачи пробрасываются в окружение процесса:
+    // их читают инструменты, которые агент запускает внутри проекта.
     environment: {
       HANDOFF_MODE: "1",
       HANDOFF_TASK_ID: options.taskId,
@@ -988,6 +1130,8 @@ function buildExecutionIntent(
     },
     abortController: explicitAbort,
     onStderr: stderr,
+    // Каждый вызов инструмента проходит через guard и одновременно пишется в
+    // activity: по этим строкам UI показывает текущий прогресс стадии.
     onToolUse: (toolName, detail) => {
       loopGuard.onToolUse(toolName, detail);
       logActivity(options.taskId, "Tool", `${toolName}${detail}`);
@@ -997,7 +1141,9 @@ function buildExecutionIntent(
       const idSuffix = id ? ` (${id.slice(0, 8)})` : "";
       logActivity(options.taskId, "Subagent", `${name} started${idSuffix}`);
     },
-    // Adapter-specific options — adapters read what they need, ignore the rest
+    // Специфичные для адаптера опции — адаптеры читают нужное, остальное игнорируют
+    // Секция hooks - единственный канал передачи токена доверия и настроек
+    // адаптеру: они не попадают ни в аудит, ни в логи резолвинга профиля.
     hooks: {
       _trustToken: RUNTIME_TRUST_TOKEN,
       settings: { attribution: { commit: "", pr: "" } },
@@ -1007,20 +1153,29 @@ function buildExecutionIntent(
 }
 
 /**
- * Execute a runtime-backed subagent query with standardized:
- * - heartbeat timer
- * - stderr collection
- * - audit logging
- * - activity logging
- * - token usage tracking
- * - error diagnosis
+ * Выполняет запрос сабагента на runtime со стандартизированными:
+ * - таймером heartbeat
+ * - сбором stderr
+ * - аудит-логированием
+ * - журналированием активности
+ * - учётом расхода токенов
+ * - диагностикой ошибок
  */
+// Переменные для ошибки объявлены до try, потому что catch тоже должен
+// сообщить о сбое: к моменту исключения контекст может быть еще не разрешен,
+// и приходится довольствоваться значением по умолчанию.
 export async function executeSubagentQuery(
   options: SubagentQueryOptions,
 ): Promise<SubagentQueryResult> {
   const { taskId, projectRoot, agentName } = options;
+  // Первая проверка владения: отсекаем заведомо чужую задачу до всех затратных
+  // операций - резолвинга профиля, bootstrap реестра, запроса к провайдеру.
   assertAiExecutionOwner(taskId);
+  // Хвост stderr собирается всегда: он нужен и для диагностики ошибки, и для
+  // адаптеров, умеющих разбирать собственный вывод.
   const stderrCollector = createStderrCollector();
+  // Heartbeat стартует до резолвинга: долгий bootstrap тоже должен продлевать
+  // claim, иначе координатор сочтет задачу брошенной.
   const heartbeatTimer = startHeartbeat(taskId);
 
   let runtimeIdForError = getEnv().AIF_DEFAULT_RUNTIME_ID;
@@ -1030,6 +1185,8 @@ export async function executeSubagentQuery(
   let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
   let adapter: RuntimeAdapter | null = null;
   let watchdog: ReturnType<typeof createFirstActivityWatchdog> | null = null;
+  // Флаг читается один раз на прогон: включение лимитов в середине запроса дало
+  // бы несогласованное состояние, когда часть событий уже учтена, а часть нет.
   const runtimeUsageLimitsEnabled = getEnv().AIF_USAGE_LIMITS_ENABLED;
 
   try {
@@ -1044,9 +1201,13 @@ export async function executeSubagentQuery(
       "Agent",
       `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"}${effortSuffix})`,
     );
+    // Сессия запрашивается из БД только когда политика workflow вообще допускает
+    // резюм: иначе один факт наличия sessionId уже влиял бы на выбор warmup.
     const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
 
+    // Аудит пишется до запуска специально: если агент упадет, промпт и профиль
+    // все равно останутся в истории, и инцидент можно будет разобрать.
     writeQueryAudit({
       timestamp: new Date().toISOString(),
       taskId,
@@ -1095,6 +1256,8 @@ export async function executeSubagentQuery(
     } else if (existingSessionId) {
       logWarmupSkip("existing_task_session");
     } else {
+      // Форк поддерживается не всеми рантаймами, поэтому сначала спрашиваем
+      // адаптер и capabilities, и только потом ищем готовую прогревающую сессию.
       const forkSupport = checkRuntimeSessionForkSupport({
         runtimeId: context.runtimeId,
         transport: context.transport,
@@ -1119,6 +1282,8 @@ export async function executeSubagentQuery(
       } else {
         const expiredCount = expireStaleRuntimeWarmupSessions();
         const projectId = findTaskById(taskId)?.projectId ?? null;
+        // Сессия ищется строго под тот же профиль, провайдера и модель: форк
+        // чужой сессии дал бы агенту контекст другой задачи или проекта.
         const warmup =
           projectId == null
             ? undefined
@@ -1130,6 +1295,8 @@ export async function executeSubagentQuery(
                 transport: context.transport,
                 model: context.model,
               });
+        // Готовой сессии нет: различаем "прогрев не успел" и "прогрев под
+        // другой профиль" по числу только что просроченных записей.
         if (!warmup?.sourceSessionId) {
           logWarmupSkip(expiredCount > 0 ? "expired" : "runtime_mismatch");
         } else {
@@ -1149,17 +1316,17 @@ export async function executeSubagentQuery(
       }
     }
 
-    // First-activity watchdog requires a transport that surfaces incremental
-    // runtime activity in real time. SDK / CLI adapters emit RuntimeEvent
-    // callbacks for streamed text, reasoning, and tool summaries, so any such
-    // event proves the runtime is alive even if the workflow performs no tool
-    // calls. API transport is pure HTTP — no intermediate events — and must
-    // stay disabled.
+    // Сторож первой активности требует транспорт, который в реальном времени
+    // показывает инкрементальную активность runtime. SDK / CLI адаптеры шлют
+    // колбэки RuntimeEvent для стримингового текста, рассуждений и сводок
+    // инструментов, поэтому любое такое событие доказывает живость runtime,
+    // даже если workflow не делает ни одного вызова инструмента. API-транспорт
+    // — чистый HTTP, промежуточных событий нет, и сторож обязан быть выключен.
     //
-    // CLI gets a 2x buffer over SDK because it carries extra cold-start cost
-    // the SDK path doesn't have: binary spawn (~1-3s) and the initial
-    // system/init exchange with the full tool/MCP catalogue. Without the
-    // buffer, slow first-turn startup on CLI can false-positive the watchdog.
+    // CLI получает 2x буфер относительно SDK, потому что несёт дополнительный
+    // холодный старт, которого нет на пути SDK: спавн бинарника (~1-3 с) и
+    // начальный обмен system/init с полным каталогом инструментов/MCP. Без
+    // буфера медленный первый запуск на CLI мог ложно взвести сторож.
     const baseFirstActivityTimeoutMs = getEnv().AGENT_FIRST_ACTIVITY_TIMEOUT_MS;
     const firstActivityTimeoutMs =
       context.transport === "api"
@@ -1169,14 +1336,18 @@ export async function executeSubagentQuery(
           : baseFirstActivityTimeoutMs;
     let result: Awaited<ReturnType<RuntimeAdapter["run"]>> | undefined;
 
-    // Retry loop: if agent stalls (no runtime activity after start), kill and restart
+    // Цикл повторов: если агент завис (нет активности runtime после старта), убить и перезапустить
     for (let attempt = 0; attempt <= FIRST_ACTIVITY_MAX_RETRIES; attempt++) {
+      // Снимок сбрасывается на каждой попытке: упавшая попытка не должна
+      // передать свой устаревший лимит в итог успешной.
       latestLimitSnapshot = null;
-      // Fresh AbortController per attempt — AbortController is single-use
+      // Новый AbortController на попытку — AbortController одноразовый
       const attemptAbort = new AbortController();
-      // Chain to the external abort if provided (stage timeout, shutdown)
+      // Цепляемся к внешней отмене, если она задана (таймаут стадии, завершение)
       const externalAbort =
         options.abortController ?? getActiveStageAbortController(taskId) ?? undefined;
+      // Если внешняя отмена уже случилась, подписываться поздно: прерываем
+      // попытку немедленно, сохранив ту же причину.
       if (externalAbort?.signal.aborted) {
         attemptAbort.abort(externalAbort.signal.reason);
       } else {
@@ -1193,17 +1364,17 @@ export async function executeSubagentQuery(
         context.agentDefinitionName,
         stderrCollector.onStderr,
       );
-      // Override the abort controller with our per-attempt one
+      // Подменяем abort-контроллер на наш, отдельный для попытки
       executionIntent.abortController = attemptAbort;
-      // API transport is pure HTTP — no incremental stream — so the
-      // start-timeout watchdog has nothing to observe and must stay off.
-      // SDK streams in-process and CLI now streams JSONL events (system/init
-      // arrives in the first few hundred ms), so both tolerate start timeout.
+      // API-транспорт — чистый HTTP, без инкрементального потока, поэтому
+      // сторожу start-timeout нечего наблюдать и он обязан быть выключен.
+      // SDK стримит в процессе, а CLI теперь стримит JSONL-события (system/init
+      // приходит в первые сотни мс), поэтому оба выдерживают start timeout.
       if (context.transport === "api") {
         executionIntent.startTimeoutMs = 0;
       }
 
-      // Set up first-activity watchdog for this attempt
+      // Настраиваем сторож первой активности для этой попытки
       watchdog = createFirstActivityWatchdog(firstActivityTimeoutMs, attemptAbort, () => {
         const timeoutSec = Math.round(firstActivityTimeoutMs / 1000);
         logActivity(
@@ -1217,9 +1388,9 @@ export async function executeSubagentQuery(
         );
       });
 
-      // Install an onEvent bridge even when the caller did not request
-      // streamed events directly: the watchdog needs a callback to observe
-      // runtime activity for tool-less workflows such as checklist sync.
+      // Устанавливаем мост onEvent, даже когда вызывающий код не запрашивал
+      // стриминговые события напрямую: сторожу нужен колбэк, чтобы наблюдать
+      // активность runtime в workflow без инструментов, например checklist sync.
       const wd = watchdog!;
       const originalOnEvent = executionIntent.onEvent ?? (() => undefined);
       const originalOnToolUse = executionIntent.onToolUse;
@@ -1235,6 +1406,9 @@ export async function executeSubagentQuery(
             });
           }
         }
+        // Лимиты вылавливаются прямо из стрима: последний валидный снимок
+        // заменяет предыдущий, но при отсутствии новых событий старый не
+        // затирается, чтобы состояние лимита осталось актуальным.
         if (runtimeUsageLimitsEnabled) {
           latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
             logger: log,
@@ -1264,8 +1438,8 @@ export async function executeSubagentQuery(
         };
       }
 
-      // Look up project scope fresh per attempt so a retry that sees a
-      // re-parented task still records against the correct project.
+      // Проект перечитывается заново на каждой попытке, чтобы повтор,
+      // увидевший перепривязанную задачу, писал в правильный проект.
       const projectIdForUsage = findTaskById(taskId)?.projectId ?? null;
 
       const runInput = {
@@ -1275,6 +1449,8 @@ export async function executeSubagentQuery(
         workflowKind: context.workflow.workflowKind,
         transport: context.transport,
         prompt: context.prompt,
+        // Сообщения и определения инструментов нужны только API-транспорту с
+        // поддержкой tool calling: SDK и CLI собирают диалог сами из prompt.
         messages:
           context.transport === RuntimeTransport.API && context.capabilities.supportsToolCalling
             ? ([
@@ -1300,6 +1476,8 @@ export async function executeSubagentQuery(
         options: context.options,
         model: context.model ?? undefined,
         execution: executionIntent,
+        // Источник usage по умолчанию SUBAGENT: расходы координатора и
+        // пользовательского чата считаются раздельно.
         usageContext: {
           source: options.usageSource ?? UsageSource.SUBAGENT,
           projectId: projectIdForUsage,
@@ -1309,6 +1487,8 @@ export async function executeSubagentQuery(
 
       try {
         assertAiExecutionOwner(taskId);
+        // Порядок ветвления важен: warmup-форк дает свежую сессию с прогретым
+        // контекстом, и только без него имеет смысл резюм или новый запуск.
         if (warmupSourceSessionId && adapter.forkSession) {
           result = await adapter.forkSession({
             ...runInput,
@@ -1322,6 +1502,10 @@ export async function executeSubagentQuery(
             context.transport === RuntimeTransport.API && context.capabilities.supportsToolCalling
               ? new WorkspaceToolExecutor(projectRoot)
               : null;
+          // Ручной цикл tool-calls для API-транспорта: адаптер не повторяет
+          // запрос сам, поэтому результат каждого инструмента дописывается в
+          // диалог и отправляется обратно модели. Лимит шагов защищает от
+          // бесконечного самоповтора.
           let conversation: RuntimeConversationMessage[] | undefined = runInput.messages;
           for (let toolStep = 0; ; toolStep += 1) {
             if (toolStep >= 20) {
@@ -1345,6 +1529,8 @@ export async function executeSubagentQuery(
                 .catch(
                   (error) => `ERROR: ${error instanceof Error ? error.message : String(error)}`,
                 );
+              // Результат обрезается: вывод команды может быть огромным, а
+              // контекстное окно модели - нет.
               conversation.push({
                 role: "tool" as const,
                 toolCallId: toolCall.id,
@@ -1353,14 +1539,16 @@ export async function executeSubagentQuery(
             }
           }
         }
-        // Success — break out of retry loop
+        // Успех — выход из цикла повторов
         watchdog.clear();
         break;
       } catch (err) {
+        // Различаем два исхода: сторож убил зависшую попытку (есть смысл
+        // повторить) и настоящая ошибка рантайма (повтор бессмыслен, пробрасываем).
         const stalledByWatchdog = watchdog.didFire;
         watchdog.clear();
         if (stalledByWatchdog && attempt < FIRST_ACTIVITY_MAX_RETRIES) {
-          // Agent stalled — kill and retry
+          // Агент завис — убить и повторить
           trackTaskInFlight(taskId, null);
           log.info(
             { taskId, agentName, attempt: attempt + 1, maxRetries: FIRST_ACTIVITY_MAX_RETRIES },
@@ -1368,12 +1556,14 @@ export async function executeSubagentQuery(
           );
           continue;
         }
-        // Not a stall or retries exhausted — re-throw
+        // Не зависание или повторы исчерпаны — пробрасываем дальше
         trackTaskInFlight(taskId, null);
         throw err;
       }
     }
 
+    // Страховка: сюда попадаем, только если все попытки истекли по сторожу,
+    // а последняя не подняла исключения сама.
     if (!result) {
       throw new Error(
         `${agentName}: all ${FIRST_ACTIVITY_MAX_RETRIES + 1} attempts stalled without runtime activity`,
@@ -1381,6 +1571,8 @@ export async function executeSubagentQuery(
     }
 
     if (runtimeUsageLimitsEnabled) {
+      // Финальный снимок берется из событий: он авторитетнее всего, что было
+      // замечено по ходу стрима, и именно его увидят подписчики UI.
       latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
       if (latestLimitSnapshot) {
         refreshRuntimeProfileLimitState({
@@ -1406,6 +1598,9 @@ export async function executeSubagentQuery(
       }
     }
 
+    // Идентификатор сохраняется не всегда: для workflow без резюма он бесполезен
+    // и только засорял бы запись задачи. Исключение - warmup-форк, после которого
+    // сессия нужна последующим стадиям.
     const runtimeSessionId = getResultSessionId(result, context.capabilities);
     if (runtimeSessionId && (context.canResume || usedWarmupFork)) {
       saveTaskSessionId(taskId, runtimeSessionId);
@@ -1443,10 +1638,12 @@ export async function executeSubagentQuery(
       );
     }
 
-    // Usage is recorded automatically by the registry wrapper via the DB
-    // usage sink (see packages/data createDbUsageSink + packages/runtime
-    // registry.wrapAdapter). No manual increment needed here.
+    // Usage записывается автоматически обёрткой реестра через БД-приёмник
+    // (см. packages/data createDbUsageSink + packages/runtime
+    // registry.wrapAdapter). Ручной инкремент здесь не нужен.
 
+    // Пустая строка вместо null: контракт результата стадии - всегда строка,
+    // чтобы потребителям не приходилось проверять на null.
     const resultText = result.outputText ?? "";
 
     log.info(
@@ -1482,8 +1679,12 @@ export async function executeSubagentQuery(
         reason: "subagent:error",
       });
     }
+    // Причина наружу формируется классификатором, а не текстом ошибки: он
+    // раскладывает сбой по категориям и решает, что безопасно показать.
     const safeReason = mapSafeRuntimeErrorReason(error);
     let diagnosticsReason: string | null = null;
+    // Диагностику предпочитаем брать у адаптера: он знает свой формат вывода и
+    // может вытащить причину из stderr, недоступную общей классификации.
     if (adapter?.diagnoseError) {
       diagnosticsReason = await adapter.diagnoseError({
         error,
@@ -1527,34 +1728,37 @@ export async function executeSubagentQuery(
       },
       `${agentName} execution failed`,
     );
+    // Наверх уходит только обезличенная ошибка: исходный текст остался в логах.
     throw buildSanitizedSubagentError(error, safeReason, providerIdForError);
   } finally {
+    // Уборка ресурсов обернута в try: падение в finally затёрло бы исходную
+    // ошибку выполнения, которая для разбора инцидента гораздо важнее.
     try {
       watchdog?.clear();
     } catch {
-      // safety guard
+      // страховка
     }
     try {
       clearInterval(heartbeatTimer);
     } catch {
-      // safety guard
+      // страховка
     }
   }
 }
 
-// Coordinator ID injected at startup to avoid circular imports
+// ID Координатора внедряется при старте, чтобы избежать циклических импортов
 let _coordinatorId: string | null = null;
 export function setCoordinatorId(id: string): void {
   _coordinatorId = id;
 }
 
-/** Update the in-flight tool in the DB and broadcast the new activity state. */
+/** Обновляет текущий инструмент в БД и рассылает новое состояние активности. */
 function trackTaskInFlight(taskId: string, tool: TaskCurrentTool | null): void {
   setTaskInFlightTool(taskId, tool);
   broadcastTaskActivityProgress(taskId);
 }
 
-/** Start a periodic heartbeat that updates the task's lastHeartbeatAt and renews the lock. */
+/** Запускает периодический heartbeat, обновляющий lastHeartbeatAt задачи и продлевающий лок. */
 export function startHeartbeat(taskId: string): NodeJS.Timeout {
   return setInterval(() => {
     const lastHeartbeatAt = updateTaskHeartbeat(taskId);

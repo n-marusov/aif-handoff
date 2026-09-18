@@ -1,3 +1,21 @@
+/**
+ * Маршруты аутентификации участников: session, login, change-password, logout.
+ *
+ * Почему модуль устроен именно так:
+ * - Все ответы отдают Cache-Control: no-store: тело содержит csrfToken и данные
+ *   сессии, и любой промежуточный кэш превратил бы их в утечку.
+ * - Сессия живет в httpOnly cookie с SameSite=Strict. Токен никогда не попадает
+ *   в тело ответа, поэтому XSS не может его прочитать, а Strict закрывает CSRF
+ *   для переходов с чужих сайтов.
+ * - Флаг secure вычисляется на каждый запрос: в проде cookie обязана идти
+ *   только по https, но локальная разработка по http должна работать.
+ * - Логин и смена пароля закрыты отдельными rate limiter-ами: без них перебор
+ *   пароля и подбор текущего пароля из активной сессии ничем не ограничены.
+ * - Отсутствие сессии трактуется как 401, а не как 500: клиент должен просто
+ *   показать форму логина.
+ * - Ответ об ошибке логина всегда одинаковый (invalid_credentials): различие
+ *   "нет пользователя" и "неверный пароль" раскрывает существующие логины.
+ */
 import { Hono } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import {
@@ -14,6 +32,8 @@ import { getParticipantAuth, type ParticipantApiEnv } from "../middleware/partic
 
 const log = logger("participant-auth-routes");
 
+// secure включается по любому из трех признаков: явная настройка, прод-режим
+// или сам https-запрос (за прокси протокол виден именно здесь).
 function sessionCookieIsSecure(requestUrl: string): boolean {
   const env = getEnv();
   return (
@@ -23,11 +43,14 @@ function sessionCookieIsSecure(requestUrl: string): boolean {
   );
 }
 
+// Лимитеры создаются один раз на модуль, а не на запрос: счетчик живет внутри
+// замыкания, и пересоздание обнуляло бы защиту от перебора.
 function createLoginRateLimiter() {
   const env = getEnv();
   return createRateLimiter({
     windowMs: env.PARTICIPANT_LOGIN_RATE_LIMIT_WINDOW_MS,
     maxRequests: env.PARTICIPANT_LOGIN_RATE_LIMIT_MAX,
+    // При выключенном режиме участников лимит не нужен: логина нет.
     skip: () => !getEnv().PARTICIPANTS_MODE_ENABLED,
     onLimit(c, resetAt) {
       const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - Date.now()) / 1_000));
@@ -60,6 +83,8 @@ export const authRouter = new Hono<ParticipantApiEnv>();
 const loginRateLimit = createLoginRateLimiter();
 const changePasswordRateLimit = createChangePasswordRateLimiter();
 
+// Состояние сессии для UI: маршрут отвечает 200 даже без аутентификации,
+// потому что клиенту нужен явный флаг participantsModeEnabled.
 authRouter.get("/session", (c) => {
   c.header("Cache-Control", "no-store");
   const env = getEnv();
@@ -93,6 +118,8 @@ authRouter.get("/session", (c) => {
   });
 });
 
+// Токен сессии ставится cookie, а не возвращается в теле: клиентский JS не
+// должен иметь к нему доступа.
 authRouter.post("/login", loginRateLimit, jsonValidator(participantLoginSchema), async (c) => {
   c.header("Cache-Control", "no-store");
   const env = getEnv();
@@ -141,6 +168,8 @@ authRouter.post("/login", loginRateLimit, jsonValidator(participantLoginSchema),
   }
 });
 
+// Смена пароля инициируется изнутри сессии, поэтому currentPassword обязателен,
+// а все прочие сессии участника отзываются слоем данных.
 authRouter.post(
   "/change-password",
   changePasswordRateLimit,
@@ -159,6 +188,8 @@ authRouter.post(
       return c.json({ error: "Authentication required", code: "authentication_required" }, 401);
     }
     const { currentPassword, newPassword } = c.req.valid("json");
+    // Отпечаток имени берется на момент действия: справочник участников может
+    // измениться позже, а запись аудита должна остаться читаемой.
     const actor: AuditActor = {
       kind: "participant",
       id: auth.session.participant.id,
@@ -174,6 +205,8 @@ authRouter.post(
         actor,
       );
       if (!result.ok) {
+        // Ветвление по коду результата, а не по тексту ошибки: сообщения можно
+        // менять, а коды - часть контракта.
         if (result.code === "invalid_current_password") {
           return c.json({ error: "Current password is incorrect", code: result.code }, 403);
         }
@@ -209,6 +242,8 @@ authRouter.post(
   },
 );
 
+// Logout требует активной сессии: без токена отзывать нечего, поэтому 401, а
+// не молчаливый успех - иначе клиент решит, что сессия закрыта.
 authRouter.post("/logout", (c) => {
   c.header("Cache-Control", "no-store");
   const env = getEnv();
@@ -237,6 +272,8 @@ authRouter.post("/logout", (c) => {
       },
       "Participant logout completed",
     );
+    // Отзыв сессии рассылается в хаб: его сокеты нужно закрыть немедленно,
+    // иначе отозванная сессия продолжит получать события по живому соединению.
     broadcast({
       type: "auth:session_revoked",
       payload: { participantId: auth.session.participant.id },

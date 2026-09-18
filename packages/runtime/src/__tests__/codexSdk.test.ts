@@ -3,7 +3,7 @@ import { validateRuntimeModelEffort } from "../modelEffort.js";
 import type { RuntimeRunInput } from "../types.js";
 import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
 
-// Mock the Codex SDK
+// Мок Codex SDK
 const mockRunStreamed = vi.fn();
 const mockThread = {
   id: "thread-abc123",

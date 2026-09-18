@@ -1,9 +1,9 @@
 import http from "k6/http";
 import { BASE_URL, okStatus, resolveFirstProjectId, tag } from "./common.js";
 
-// /tasks is a pure SQLite read — this script is the canary that catches the
-// "we slowed down the DB layer" class of regression; thresholds are tight on
-// purpose because the endpoint has no business talking to the filesystem.
+// /tasks — только чтение SQLite; этот скрипт — индикатор регрессий вида
+// «мы замедлили слой данных». Пороги намеренно жёсткие: эндпоинт не должен
+// обращаться к файловой системе.
 export const options = {
   scenarios: {
     steady: {
@@ -14,9 +14,10 @@ export const options = {
   },
   thresholds: {
     "http_req_failed{endpoint:tasks}": ["rate<0.01"],
-    // Payload is ~100KB per task list; serialization + SQLite joins dominate
-    // under 20 VUs. Budgets set above baseline (~570ms p95) so 2-3× regressions
-    // still fail the suite while normal load does not flap.
+    // Ответ ~100KB на список задач; при 20 VU основную стоимость дают
+    // сериализация и join-ы SQLite. Бюджеты выставлены выше базовой линии
+    // (~570ms p95), чтобы регрессия в 2-3 раза валила набор, а нормальная
+    // нагрузка не давала ложных срабатываний.
     "http_req_duration{endpoint:tasks}": ["p(95)<1200", "p(99)<2000"],
   },
 };

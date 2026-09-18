@@ -56,7 +56,7 @@ describe("OpenCode error classification", () => {
     expect(error.category).toBe("unknown");
   });
 
-  // HTTP status classification
+  // Классификация по HTTP status
   it("classifies by HTTP status 429 as rate_limit", () => {
     const error = classifyOpenCodeRuntimeError(new Error("response body"), 429);
     expect(error.adapterCode).toBe("OPENCODE_RATE_LIMIT");

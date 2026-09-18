@@ -9,7 +9,7 @@ import {
 describe("CLI probe functions", () => {
   describe("probeClaudeCli", () => {
     it("returns ok with version for a reachable binary", () => {
-      // Use 'node' as a universally available binary to test the probe mechanism
+      // Берём 'node' как общедоступный бинарник, чтобы проверить сам механизм пробы
       const result = probeClaudeCli("node");
       expect(result.ok).toBe(true);
       expect(result.version).toBeDefined();

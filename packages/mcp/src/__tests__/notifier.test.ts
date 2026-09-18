@@ -26,13 +26,13 @@ describe("broadcastTaskEvent", () => {
 
   it("handles non-OK response without throwing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-    // Should not throw
+    // Не должен бросать исключение
     await broadcastTaskEvent("http://localhost:3009", "task-123", "sync:task_updated");
   });
 
   it("handles fetch errors without throwing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
-    // Should not throw
+    // Не должен бросать исключение
     await broadcastTaskEvent("http://localhost:3009", "task-123", "task:created");
   });
 });

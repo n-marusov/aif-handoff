@@ -107,25 +107,25 @@ export function ChatPanel({
   const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const handleTaskCreated = useCallback(() => {
-    // Task created via action card — react-query invalidation happens in useCreateTask
+    // Задача создана через карточку действия — инвалидация react-query идёт в useCreateTask
   }, []);
   const panelRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom on new messages
+  // Автопрокрутка вниз при новых сообщениях
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" });
   }, [messages, isStreaming]);
 
-  // Focus textarea when panel opens
+  // Фокус в textarea при открытии панели
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => textareaRef.current?.focus(), 300);
     }
   }, [isOpen]);
 
-  // Close chat on Escape key or outside click while open
+  // Закрытие чата по Escape или клику вне панели, пока она открыта
   useOutsideClick(panelRef, onClose, isOpen);
 
   const handleSend = () => {
@@ -231,7 +231,7 @@ export function ChatPanel({
 
   const sessionProfileId = activeSession?.runtimeProfileId ?? null;
 
-  // Show the session's own runtime when it has one, otherwise show the project effective runtime
+  // Показываем runtime сессии, если у неё есть свой, иначе — эффективный runtime проекта
   const sessionProfile = sessionProfileId
     ? runtimeProfiles?.find((p) => p.id === sessionProfileId)
     : null;

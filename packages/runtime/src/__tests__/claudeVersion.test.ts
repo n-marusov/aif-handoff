@@ -60,10 +60,10 @@ describe("isVersionBelowMin", () => {
 
 describe("readBundledClaudeVersion", () => {
   it("reads the version of the Claude Code binary bundled with the installed Agent SDK", () => {
-    // Real call against the installed @anthropic-ai/claude-agent-sdk manifest.
-    // Guards the manifest-resolution path (exports-restricted subpath resolved
-    // via the main entry) and asserts the dependency we pin actually bundles a
-    // Claude Code at/above the supported minimum.
+    // Реальный вызов против манифеста установленного @anthropic-ai/claude-agent-sdk.
+    // Прикрывает путь разрешения манифеста (подпуть с ограничением exports,
+    // разрешаемый через главный entry) и утверждает, что закреплённая зависимость
+    // действительно бандлит Claude Code не ниже поддерживаемого минимума.
     const version = readBundledClaudeVersion();
     expect(version, "expected a parseable bundled version from the SDK manifest").not.toBeNull();
     expect(isVersionBelowMin(version!)).toBe(false);
@@ -96,10 +96,10 @@ const recordingLogger = () => {
 
 describe("assertClaudeExecutableCompatible", () => {
   beforeEach(() => {
-    // Default to a non-test env so the DI-driven cases exercise the probe path;
-    // individual skip tests override this. VITEST must be cleared too — vitest 4
-    // marks the process with VITEST (not NODE_ENV=test), which the guard treats
-    // as a unit-test context.
+    // По умолчанию окружение не-test, чтобы кейсы с DI реально шли путём probe;
+    // отдельные skip-тесты переопределяют это. VITEST тоже надо сбрасывать: vitest 4
+    // помечает процесс через VITEST (а не NODE_ENV=test), и guard считает
+    // это юнит-контекстом.
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("VITEST", "");
     vi.stubEnv("AIF_CLAUDE_INTEGRATION", "");
@@ -136,7 +136,7 @@ describe("assertClaudeExecutableCompatible", () => {
   });
 
   it("does not throw and warns when the bundled version cannot be determined", async () => {
-    // No explicit path → guard reads the SDK-bundled version, not PATH.
+    // No explicit path → guard читает версию из бандла SDK, а не из PATH.
     const probeFn = probe(parseClaudeVersion("2.1.220"));
     const bundledFn = bundled(null);
     const { logger, calls } = recordingLogger();
@@ -169,7 +169,7 @@ describe("assertClaudeExecutableCompatible", () => {
       ),
     ).resolves.toBeUndefined();
     expect(bundledFn).toHaveBeenCalled();
-    // The bundled version is used; the (lower) PATH probe is never consulted.
+    // Используется версия из бандла; (более низкий) PATH-probe никогда не опрашивается.
     expect(probeFn).not.toHaveBeenCalled();
     expect(calls.debug).toHaveLength(1);
     expect(calls.warn).toHaveLength(0);
@@ -270,9 +270,9 @@ describe("assertClaudeExecutableCompatible", () => {
   });
 
   it("is a no-op under vitest (VITEST env set, no integration flag)", async () => {
-    // vitest 4 marks the process with VITEST rather than NODE_ENV=test; the
-    // guard treats either as a unit-test context so it never spawns a real
-    // binary during the test suite.
+    // vitest 4 помечает процесс через VITEST, а не NODE_ENV=test;
+    // guard считает любой из них юнит-контекстом, чтобы во время
+    // тестового набора реальный бинарник не спавнился.
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("VITEST", "true");
     vi.stubEnv("AIF_CLAUDE_INTEGRATION", "");

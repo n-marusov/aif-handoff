@@ -1,3 +1,31 @@
+/**
+ * Маршруты интерактивного чата (@aif/api).
+ *
+ * Назначение: единая точка общения пользователя с рантаймом (Claude, Codex,
+ * OpenRouter) из UI. Здесь сосредоточен весь жизненный цикл одной реплики:
+ * выбор адаптера и профиля, переиспользование или создание runtime-сессии,
+ * стриминг событий в WebSocket, персистенция сообщений через @aif/data,
+ * учет usage и обработка прерывания (abort).
+ *
+ * Почему файл устроен именно так:
+ * - Ответ отдается по двум каналам сразу: JSON в HTTP-ответе (для клиентов без
+ *   сокета) и дельта-события в WebSocket (для живого UI). Оба обязаны описывать
+ *   один и тот же текст, поэтому любой фрагмент сначала накапливается в
+ *   assistantSegments и только затем отдается наружу.
+ * - Рантайм может оборвать поток на середине: часть текста приходит дельтами,
+ *   часть остается в result.outputText, а вопросы (AskUserQuestion) приходят
+ *   отдельными событиями. Поэтому порядок "текст -> вопрос -> текст"
+ *   восстанавливается вручную, а не берется из порядка событий.
+ * - AbortController регистрируется до любой медленной работы (резолв проекта,
+ *   рантайма, автосоздание сессии). Иначе Stop, нажатый в первые сотни
+ *   миллисекунд, попадал бы в 404, а запуск продолжал бы работу вхолостую.
+ * - Часть состояния (полный ответ, id runtime-сессии, вложения) поднята во
+ *   внешнюю область видимости try, потому что ветка abort должна успеть
+ *   сохранить частичный результат и связать DB-сессию с рантаймом.
+ * - Ошибки рантайма нельзя отдавать клиенту как есть: текст провайдера
+ *   редактируется, а наружу уходит только классификация по структурным полям
+ *   (категория, код), но не по содержимому сообщения.
+ */
 import { Hono } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { z } from "zod";
@@ -70,19 +98,29 @@ import {
 } from "../services/runtime.js";
 import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
 
+// Границу проекта задаем текстом системного промпта, а не фильтрацией на
+// стороне API: рантайм сам решает, какие пути читать, поэтому ограничить его
+// можно только договоренностью в промпте.
 const PROJECT_SCOPE_SYSTEM_APPEND =
   "Project scope rule: work strictly inside the current working directory (project root). " +
   "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
   "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
+// UI не умеет отвечать на интерактивный инструмент внутри одного хода: вопрос
+// рендерится как markdown, а ответ приходит следующим сообщением. Без этой
+// договоренности модель может молча ждать ввода, которого не будет.
 const CHAT_ASKUSERQUESTION_HINT =
   "Chat interaction rule: the AIF chat UI renders AskUserQuestion tool calls as a markdown block " +
   "with the question, header, and numbered options — use the tool normally when you need structured " +
   "input. The user's next chat message is their answer and the session resumes with that answer in " +
   "history; never wait silently.";
 
+// Читающие инструменты не меняют состояние проекта и дают много визуального
+// шума, поэтому их вызовы не отражаются в ленте чата.
 const NOISY_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "LS", "NotebookRead"]);
 
+// Внутренняя форма вопроса: адаптеры дают необязательные поля, а рендерер
+// ожидает нормализованный вид с гарантированным массивом опций.
 type NormalizedQuestion = {
   question: string;
   header?: string;
@@ -90,6 +128,8 @@ type NormalizedQuestion = {
   options: Array<{ label: string; description?: string }>;
 };
 
+// Рендерим блок вручную (а не markdown-таблицей), чтобы нумерация опций
+// совпадала с номерами, которые пользователь вводит в ответе.
 function renderQuestionBlock(entry: NormalizedQuestion, showSelectionHint: boolean): string[] {
   const lines: string[] = [];
   if (entry.header) lines.push(`**${entry.header}**`);
@@ -114,6 +154,8 @@ function renderQuestionBlock(entry: NormalizedQuestion, showSelectionHint: boole
   return lines;
 }
 
+// Возвращает null, когда рендерить нечего: пустой блок лучше не показывать,
+// чем вставлять в чат сообщение из одних разделителей.
 function formatToolQuestion(payload: RuntimeToolQuestionPayload): string | null {
   const multipleQuestions = payload.questions.length > 1;
   const anyMultiSelect = payload.questions.some((q) => q.multiSelect === true);
@@ -152,6 +194,10 @@ function formatToolQuestion(payload: RuntimeToolQuestionPayload): string | null 
   return lines.join("\n");
 }
 
+// Протокол действий: модель помечает намерение создать задачу специальным
+// блоком <!--ACTION:CREATE_TASK-->, а UI превращает его в карточку
+// подтверждения. Так создание задачи остается явным действием пользователя, а
+// не побочным эффектом обычного ответа.
 const CHAT_ACTIONS_PROMPT = `
 Identity: You are AIFer.
 
@@ -169,16 +215,22 @@ Set "isFix" to true when the user describes a bug, defect, or asks to fix/repair
 `.trim();
 
 const log = logger("chat-route");
+// Отдельное имя для логов, которые читает UI рантайма: по нему сообщения
+// фильтруются в панели активности.
 const API_RUNTIME_LOG = "api-runtime";
 type CreateChatSessionPayload = z.infer<typeof createChatSessionSchema>;
 type UpdateChatSessionPayload = z.infer<typeof updateChatSessionSchema>;
 type ChatRequestPayload = z.infer<typeof chatRequestSchema>;
 
+// Описание "виртуальной" сессии, у которой нет строки в БД: она существует
+// только на стороне рантайма и адресуется составным идентификатором.
 interface VirtualRuntimeSessionRef {
   runtimeId: string;
   sessionId: string;
 }
 
+// Редактируем построчно, а не целиком: многострочные блоки (план, лог
+// реализации) должны сохранить разбиение, иначе промпт потеряет структуру.
 function redactTaskContextForRuntimePrompt(text: string): string {
   return text
     .split(/\r?\n/)
@@ -186,6 +238,9 @@ function redactTaskContextForRuntimePrompt(text: string): string {
     .join("\n");
 }
 
+// Собирает системную добавку из независимых частей: правило области проекта
+// присутствует всегда, а подсказка про интерактивные вопросы - только если
+// адаптер действительно умеет их задавать.
 function buildContextAppend(
   projectName: string,
   task: Task | null,
@@ -228,6 +283,8 @@ function buildContextAppend(
   return parts.join("\n");
 }
 
+// Идентификаторы рантаймов сравниваем в нормализованном виде: пользователь и
+// конфиг могут дать разный регистр, а реестр адаптеров регистрозависим.
 function normalizeRuntimeId(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -238,6 +295,9 @@ function isLocalCodexRuntimeId(runtimeId: string): boolean {
   return normalizeRuntimeId(runtimeId) === CODEX_RUNTIME_ID;
 }
 
+// Схема виртуального id: "sdk:<id>" для единого SDK-транспорта и
+// "runtime:<runtimeId>:<sessionId>" для остальных. Так один и тот же
+// внешний id не конфликтует между разными рантаймами.
 function formatVirtualRuntimeSessionId(
   runtimeId: string,
   runtimeSessionId: string,
@@ -249,6 +309,8 @@ function formatVirtualRuntimeSessionId(
   return `runtime:${encodeURIComponent(runtimeId)}:${encodeURIComponent(runtimeSessionId)}`;
 }
 
+// Разбор обратен formatVirtualRuntimeSessionId; для схемы "sdk:" рантайм
+// берется из окружения, потому что в самом id его нет.
 function parseVirtualRuntimeSessionId(
   id: string,
   fallbackRuntimeId?: string,
@@ -274,12 +336,17 @@ function parseVirtualRuntimeSessionId(
   return { runtimeId: normalizeRuntimeId(runtimeId), sessionId };
 }
 
+// Источник влияет на то, как UI подписывает сессию: запуски через CLI и
+// app-server считаются локальными, все остальные - агентными.
 function runtimeSourceFromTransport(transport: string): "cli" | "agent" {
   return transport === RuntimeTransport.CLI || transport === RuntimeTransport.APP_SERVER
     ? "cli"
     : "agent";
 }
 
+// Преобразование событий рантайма в сообщения чата. События без роли или без
+// текста отбрасываются: в UI они не отображаются, а в БД создавали бы пустые
+// строки и ломали дедупликацию при перезагрузке.
 function mapRuntimeEventsToChatMessages(
   runtimeEvents: RuntimeEvent[],
   sessionId: string,
@@ -315,6 +382,9 @@ function mapRuntimeEventsToChatMessages(
     .filter((message): message is ChatSessionMessage => Boolean(message));
 }
 
+// Быстрый путь для Codex: сессия восстанавливается из локального индекса без
+// поднятия адаптера. Возврат null означает "индекса нет", и вызывающий код
+// откатывается на общий путь через адаптер.
 async function loadIndexedCodexVirtualSession(input: {
   virtualId: string;
   projectId: string | null;
@@ -340,6 +410,8 @@ async function loadIndexedCodexVirtualSession(input: {
   };
 }
 
+// То же самое для сообщений: null здесь - сигнал откатиться на адаптер, а не
+// "сообщений нет". Пустой массив означает именно отсутствие событий.
 async function loadIndexedCodexRuntimeMessages(input: {
   runtimeSessionId: string;
   chatSessionId: string;
@@ -350,11 +422,13 @@ async function loadIndexedCodexRuntimeMessages(input: {
   const runtimeEvents = await readCodexSessionEventsFromFile(filePath, {
     limit: input.limit,
   });
-  // Indexed Codex JSONL events are normalized into plain string messages, so
-  // they do not need adapter-specific content extraction here.
+  // События JSONL проиндексированного Codex нормализованы в обычные строковые
+  // сообщения, поэтому специфичное для адаптера извлечение контента здесь не нужно.
   return mapRuntimeEventsToChatMessages(runtimeEvents, input.chatSessionId);
 }
 
+// Прерывание может быть обернуто: проверяем name, code и рекурсивно cause,
+// потому что разные транспорты заворачивают сигнал по-своему.
 function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const asError = err as { name?: string; code?: string; cause?: unknown };
@@ -364,6 +438,9 @@ function isAbortError(err: unknown): boolean {
   return false;
 }
 
+// Классификация ошибки без разбора текста сообщения: решение принимается по
+// структурной категории (@aif/runtime), а наружу уходит уже безопасная строка.
+// Сырой текст провайдера остается только в логах.
 function classifyChatError(err: unknown): {
   status: 429 | 500;
   code: string;
@@ -407,24 +484,27 @@ function classifyChatError(err: unknown): {
   return redactForClient("Chat request failed", "CHAT_REQUEST_FAILED", 500);
 }
 
-/** Runtime-aware input sanitization. Uses adapter.sanitizeInput if available, otherwise passthrough. */
+/** Санитизация входа с учётом runtime: adapter.sanitizeInput, если доступен, иначе без изменений. */
 function sanitizeRuntimeInput(text: string, adapter?: RuntimeAdapter): string {
   return adapter?.sanitizeInput ? adapter.sanitizeInput(text) : text.trim();
 }
 
+// Снимок лимитов показываем только при включенной фиче: клиентские экраны
+// завязаны на тот же флаг, и отдача снимка в выключенном деплое дает лишь
+// лишние байты и риск устаревшего UI.
 function normalizeOptionalRuntimeLimitSnapshot(
   snapshot: RuntimeLimitSnapshot | null | undefined,
 ): RuntimeLimitSnapshot | null {
-  // Skip exposure entirely when usage-limits feature is disabled — the
-  // client UI surfaces are gated on the same flag, so forwarding a snapshot
-  // just wastes bytes and risks stale UI in disabled deployments.
+  // Полностью пропускаем выдачу, когда функция лимитов использования
+  // отключена — поверхности UI гейтятся тем же флагом, поэтому пересылка
+  // снапшота лишь тратит байты и рискует устаревшим UI в отключённых сборках.
   if (!getEnv().AIF_USAGE_LIMITS_ENABLED) return null;
   return snapshot ? sanitizeRuntimeLimitSnapshotForExposure(snapshot, "chat") : null;
 }
 
 /**
- * Strip the "Attached files:" block appended to user prompts.
- * Runtime adapters may store the full prompt; we only want the original user message.
+ * Убирает блок "Attached files:", дописываемый к пользовательским промптам.
+ * Runtime-адаптеры могут сохранять полный промпт; нужно только исходное сообщение пользователя.
  */
 function stripAttachedFilesBlock(text: string): string {
   const idx = text.indexOf("\n\n---\nAttached files:\n");
@@ -432,9 +512,12 @@ function stripAttachedFilesBlock(text: string): string {
 }
 
 /**
- * Extract human-readable text from message payloads.
- * Returns only user-visible text — skips thinking/tool blocks.
+ * Извлекает человекочитаемый текст из полезной нагрузки сообщений.
+ * Возвращает только видимый пользователю текст — блоки thinking/tool пропускаются.
  */
+// Событие может быть строкой, объектом с content-строкой или массивом
+// блоков. Интересуют только текстовые блоки: thinking и вызовы инструментов в
+// историю чата не попадают.
 function extractMessageContent(message: unknown, adapter?: RuntimeAdapter): string {
   const sanitize = (t: string) => sanitizeRuntimeInput(t, adapter);
 
@@ -460,6 +543,8 @@ function extractMessageContent(message: unknown, adapter?: RuntimeAdapter): stri
   return "";
 }
 
+// Роль не приходит отдельным полем события - она лежит внутри data. Ответ null
+// означает, что событие не является репликой и должно быть отброшено.
 function eventRole(event: RuntimeEvent): "user" | "assistant" | null {
   const roleValue =
     event.data && typeof event.data === "object" && typeof event.data.role === "string"
@@ -471,15 +556,18 @@ function eventRole(event: RuntimeEvent): "user" | "assistant" | null {
   return null;
 }
 
+// Идентификатор должен быть стабильным между запросами: если у события нет id,
+// генерируем случайный, но для вопросов опираемся на toolUseId, иначе один и
+// тот же вопрос получал бы новый id при каждом обновлении страницы.
 function eventId(event: RuntimeEvent): string {
   const data = event.data;
   if (data && typeof data === "object") {
     if (typeof data.id === "string" && data.id) {
       return data.id;
     }
-    // `tool:question` payloads don't carry a generic `id` field — fall back to
-    // the provider's `toolUseId` so the same question keeps a stable client id
-    // across fetches/reloads instead of churning on every refresh.
+    // Полезная нагрузка `tool:question` не имеет общего поля `id` — откатываемся к
+    // `toolUseId` провайдера, чтобы один и тот же вопрос сохранял стабильный клиентский
+    // id между выборками/перезагрузками вместо перемешивания при каждом обновлении.
     if (event.type === "tool:question" && typeof data.toolUseId === "string" && data.toolUseId) {
       return `tool:question:${data.toolUseId}`;
     }
@@ -487,11 +575,15 @@ function eventId(event: RuntimeEvent): string {
   return crypto.randomUUID();
 }
 
+// Ответ ассистента хранится не одной строкой, а последовательностью сегментов:
+// только так можно сохранить чередование текста и блоков вопросов.
 type AssistantSegment = {
   type: "text" | "question";
   content: string;
 };
 
+// Соседние текстовые дельты склеиваются в один сегмент: дробить их значило бы
+// получить десятки строк в БД на один ответ.
 function mergeAdjacentTextSegment(segments: AssistantSegment[], text: string): void {
   if (!text) return;
   const last = segments.at(-1);
@@ -502,6 +594,8 @@ function mergeAdjacentTextSegment(segments: AssistantSegment[], text: string): v
   segments.push({ type: "text", content: text });
 }
 
+// Ищем наибольшее перекрытие суффикса left и префикса right - по нему потом
+// решается, какую часть outputText считать недостающей.
 function longestOverlapSuffixPrefix(left: string, right: string): number {
   const max = Math.min(left.length, right.length);
   for (let len = max; len > 0; len -= 1) {
@@ -512,6 +606,10 @@ function longestOverlapSuffixPrefix(left: string, right: string): number {
   return 0;
 }
 
+// Сопоставляет фактический текст ответа (outputText) со стримом дельт и
+// возвращает пропущенные части. Сравнение идет по точному вхождению, затем по
+// краям, и лишь затем - по перекрытию: чем слабее эвристика, тем выше риск
+// продублировать текст, поэтому порядок проверок именно такой.
 function recoverMissingTextParts(
   streamed: string,
   outputText: string,
@@ -557,18 +655,23 @@ function recoverMissingTextParts(
 }
 
 /**
- * Normalize a message content string before matching it across runtime and DB
- * sources. Runtime-side content is already `.trim()`ed by extractTextContent
- * (and by Claude's session file parser which joins blocks with `\n\n` then
- * trims), but DB content preserves the raw streamed string which may carry
- * leading/trailing whitespace inherited from Claude's delta stream. Without
- * normalization the exact-equality match in mergeRuntimeAndDbMessages fails
- * and produces a duplicate after page reload.
+ * Нормализует строку содержимого сообщения перед сопоставлением между
+ * runtime- и DB-источниками. Runtime-содержимое уже `.trim()`'ится в
+ * extractTextContent (и в парсере файлов сессий Claude, который склеивает
+ * блоки через `\n\n` и затем обрезает), а DB-содержимое хранит сырую
+ * потоковую строку с возможными ведущими/замыкающими пробелами из delta-
+ * потока Claude. Без нормализации точное сравнение в
+ * mergeRuntimeAndDbMessages не срабатывает и после перезагрузки страницы
+ * появляется дубликат.
  */
 function normalizeContentForMatch(content: string): string {
   return content.trim();
 }
 
+// Сводим историю из рантайма и из БД в один список. Совпадения ищутся по паре
+// роль + нормализованный текст: при совпадении предпочитаем DB-запись, потому
+// что только в ней есть настоящий id, время и вложения. Несовпавшие DB-строки
+// (например, из отредактированной вручную истории) добавляются в конец.
 function mergeRuntimeAndDbMessages(
   runtimeMessages: ChatSessionMessage[],
   dbMessages: ChatSessionMessage[],
@@ -609,6 +712,8 @@ function mergeRuntimeAndDbMessages(
   return merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
+// Спецификация workflow для чата: обязательных возможностей нет, а сессию
+// переиспользуем, если адаптер умеет resume.
 function buildChatRuntimeWorkflow(prompt: string, systemPromptAppend: string) {
   return createRuntimeWorkflowSpec({
     workflowKind: "chat",
@@ -619,6 +724,9 @@ function buildChatRuntimeWorkflow(prompt: string, systemPromptAppend: string) {
   });
 }
 
+// Общий путь резолва для всех чат-эндпоинтов: сначала выбираем профиль и
+// адаптер, затем сразу проверяем возможности - до запуска, а не после, чтобы
+// не получить половину работы без возможности ее продолжить.
 async function resolveChatRuntimeAdapter(
   projectId: string,
   prompt: string,
@@ -640,11 +748,15 @@ async function resolveChatRuntimeAdapter(
   return { workflow, context };
 }
 
+// Адаптер резолвится по runtimeId для операций над уже существующей
+// runtime-сессией, когда профиль проекта может быть недоступен.
 async function getAdapterForRuntimeId(runtimeId: string): Promise<RuntimeAdapter> {
   const registry = await getApiRuntimeRegistry();
   return registry.resolveRuntime(runtimeId);
 }
 
+// Параметры, нужные адаптеру для доступа к чужой сессии. Заполняются
+// максимально доступно и деградируют до значений по умолчанию.
 interface RuntimeSessionLookupContext {
   providerId: string;
   profileId: string | null;
@@ -655,12 +767,16 @@ interface RuntimeSessionLookupContext {
   headers?: Record<string, string>;
 }
 
+// Пустая строка и отсутствие параметра равнозначны: иначе пустой query-параметр
+// перезаписывал бы значение из профиля.
 function parseOptionalQueryParam(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
+// Собираем options только из заданных полей: undefined здесь был бы передан в
+// адаптер и перекрыл бы собственные значения по умолчанию.
 function buildSessionLookupOptions(input: {
   options?: Record<string, unknown> | null;
   baseUrl?: string | null;
@@ -676,6 +792,9 @@ function buildSessionLookupOptions(input: {
   return Object.keys(options).length > 0 ? options : undefined;
 }
 
+// Приоритет источников: сначала явно указанный профиль, затем профиль проекта,
+// и только потом дескриптор адаптера. Профиль принимается лишь при совпадении
+// runtimeId, иначе адаптер пошел бы не за той сессией.
 async function resolveVirtualSessionLookupContext(input: {
   runtimeId: string;
   adapter: RuntimeAdapter;
@@ -751,17 +870,22 @@ async function resolveVirtualSessionLookupContext(input: {
 export const chatRouter = new Hono();
 
 /**
- * Per-conversation AbortController registry. Populated before dispatching the
- * runtime `run`/`resume` call and cleared in the route's finally block.
- * The `/:conversationId/abort` endpoint looks up the controller and calls
- * `.abort()`, which propagates through the Claude adapter (AbortController on
- * SDK query options, `kill()` on the CLI spawn) and surfaces to the client as
- * `chat:error` with code `"aborted"`.
+ * Реестр AbortController по каждой беседе. Заполняется перед отправкой
+ * вызова `run`/`resume` рантайма и очищается в finally-блоке маршрута.
+ * Эндпоинт `/:conversationId/abort` находит контроллер и вызывает
+ * `.abort()`, что распространяется через адаптер Claude (AbortController в
+ * опциях запроса SDK, `kill()` у spawn CLI) и проявляется клиенту как
+ * `chat:error` с кодом `"aborted"`.
  */
+// Активные запуски адресуются по conversationId, а не по sessionId: клиент
+// начинает новый чат до того, как у него появится id сессии, и должен уметь
+// его остановить.
 const activeChatRuns = new Map<string, AbortController>();
 
-// ── Session CRUD ───────────────────────────────────────────
+// ── CRUD сессий ───────────────────────────────────────────
 
+// Проект обязателен: без него нельзя ни найти корень репозитория, ни выбрать
+// профиль рантайма, а сессии без проекта не имеют смысла.
 // GET /chat/sessions?projectId=...
 chatRouter.get("/sessions", async (c) => {
   const projectId = c.req.query("projectId");
@@ -775,15 +899,20 @@ chatRouter.get("/sessions", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  // DB-backed web sessions
+  // Список отдается в двух слоях: сначала сохраненные сессии из БД, затем
+  // обнаруженные у рантайма. Слияние делает клиентский код ниже, а здесь
+  // важно только то, что список из БД не зависит от доступности рантайма.
+  // Веб-сессии из БД
   const dbRows = listChatSessions(projectId);
   const dbSessions = dbRows.map(toChatSessionResponse);
 
-  // Collect linked external runtime session IDs to avoid duplicates
+  // Собираем id внешних runtime-сессий, привязанных в БД, чтобы не дублировать
   const linkedRuntimeSessionIds = new Set(
     dbRows.map((r) => r.runtimeSessionId ?? r.agentSessionId).filter(Boolean) as string[],
   );
 
+  // Обнаружение сессий у рантайма - вспомогательное: при недоступности
+  // провайдера пользователь все равно должен видеть свои сохраненные чаты.
   let runtimeSessions: ChatSession[] = [];
   const systemAppend = buildContextAppend(project.name, null);
   try {
@@ -841,6 +970,8 @@ chatRouter.get("/sessions", async (c) => {
           "WARN [chat-route] Runtime does not support external session listing; returning DB sessions only",
         );
       } else {
+        // Кеш нужен из-за дорогого листинга у провайдера; включается только
+        // для рантаймов, где такое поведение объявлено безопасным.
         const useCache = shouldUseSessionCacheForRuntime(runtimeId);
         const cacheKey = sessionCacheKey(
           runtimeId,
@@ -911,7 +1042,9 @@ chatRouter.get("/sessions", async (c) => {
     );
   }
 
-  // Merge, sort by updatedAt DESC, cap at 20
+  // Слияние, сортировка по updatedAt DESC, не более 20
+  // Ограничение в 20 записей держит ответ компактным и заодно закрывает
+  // случай, когда история рантайма содержит сотни технических сессий.
   const all = [...dbSessions, ...runtimeSessions]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 20);
@@ -923,6 +1056,8 @@ chatRouter.get("/sessions", async (c) => {
 chatRouter.post("/sessions", jsonValidator(createChatSessionSchema), async (c) => {
   const body = c.req.valid("json") as CreateChatSessionPayload;
   log.debug("POST /chat/sessions projectId=%s title=%s", body.projectId, body.title);
+  // Проверяем, что выбранный профиль действительно принадлежит проекту:
+  // иначе чат мог бы незаметно уехать в чужой рабочий каталог.
   const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
     projectId: body.projectId,
     selections: { runtimeProfileId: body.runtimeProfileId },
@@ -950,6 +1085,8 @@ chatRouter.get("/sessions/:id", async (c) => {
   const id = c.req.param("id");
   log.debug("GET /chat/sessions/%s", id);
 
+  // Виртуальный id означает сессию рантайма без строки в БД, поэтому сначала
+  // проверяем виртуальный формат и только потом ищем запись в БД.
   const virtual = parseVirtualRuntimeSessionId(id);
   if (virtual) {
     const queryProjectId = parseOptionalQueryParam(c.req.query("projectId"));
@@ -998,6 +1135,8 @@ chatRouter.get("/sessions/:id", async (c) => {
       if (!info) {
         return c.json({ error: "Chat session not found" }, 404);
       }
+      // projectId у виртуальной сессии неизвестен, поэтому в ответе он пустой:
+      // привязка появится после первого ответа в этот чат.
       const session: ChatSession = {
         id,
         projectId: "",
@@ -1073,6 +1212,8 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
         headers: lookupContext.headers,
       });
 
+      // События рантайма и строки БД могут описывать одни и те же реплики,
+      // поэтому перед отдачей они сводятся вместе по роли и тексту.
       const messages = mapRuntimeEventsToChatMessages(runtimeEvents, id, adapter);
 
       return c.json(messages);
@@ -1090,6 +1231,9 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
     return c.json({ error: "Chat session not found" }, 404);
   }
 
+  // Основной путь: сессия есть в БД. К ее сообщениям добавляются события
+  // рантайма, чтобы UI видел и то, что сохранил сервер, и то, что успел
+  // начитать провайдер.
   const dbMessages = listChatMessages(id).map(toChatMessageResponse);
   const project = findProjectById(session.projectId);
   const linkedRuntimeSessionId = session.runtimeSessionId ?? session.agentSessionId;
@@ -1103,6 +1247,9 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
     let profileBaseUrl: string | null = null;
     let profileTransport: RuntimeTransport | undefined;
 
+    // Параметры профиля разворачиваются вручную, потому что адаптер идет к уже
+    // существующей сессии: она могла быть создана с профилем, который сейчас
+    // не является профилем проекта.
     if (session.runtimeProfileId) {
       const profileRow = findRuntimeProfileById(session.runtimeProfileId);
       if (profileRow) {
@@ -1158,6 +1305,8 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
 
         const runtimeMessages = mapRuntimeEventsToChatMessages(runtimeEvents, id, adapter);
 
+        // Пустой ответ рантайма не стирает историю: если в БД есть сообщения,
+        // отдаем именно их, иначе чат выглядел бы потерянным.
         if (runtimeMessages.length === 0 && dbMessages.length > 0) {
           log.debug(
             {
@@ -1202,6 +1351,8 @@ chatRouter.put("/sessions/:id", jsonValidator(updateChatSessionSchema), async (c
     return c.json(runtimeValidation, 400);
   }
 
+  // Обновляем только разрешенные поля: id, проект и авторство сессии менять
+  // через этот эндпоинт нельзя.
   const row = updateChatSession(id, {
     title: body.title,
     runtimeProfileId: body.runtimeProfileId,
@@ -1218,12 +1369,14 @@ chatRouter.delete("/sessions/:id", async (c) => {
   if (!existing) {
     return c.json({ error: "Chat session not found" }, 404);
   }
+  // Удаление полное: вместе с сессией @aif/data убирает связанные сообщения,
+  // поэтому отдельная очистка здесь не нужна.
   deleteChatSession(id);
   broadcast({ type: "chat:session_deleted", payload: { id } });
   return c.body(null, 204);
 });
 
-// GET /chat/sessions/:sessionId/attachments/:filename — download a chat attachment
+// GET /chat/sessions/:sessionId/attachments/:filename — скачать вложение чата
 chatRouter.get("/sessions/:sessionId/attachments/:filename", async (c) => {
   const { sessionId, filename } = c.req.param();
   const session = findChatSessionById(sessionId);
@@ -1235,6 +1388,8 @@ chatRouter.get("/sessions/:sessionId/attachments/:filename", async (c) => {
   const messages = listChatMessages(sessionId);
   const decodedFilename = decodeURIComponent(filename);
 
+  // Вложение ищется перебором сообщений сессии: путь к файлу хранится только в
+  // БД, а не в URL, поэтому прямой доступ по имени невозможен без проверки.
   for (const msg of messages) {
     const response = toChatMessageResponse(msg);
     const attachment = response.attachments?.find((a) => a.name === decodedFilename);
@@ -1245,6 +1400,8 @@ chatRouter.get("/sessions/:sessionId/attachments/:filename", async (c) => {
         c.header("Content-Disposition", `attachment; filename="${attachment.name}"`);
         c.header("Content-Length", String(buffer.length));
         return new Response(new Uint8Array(buffer), { headers: c.res.headers });
+        // Ошибка чтения файла - это 404, а не 500: запись в БД могла сохраниться,
+        // а сам файл на диске - исчезнуть (например, после очистки проекта).
       } catch {
         return c.json({ error: "Attachment file not found on disk" }, 404);
       }
@@ -1255,9 +1412,11 @@ chatRouter.get("/sessions/:sessionId/attachments/:filename", async (c) => {
 });
 
 // POST /chat
-// POST /chat/:conversationId/abort — interrupt an in-flight chat run.
+// POST /chat/:conversationId/abort — прервать выполняющийся запуск чата.
 chatRouter.post("/:conversationId/abort", async (c) => {
   const conversationId = c.req.param("conversationId");
+  // Если запуска нет, отвечаем 404: клиент мог опоздать со Stop, и это не
+  // ошибка - гонку с завершением запроса здесь гасить не нужно.
   const controller = activeChatRuns.get(conversationId);
   if (!controller) {
     log.debug(
@@ -1278,12 +1437,12 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   let { sessionId: inputSessionId } = body;
   const env = getEnv();
 
-  // Register the AbortController BEFORE any slow work (project lookup, runtime
-  // resolution, session auto-create). This closes the window where an early
-  // Stop click from the client would hit `/abort` with a 404 because the
-  // controller wasn't registered yet, letting the `/chat` request continue
-  // running. If `.abort()` fires before `adapter.run()` is reached, the
-  // already-aborted signal propagates into the run and trips the catch below.
+  // Регистрируем AbortController ДО любой медленной работы (поиск проекта,
+  // разрешение профиля, автосоздание сессии). Это закрывает окно, когда ранний
+  // клик Stop клиент присылал в `/abort` и получал 404, потому что контроллера
+  // ещё не было, а запрос `/chat` продолжал выполняться. Если `.abort()`
+  // сработает до достижения `adapter.run()`, уже сброшенный сигнал доходит до
+  // запуска и попадает в catch ниже.
   const chatConversationId = conversationId ?? crypto.randomUUID();
   const abortController = new AbortController();
   activeChatRuns.set(chatConversationId, abortController);
@@ -1292,17 +1451,17 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   let runtimeId: string | undefined;
   let runtimeProfileId: string | null | undefined;
   let runtimeProviderId: string | undefined;
-  // Hoisted so the abort branch can persist any partial streamed output.
+  // Вынесена наверх, чтобы ветка abort могла сохранить частичный потоковый вывод.
   let fullAssistantResponse = "";
-  // Captured from the runtime `system:init` event so the abort branch can
-  // link the DB chat session to the runtime session even when the run never
-  // completed. Without this, aborting the first turn of a fresh chat would
-  // break runtime continuity — the next turn would have no resume context.
+  // Захватывается из события runtime `system:init`, чтобы ветка abort могла
+  // связать DB-сессию чата с runtime-сессией даже когда запуск так и не
+  // завершился. Без этого прерывание первого хода нового чата ломало бы
+  // непрерывность рантайма — следующий ход не имел бы контекста возобновления.
   let runtimeSessionIdFromEvents: string | null = null;
   let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
-  // Hoisted so the abort branch can surface server-resolved attachment paths
-  // to the client — without this, an aborted run with uploads would leave the
-  // user bubble with a path-less chip until the session is reopened.
+  // Вынесены наверх, чтобы ветка abort могла показать клиенту разрешённые
+  // сервером пути вложений — без этого прерванный запуск с файлами оставил бы
+  // пузырёк пользователя с чипом без пути до повторного открытия сессии.
   let savedAttachments: ChatMessageAttachment[] | undefined;
 
   try {
@@ -1311,7 +1470,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       return c.json({ error: "Project not found" }, 404);
     }
 
-    // Resolve currently open task for context injection
+    // Разрешение текущей открытой задачи для внедрения контекста
     let currentTask: Task | null = null;
     if (taskId) {
       const row = findTaskById(taskId);
@@ -1349,10 +1508,10 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       interactiveQuestions: chatRuntimeCaps.supportsInteractiveQuestions === true,
     });
 
-    // Resolve or auto-create a chat session. Existing DB sessions are loaded
-    // before runtime resolution so their saved runtimeProfileId stays pinned.
+    // Разрешение или автосоздание сессии чата. Существующие DB-сессии читаются
+    // до разрешения runtime, чтобы их сохранённый runtimeProfileId остался закреплён.
 
-    // External runtime sessions are virtual — create a DB session linked to the runtime session
+    // Внешние runtime-сессии виртуальны — создаём DB-сессию, привязанную к runtime-сессии
     if (incomingVirtual) {
       const autoTitle = message.slice(0, 80);
       const session = createChatSession({
@@ -1415,7 +1574,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       updateChatSessionTimestamp(chatSessionId);
     }
 
-    // Persist file attachments to disk and build prompt with paths
+    // Сохраняем вложения-файлы на диск и собираем промпт с путями
     let prompt = explore ? `/aif-explore ${message}` : message;
     if (attachments?.length && chatSessionId) {
       const persisted = await persistAttachments(attachments, {
@@ -1444,15 +1603,18 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
 
     const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
-    // Preserve assistant-turn event order as text/question segments:
-    //   * question blocks are buffered and flushed before the next text delta
-    //     (or at turn end), so a stream like text→question→text stays ordered.
-    //   * recovery-path merges missing text from `result.outputText` with
-    //     streamed deltas via suffix/prefix overlap and flushes buffered
-    //     questions after recovered text, keeping intro-before-question.
-    //   * DB persistence writes each ordered segment as a separate assistant
-    //     row so replay shape matches runtime history (`session-message` +
-    //     per-question `tool:question`) and dedupe remains stable on reload.
+    // Сохраняем порядок событий хода ассистента как сегменты text/question:
+    //   * блоки вопросов буферизуются и сбрасываются перед следующим текстовым
+    //     delta (или в конце хода), чтобы поток вида text→question→text оставался
+    //     упорядоченным.
+    //   * путь восстановления сливает отсутствующий текст из `result.outputText`
+    //     с потоковыми delta через перекрытие суффикса/префикса и сбрасывает
+    //     буферизованные вопросы после восстановленного текста, сохраняя
+    //     порядок «вступление до вопроса».
+    //   * персист в БД пишет каждый упорядоченный сегмент отдельной строкой
+    //     ассистента, чтобы форма повтора совпадала с историей рантайма
+    //     (`session-message` + отдельный `tool:question` на вопрос) и
+    //     дедупликация оставалась стабильной при перезагрузке.
     let streamedText = "";
     let streamedTextLength = 0;
     const assistantSegments: AssistantSegment[] = [];
@@ -1532,10 +1694,10 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         const toolName = typeof data.name === "string" ? data.name : null;
         if (!toolName) return;
         if (data.interactive === true) {
-          // Adapter will emit a correlated `tool:question` event for interactive
-          // tools — skip the raw tool:use so we don't render both a `> Tool` line
-          // and the question block. Runtime-neutral: branches on an event flag,
-          // not a provider-specific tool name.
+          // Адаптер выпустит коррелированное событие `tool:question` для
+          // интерактивных инструментов — пропускаем сырое tool:use, чтобы не
+          // рендерить и строку `> Tool`, и блок вопроса. Нейтрально к runtime:
+          // ветвление по флагу события, а не по имени инструмента провайдера.
           return;
         }
         if (NOISY_TOOL_NAMES.has(toolName) || toolName.startsWith("mcp__handoff__")) {
@@ -1552,11 +1714,11 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         sendToken(`\n\n> 🔧 ${toolName}\n\n`);
       }
 
-      // Capture the runtime session id as soon as the adapter emits it, so
-      // the abort branch can persist a DB→runtime session link even when
-      // adapter.run() never resolves. Without this, aborting the first turn
-      // of a fresh chat would leave the DB session without runtimeSessionId
-      // and the next turn would dispatch with no resume context.
+      // Захватываем id сессии рантайма сразу, как адаптер его выдаёт, чтобы
+      // ветка abort могла сохранить связь DB→runtime-сессии даже когда
+      // adapter.run() так и не разрешится. Без этого прерывание первого хода
+      // нового чата оставило бы DB-сессию без runtimeSessionId, и следующий
+      // ход ушёл бы без контекста возобновления.
       if (event.type === "system:init" && event.data) {
         const sid = event.data.sessionId;
         if (typeof sid === "string" && sid) {
@@ -1682,11 +1844,11 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       );
     }
 
-    // Recover assistant text that never arrived as `stream:text` deltas.
-    // Claude CLI partial-messages can emit a mix where only part of assistant
-    // text arrives as deltas and the rest remains in `result.outputText`.
-    // Merge missing prefix/suffix fragments and emit them before any pending
-    // question blocks to keep intro-before-question ordering.
+    // Восстанавливаем текст ассистента, который так и не пришёл delta-ми
+    // `stream:text`. Claude CLI в partial-messages может выдавать смесь, где
+    // часть текста ассистента приходит delta-ми, а остальное остаётся в
+    // `result.outputText`. Склеиваем отсутствующие фрагменты префикса/суффикса
+    // и отправляем их до буферизованных блоков вопросов, сохраняя порядок.
     const recovered = recoverMissingTextParts(streamedText, result.outputText ?? "");
     if (recovered.prefix) {
       mergeAdjacentTextSegment(assistantSegments, recovered.prefix);
@@ -1703,8 +1865,8 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
 
     fullAssistantResponse = assistantSegments.map((segment) => segment.content).join("");
 
-    // Persist each ordered assistant segment separately. Keeping the same
-    // split shape as runtime replay makes mergeRuntimeAndDbMessages stable.
+    // Сохраняем каждый упорядоченный сегмент ассистента отдельно. Та же форма
+    // разделения, что и при повторе runtime, делает mergeRuntimeAndDbMessages стабильным.
     if (chatSessionId) {
       for (const segment of assistantSegments) {
         const trimmed = segment.content.trim();
@@ -1730,10 +1892,10 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         taskId: taskId ?? null,
         runtimeProfileId: runtimeProfileId ?? null,
         runtimeLimitSnapshot: normalizedLatestLimitSnapshot,
-        // Expose per-turn usage so the frontend can show token/cost spend
-        // without a round-trip to the usage_events table. Recording of the
-        // usage itself already happened inside the registry wrapper via the
-        // DB sink — this payload is purely for UI display.
+        // Отдаём использование за ход, чтобы фронтенд показывал расход
+        // токенов/стоимости без похода к таблице usage_events. Сам учёт уже
+        // выполнен внутри обёртки реестра через DB-сток — эта полезная
+        // нагрузка нужна исключительно для отображения в UI.
         usage: result.usage ?? null,
       },
     };
@@ -1759,17 +1921,17 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     const normalizedErrorLimitSnapshot = normalizeOptionalRuntimeLimitSnapshot(errorLimitSnapshot);
     const aborted = abortController.signal.aborted || isAbortError(err);
     if (aborted) {
-      // Persist any tokens streamed before the abort so the partial assistant
-      // reply survives reload. Without this, a fresh session stopped mid-stream
-      // would lose visible output.
+      // Сохраняем все токены, отправленные до прерывания, чтобы частичный
+      // ответ ассистента пережил перезагрузку. Без этого свежая сессия,
+      // остановленная посреди потока, потеряла бы видимый вывод.
       const partial = fullAssistantResponse.trim();
       if (chatSessionId && partial) {
         createChatMessage({ sessionId: chatSessionId, role: "assistant", content: partial });
         updateChatSessionTimestamp(chatSessionId);
       }
-      // Link the DB chat session to the runtime session the adapter started
-      // before we aborted, so the next turn can resume instead of starting
-      // a brand-new runtime thread and losing continuity.
+      // Привязываем DB-сессию чата к runtime-сессии, которую адаптер успел
+      // запустить до прерывания, чтобы следующий ход возобновил её, а не
+      // начал новую runtime-ветку с потерей непрерывности.
       if (chatSessionId && runtimeSessionIdFromEvents) {
         updateChatSession(chatSessionId, {
           runtimeProfileId: runtimeProfileId ?? null,
@@ -1831,12 +1993,12 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           conversationId: chatConversationId,
           sessionId: chatSessionId,
           runtimeLimitSnapshot: normalizedErrorLimitSnapshot,
-          // Expose the partial assistant reply so clients without an active
-          // WebSocket can render what was saved server-side. Mirrors the
-          // success path's `assistantMessage`.
+          // Отдаём частичный ответ ассистента, чтобы клиенты без активного
+          // WebSocket отрисовали сохранённое на сервере. Зеркалирует
+          // `assistantMessage` успешного пути.
           assistantMessage: partial.length > 0 ? partial : null,
-          // Echo server-resolved attachments so the optimistic user bubble
-          // can upgrade its chips with download paths even on abort.
+          // Эхо разрешённых сервером вложений, чтобы оптимистичный пузырёк
+          // пользователя обновил чипы путями скачивания даже при прерывании.
           ...(savedAttachments?.length ? { attachments: savedAttachments } : {}),
         },
         409,

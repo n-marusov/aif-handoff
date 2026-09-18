@@ -758,7 +758,7 @@ describe("registry usage pipeline", () => {
       usageContext: { source: UsageSource.TEST },
     });
 
-    // Still records the event — we take the data when we get it — but warns.
+    // Событие всё равно записывается — данные берём, когда они есть — но предупреждаем.
     expect(sink.events).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ usageReporting: UsageReporting.NONE }),
@@ -984,8 +984,8 @@ describe("Language directive injection", () => {
   });
 
   it("does not throw and logs WARN when config read fails", async () => {
-    // Point projectRoot at a path where config.yaml exists but is unreadable
-    // garbage — YAML.parse will blow up and we should swallow + warn.
+    // projectRoot указывает на путь, где config.yaml существует, но это нечитаемый
+    // мусор — YAML.parse взорвётся, и мы должны проглотить ошибку + warn.
     const root = await setupTempProject(":::not yaml::\n  - [");
     const { adapter, captured } = createCapturingAdapter();
     const logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn() };

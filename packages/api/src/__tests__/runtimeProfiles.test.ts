@@ -128,9 +128,9 @@ describe("runtimeProfiles API", () => {
 
   beforeEach(() => {
     previousUsageLimitsEnv = process.env.AIF_USAGE_LIMITS_ENABLED;
-    // Flag defaults to false (opt-in). Most tests here exercise the live
-    // refresh path, so enable it per-test. Cases that need the disabled
-    // path override and restore this inside the test body.
+    // Флаг по умолчанию false (opt-in). Большинство тестов здесь идут живым
+    // путём обновления, поэтому включаем его в каждом тесте. Случаям, которым
+    // нужен выключенный путь, переопределяем и восстанавливаем его внутри тела теста.
     process.env.AIF_USAGE_LIMITS_ENABLED = "true";
     resetEnvCache();
     testDb.current = createTestDb();
@@ -245,7 +245,7 @@ describe("runtimeProfiles API", () => {
     process.env.AIF_USAGE_LIMITS_ENABLED = "false";
     resetEnvCache();
     try {
-      // Create a Codex profile so the route actually reaches the refresh path.
+      // Создаём Codex-профиль, чтобы маршрут реально дошёл до пути обновления.
       const createRes = await app.request("/runtime-profiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -90,10 +90,10 @@ describe("FormDialog", () => {
       </FormDialog>,
     );
 
-    // When open is false, Dialog does not render content
+    // При open=false Dialog не рендерит содержимое
     expect(screen.queryByText("Hidden")).not.toBeInTheDocument();
 
-    // When open is true, Dialog renders content
+    // При open=true Dialog рендерит содержимое
     rerender(
       <FormDialog
         open={true}

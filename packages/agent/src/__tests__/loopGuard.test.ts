@@ -7,7 +7,7 @@ describe("LoopGuard", () => {
     const guard = new LoopGuard({ maxToolCalls: 3, readOnlyBurst: 20 });
     guard.onToolUse("Read", "src/a.ts");
     guard.onToolUse("Read", "src/b.ts");
-    guard.onToolUse("Bash", "pnpm install"); // not read-only, but counts toward the cap
+    guard.onToolUse("Bash", "pnpm install"); // не read-only, но идёт в общий лимит
     expect(() => guard.onToolUse("Read", "src/c.ts")).toThrow(AiLoopDetectedError);
   });
 
@@ -22,7 +22,7 @@ describe("LoopGuard", () => {
     const guard = new LoopGuard({ maxToolCalls: 500, readOnlyBurst: 3 });
     guard.onToolUse("Read", "src/a.ts");
     guard.onToolUse("Read", "src/b.ts");
-    guard.onToolUse("Edit", "src/a.ts"); // write resets the burst
+    guard.onToolUse("Edit", "src/a.ts"); // запись сбрасывает серию
     guard.onToolUse("Read", "src/c.ts");
     guard.onToolUse("Read", "src/d.ts");
     expect(() => guard.onToolUse("Read", "src/e.ts")).toThrow(AiLoopDetectedError);

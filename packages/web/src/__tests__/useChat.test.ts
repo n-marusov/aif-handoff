@@ -68,7 +68,7 @@ describe("useChat", () => {
         explore: false,
       }),
     );
-    // conversationId is generated client-side as a UUID
+    // conversationId генерируется на клиенте как UUID
     expect(mockSendChatMessage.mock.calls[0][0].conversationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
@@ -104,7 +104,7 @@ describe("useChat", () => {
 
     const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
 
-    // Simulate chat:token events
+    // Симулируем события chat:token
     act(() => {
       window.dispatchEvent(
         new CustomEvent("chat:token", {
@@ -229,7 +229,7 @@ describe("useChat", () => {
 
     await act(async () => {
       rerender({ pid: "p-1", sid: "sess-1" });
-      // Flush the async load
+      // Ждём завершения асинхронной загрузки
       await new Promise<void>((r) => setTimeout(r, 10));
     });
 
@@ -398,7 +398,7 @@ describe("useChat", () => {
   });
 
   it("abort targets the currently viewed session when multiple streams are in flight", async () => {
-    // Stream A: pending on session "sess-A"
+    // Поток A: ожидает на сессии "sess-A"
     let resolveA: ((v: { conversationId: string; sessionId: string }) => void) | null = null;
     mockSendChatMessage.mockImplementationOnce(
       () =>
@@ -406,7 +406,7 @@ describe("useChat", () => {
           resolveA = resolve;
         }),
     );
-    // Stream B: pending on session "sess-B"
+    // Поток B: ожидает на сессии "sess-B"
     let resolveB: ((v: { conversationId: string; sessionId: string }) => void) | null = null;
     mockSendChatMessage.mockImplementationOnce(
       () =>
@@ -415,15 +415,15 @@ describe("useChat", () => {
         }),
     );
 
-    // Hook A bound to session A; Hook B to session B — they share the abort registry
-    // via activeStreamsRef only within one hook instance, so simulate the real scenario
-    // with a single hook switching its viewed session.
+    // Хук A привязан к сессии A; хук B — к сессии B; общий реестр abort через
+    // activeStreamsRef существует только внутри одного экземпляра хука, поэтому
+    // симулируем реальный сценарий одним хуком, меняющим просматриваемую сессию.
     const { result, rerender } = renderHook(
       ({ sid }: { sid: string | null }) => useChat("p-1", sid),
       { initialProps: { sid: "sess-A" as string | null } },
     );
 
-    // Start stream for session A
+    // Запускаем поток для сессии A
     let sendAPromise: Promise<void>;
     act(() => {
       sendAPromise = result.current.sendMessage("A");
@@ -431,7 +431,7 @@ describe("useChat", () => {
     await waitFor(() => expect(mockSendChatMessage).toHaveBeenCalledTimes(1));
     const convA = mockSendChatMessage.mock.calls[0][0].conversationId as string;
 
-    // Switch to session B — wait for the effect to clear isStreaming — then send
+    // Переключаемся на сессию B — ждём, пока эффект сбросит isStreaming, — затем отправляем
     await act(async () => {
       rerender({ sid: "sess-B" });
       await new Promise((r) => setTimeout(r, 0));
@@ -443,7 +443,7 @@ describe("useChat", () => {
     await waitFor(() => expect(mockSendChatMessage).toHaveBeenCalledTimes(2));
     const convB = mockSendChatMessage.mock.calls[1][0].conversationId as string;
 
-    // Switch back to A and hit Stop — must abort A's conversation, not B's
+    // Возврат на A и нажатие Stop — должен прервать conversation A, а не B
     rerender({ sid: "sess-A" });
     await act(async () => {
       await result.current.abortStream();
@@ -453,7 +453,7 @@ describe("useChat", () => {
     expect(mockAbortChat).toHaveBeenCalledWith(convA);
     expect(convA).not.toBe(convB);
 
-    // Clean up pending promises
+    // Убираем висящие промисы
     await act(async () => {
       resolveA?.({ conversationId: convA, sessionId: "sess-A" });
       resolveB?.({ conversationId: convB, sessionId: "sess-B" });
@@ -502,7 +502,7 @@ describe("useChat", () => {
   });
 
   it("does not clear Stop or show Stopped on session B when session A's run aborts in the background", async () => {
-    // Stream A: resolvable by us, simulates A's HTTP settling after user switches away
+    // Поток A: разрешаем мы сами — имитация завершения HTTP-A после переключения пользователя
     let rejectA: ((reason?: unknown) => void) | null = null;
     mockSendChatMessage.mockImplementationOnce(
       () =>
@@ -510,7 +510,7 @@ describe("useChat", () => {
           rejectA = reject;
         }),
     );
-    // Stream B: pending forever for this test
+    // Поток B: в этом тесте ждёт вечно
     let resolveB: ((v: { conversationId: string; sessionId: string }) => void) | null = null;
     mockSendChatMessage.mockImplementationOnce(
       () =>
@@ -524,7 +524,7 @@ describe("useChat", () => {
       { initialProps: { sid: "sess-A" as string | null } },
     );
 
-    // Kick off stream for A
+    // Запускаем поток для A
     let sendAPromise: Promise<void>;
     act(() => {
       sendAPromise = result.current.sendMessage("A");
@@ -532,7 +532,7 @@ describe("useChat", () => {
     await waitFor(() => expect(mockSendChatMessage).toHaveBeenCalledTimes(1));
     const convA = mockSendChatMessage.mock.calls[0][0].conversationId as string;
 
-    // Switch to B and kick off its stream
+    // Переключаемся на B и запускаем его поток
     await act(async () => {
       rerender({ sid: "sess-B" });
       await new Promise((r) => setTimeout(r, 0));
@@ -543,7 +543,7 @@ describe("useChat", () => {
     });
     await waitFor(() => expect(mockSendChatMessage).toHaveBeenCalledTimes(2));
 
-    // While the user is still viewing B, A's HTTP request aborts with 409.
+    // Пока пользователь всё ещё смотрит B, HTTP-запрос A прерывается с 409.
     await act(async () => {
       rejectA!(
         new ApiError("Chat run aborted by user", 409, {
@@ -556,11 +556,11 @@ describe("useChat", () => {
       await sendAPromise;
     });
 
-    // B is still streaming — Stop must stay, no "Stopped" banner must appear.
+    // B всё ещё стримит — Stop должен остаться, баннер "Stopped" не должен появиться.
     expect(result.current.isStreaming).toBe(true);
     expect(result.current.chatErrorCode).toBeNull();
 
-    // Clean up
+    // Очистка
     await act(async () => {
       resolveB?.({ conversationId: "conv-B", sessionId: "sess-B" });
       await sendBPromise;
@@ -647,8 +647,8 @@ describe("useChat", () => {
 
     const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
 
-    // WS `chat:error` with code=aborted arrives first — this clears the
-    // in-flight stream state before the HTTP 409 lands.
+    // WS `chat:error` с code=aborted приходит первым — он очищает состояние
+    // активного потока до того, как прилетит HTTP 409.
     act(() => {
       window.dispatchEvent(
         new CustomEvent("chat:error", {
@@ -657,8 +657,8 @@ describe("useChat", () => {
       );
     });
 
-    // Then the HTTP request rejects with a 409 carrying server-resolved
-    // attachment paths. The bubble must still pick them up.
+    // Затем HTTP-запрос отклоняется с 409, несущим разрешённые сервером
+    // пути вложений. «Пузырёк» сообщения должен всё равно их подхватить.
     await act(async () => {
       rejectSend!(
         new ApiError("Chat run aborted by user", 409, {

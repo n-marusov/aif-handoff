@@ -59,9 +59,9 @@ describe("Claude adapter — transport routing and capabilities", () => {
       expect(runClaudeRuntimeMock).toHaveBeenCalledTimes(1);
       expect(runClaudeCliMock).not.toHaveBeenCalled();
       expect(runClaudeRuntimeMock.mock.calls[0][2]).toEqual({
-        // Only the resolved SDK executable is forwarded; the version guard
-        // reads the SDK-bundled binary version from the manifest when this is
-        // absent, and never probes an unrelated `claude` on PATH.
+        // Пробрасывается только разрешённый SDK-исполняемый файл; при его
+        // отсутствии version guard читает версию встроенного в SDK бинарника
+        // из манифеста и никогда не зондирует посторонний `claude` на PATH.
         pathToClaudeCodeExecutable:
           "C:\\nvm4w\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe",
       });

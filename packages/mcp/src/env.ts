@@ -3,40 +3,40 @@ import { logger, getEnv, parseMcpPortSetting } from "@aif/shared";
 const log = logger("mcp:env");
 
 export interface McpEnv {
-  /** API server URL for WebSocket broadcast (from shared env) */
+  /** URL API-сервера для WebSocket-рассылки (из общего окружения) */
   apiUrl: string;
-  /** Transport mode: "stdio" (default) or "http" (for Docker / remote) */
+  /** Режим транспорта: "stdio" (по умолчанию) или "http" (для Docker / удалённого доступа) */
   transport: "stdio" | "http";
-  /** HTTP port when transport is "http" */
+  /** HTTP-порт, когда транспорт "http" */
   httpPort: number;
-  /** Rate limit: requests per minute for read tools */
+  /** Лимит частоты: запросов в минуту для инструментов чтения */
   rateLimitReadRpm: number;
-  /** Rate limit: requests per minute for write tools */
+  /** Лимит частоты: запросов в минуту для инструментов записи */
   rateLimitWriteRpm: number;
-  /** Rate limit: burst size for read tools */
+  /** Лимит частоты: размер всплеска для инструментов чтения */
   rateLimitReadBurst: number;
-  /** Rate limit: burst size for write tools */
+  /** Лимит частоты: размер всплеска для инструментов записи */
   rateLimitWriteBurst: number;
   /**
-   * Opt-in flag for the stateless multi-session HTTP transport. Defaults to
-   * `false` (legacy single-session behavior). Set
-   * `AIF_MCP_HTTP_MULTI_SESSION_ENABLED` to 1/true/yes/on to let multiple
-   * clients (e.g. several Claude Code windows) connect concurrently to the same
-   * `/mcp` endpoint. Only relevant when `transport` is `http`.
+   * Opt-in флаг stateless-мультисессионного HTTP-транспорта. По умолчанию
+   * `false` (legacy односессионное поведение). Установите
+   * `AIF_MCP_HTTP_MULTI_SESSION_ENABLED` в 1/true/yes/on, чтобы несколько
+   * клиентов (например, несколько окон Claude Code) подключались одновременно
+   * к одному `/mcp`-эндпоинту. Актуально только при `transport` = `http`.
    */
   httpMultiSession: boolean;
-  /** Whether Participants Mode is enabled in the shared application. */
+  /** Включён ли режим участников в приложении. */
   participantsModeEnabled: boolean;
-  /** Dedicated bearer token for HTTP MCP. Never used for participant sessions. */
+  /** Выделенный bearer-токен для HTTP MCP. Никогда не используется для сессий участников. */
   authToken: string | null;
 }
 
 const BOOLEAN_TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 
 /**
- * Parse an opt-in boolean env flag. Defaults to `false` unless the value is one
- * of 1/true/yes/on (case-insensitive) — matches `@aif/shared` env boolean
- * semantics so operators get consistent behavior across packages.
+ * Разбирает opt-in булев флаг окружения. По умолчанию `false`, если значение не
+ * одно из 1/true/yes/on (без учёта регистра) — совпадает с булевой семантикой
+ * `@aif/shared`, чтобы поведение было согласованным между пакетами.
  */
 function parseBooleanFlag(value: string | undefined): boolean {
   if (!value) return false;
@@ -69,9 +69,9 @@ function resolveMcpPort(value: string | undefined, transport: McpEnv["transport"
 }
 
 /**
- * Load MCP-specific environment config.
- * DB connection uses the shared getDb() from @aif/shared/server (same as api/agent).
- * API_BASE_URL comes from the shared env.
+ * Загружает конфигурацию окружения MCP.
+ * Соединение с БД использует общий getDb() из @aif/shared/server (как у api/agent).
+ * API_BASE_URL берётся из общего окружения.
  */
 export function loadMcpEnv(): McpEnv {
   const sharedEnv = getEnv();

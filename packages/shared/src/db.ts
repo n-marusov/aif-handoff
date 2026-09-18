@@ -1,3 +1,20 @@
+// Подключение к базе и управление схемой: открытие соединения, создание таблиц,
+// миграции, триггеры и индексы.
+//
+// Схема описывается в schema.ts, а здесь всё, что приводит существующую базу к этой схеме.
+// Порядок применения жёстко задан:
+//   1. ensureTables - CREATE TABLE IF NOT EXISTS для чистой базы;
+//   2. runMigrations - нумерованные миграции, ориентир - PRAGMA user_version;
+//   3. runRuntimeBackfills, ensureTriggers, ensureIndexes - идемпотентные доработки.
+//
+// Соединение одно на процесс и кэшируется: одному процессу незачем держать несколько
+// подключений к тому же файлу.
+//
+// ВАЖНО про миграции: массив MIGRATIONS только дополняется. Номер версии и SQL уже
+// выпущенной миграции менять нельзя - база хранит прогресс в PRAGMA user_version, и
+// подменённый SQL на таких базах просто не выполнится, оставив схему рассинхронизированной
+// с кодом. При конфликте веток новая миграция добавляется в конец со следующим номером.
+
 import { mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import Database from "better-sqlite3";
@@ -8,17 +25,26 @@ import { findMonorepoRootFromUrl } from "./monorepoRoot.js";
 
 const log = logger("db");
 
+// Ссылки на соединение держатся в модуле: drizzle-объект нужен потребителям, а исходный
+// клиент - для pragma, транзакций и закрытия.
 let _db: BetterSQLite3Database<typeof schema> | null = null;
 let _sqlite: Database.Database | null = null;
 
+// Корень монорепозитория нужен для разрешения относительного пути к базе.
 const MONOREPO_ROOT = findMonorepoRootFromUrl(import.meta.url);
 
-/** Resolve DB path relative to the monorepo root. */
+// Относительный путь разрешается от корня монорепозитория, а не от текущего каталога:
+// процессы запускаются из разных мест, а база в проекте одна. Специальное значение
+// ":memory:" и абсолютные пути возвращаются без изменений.
+/** Разрешает путь к базе относительно корня монорепозитория. */
 function resolveDbPath(raw: string): string {
   if (raw === ":memory:" || raw.startsWith("/")) return raw;
   return resolve(MONOREPO_ROOT, raw);
 }
 
+// Соединение создаётся лениво и один раз на процесс. При открытии выставляются два
+// обязательных режима: WAL даёт параллельное чтение во время записи, а foreign_keys = ON
+// включает проверку внешних ключей, которая в SQLite по умолчанию выключена.
 export function getDb(url?: string): BetterSQLite3Database<typeof schema> {
   if (_db) return _db;
 
@@ -37,7 +63,10 @@ export function getDb(url?: string): BetterSQLite3Database<typeof schema> {
   return _db;
 }
 
-/** Create tables if they don't exist. */
+/** Создаёт таблицы, если они ещё не существуют. */
+// Создание таблиц для чистой базы. Выражения идемпотентны (IF NOT EXISTS), а описанная
+// здесь схема соответствует последней версии - поэтому на новой базе миграции ниже
+// пропускаются.
 function ensureTables(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -428,21 +457,30 @@ function ensureTables(sqlite: Database.Database): void {
 }
 
 /**
- * Versioned migration system using SQLite's PRAGMA user_version.
- * Each migration runs once, in order, inside a transaction.
- * Add new migrations to the end of the array — never reorder or remove existing entries.
+ * Система версионированных миграций на PRAGMA user_version из SQLite.
+ * Каждая миграция выполняется один раз, по порядку, внутри транзакции.
+ * Новые миграции добавляются в конец массива — существующие записи нельзя переставлять или удалять.
  */
+// Описание одной миграции. Триггеры вынесены в отдельное поле, потому что их DDL содержит
+// точки с запятой внутри тела (BEGIN ... END) - разбиение по ";" его разрушило бы.
+// Поле backfill позволяет выполнить перенос данных в той же транзакции, что и изменение
+// схемы, то есть без промежуточного состояния.
 interface Migration {
   version: number;
   description: string;
   sql: string;
-  /** Trigger DDL statements that contain internal semicolons and must be executed whole. */
+  /** DDL-выражения триггеров с точками с запятой внутри тела, которые нужно выполнять целиком. */
   triggers?: string[];
-  /** Optional data migration that must run atomically with the versioned DDL. */
+  /** Необязательная миграция данных, выполняемая атомарно с версионированным DDL. */
   backfill?: (sqlite: Database.Database) => Record<string, number>;
 }
 
+// Перенос данных: строкам без владельца проставляются значения по умолчанию. Запускается
+// в одной транзакции с изменением схемы, поэтому прерывание не оставит половинчатого
+// состояния.
 function backfillParticipantOwnership(sqlite: Database.Database): Record<string, number> {
+  // Миграция может применяться и к базе, созданной до появления колонки created_at,
+  // поэтому выражение для времени выбирается по факту её наличия.
   const historyCreatedAtExpression = hasColumn(sqlite, "tasks", "created_at")
     ? "tasks.created_at"
     : "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -507,9 +545,17 @@ function backfillParticipantOwnership(sqlite: Database.Database): Record<string,
   };
 }
 
+// Нумерованные миграции. ПРАВИЛО: массив только дополняется. Нельзя менять номер версии
+// или SQL уже выпущенной миграции: база, где эта версия применена, пропустит новое
+// содержимое (runMigrations отбирает version > user_version), и схема разойдётся с кодом.
+// При конфликте в мерже ранее влитая миграция остаётся на своём номере, а вторая переносится
+// в конец с новым.
+//
+// ALTER TABLE ADD COLUMN безопасно выпускать повторно: ошибка о дублирующейся колонке
+// поглощается isIgnorableMigrationError.
 const MIGRATIONS: Migration[] = [
-  // Legacy columns that were added via ensureColumn — consolidated into migrations.
-  // These use ensureColumn-style idempotent checks since existing DBs already have them.
+  // Наследованные колонки, добавлявшиеся через ensureColumn, — сведены в миграции.
+  // Идемпотентные проверки в стиле ensureColumn: в существующих базах они уже есть.
   {
     version: 1,
     description: "Add session_id column to tasks for agent session resume",
@@ -645,13 +691,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE chat_sessions ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
     `,
   },
-  // IMPORTANT: version 10 intentionally rewrites upstream's old "backfill-only"
-  // migration because a diverged feature branch previously used version 9 for
-  // the manual-review schema. DBs that already ran upstream v9/v10 are safe:
-  // they already have usage_events and token aggregate columns, so skipping
-  // this rewritten v10 is harmless. DBs that reached the diverged feature
-  // branch v9 need this reconciliation step before version 11 can land
-  // cleanly after the histories merge.
+  // ВАЖНО: версия 10 намеренно переписывает старую «только backfill» миграцию
+  // апстрима, потому что ответвлённая ветка фичи ранее использовала версию 9 под
+  // схему manual-review. Базам, уже выполнившим апстримные v9/v10, ничего не угрожает:
+  // в них есть usage_events и агрегатные колонки токенов, поэтому пропуск
+  // переписанной v10 безвреден. Базам, дошедшим до v9 из ответвлённой ветки,
+  // нужен этот шаг сверки, чтобы версия 11 легла корректно
+  // после слияния историй.
   {
     version: 10,
     description:
@@ -1170,7 +1216,7 @@ const MIGRATIONS: Migration[] = [
       const statusCount = sqlite
         .prepare("UPDATE tasks SET status = 'plan_review' WHERE status = 'plan_ready'")
         .run().changes;
-      // blocked_from_status may not exist in pre-v27 schemas; safely skip if missing.
+      // В схемах до v27 колонки blocked_from_status может не быть; при отсутствии безопасно пропускаем.
       let blockedCount = 0;
       try {
         blockedCount = sqlite
@@ -1193,6 +1239,8 @@ const MIGRATIONS: Migration[] = [
   },
 ];
 
+// Простое разбиение по точке с запятой. Годится только для DDL без вложенных ";" - тела
+// триггеров по этой причине передаются отдельным полем triggers.
 function splitSqlStatements(sqlText: string): string[] {
   return sqlText
     .split(";")
@@ -1200,18 +1248,26 @@ function splitSqlStatements(sqlText: string): string[] {
     .filter((statement) => statement.length > 0);
 }
 
+// Повторное применение уже выполненного DDL ошибкой не считается. Признак берётся из
+// текста сообщения драйвера: другого источника у SQLite нет, поэтому список вариантов
+// должен покрывать все формы, которые драйвер выдаёт при дублировании колонки или объекта.
 function isIgnorableMigrationError(error: unknown): boolean {
   const message = String(error).toLowerCase();
   return message.includes("duplicate column name") || message.includes("already exists");
 }
 
+// Применение миграций от текущей версии к последней. Все они выполняются в одной
+// транзакции вместе с обновлением user_version: прерывание на середине откатит изменения
+// целиком, и база не останется в состоянии "часть схемы новая, часть нет".
 function runMigrations(sqlite: Database.Database): void {
   const currentVersion = (sqlite.pragma("user_version", { simple: true }) as number) ?? 0;
   const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
 
   if (pending.length === 0) {
-    // For fresh DBs (user_version=0) that were just created with CREATE TABLE IF NOT EXISTS
-    // (which already includes session_id), set version to latest to skip migrations.
+    // Чистая база уже создана через CREATE TABLE IF NOT EXISTS с полной актуальной схемой,
+    // поэтому прогонять по ней все миграции незачем - достаточно отметить последнюю версию.
+    // Для свежих баз (user_version=0), только что созданных через CREATE TABLE IF NOT EXISTS
+    // (схема уже включает session_id), выставляется последняя версия, чтобы пропустить миграции.
     if (currentVersion === 0 && MIGRATIONS.length > 0) {
       const latest = MIGRATIONS[MIGRATIONS.length - 1].version;
       sqlite.pragma(`user_version = ${latest}`);
@@ -1269,11 +1325,17 @@ function runMigrations(sqlite: Database.Database): void {
   log.info({ newVersion: pending[pending.length - 1].version }, "Migrations complete");
 }
 
+// Проверка наличия колонки. Нужна в backfill-функциях, где требуется SQL, совместимый и
+// со старой, и с новой схемой.
 function hasColumn(sqlite: Database.Database, tableName: string, columnName: string): boolean {
   const rows = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
   return rows.some((row) => row.name === columnName);
 }
 
+// Идемпотентные доработки данных, применяемые к любой базе независимо от версии:
+// заполнение значений по умолчанию и восстановление полей после расхождений прошлых
+// версий. Запускается на каждом открытии базы, поэтому все операции обязаны быть
+// повторяемыми.
 function runRuntimeBackfills(sqlite: Database.Database): void {
   if (hasColumn(sqlite, "app_settings", "id")) {
     const appSettingsBackfill = sqlite
@@ -1406,7 +1468,9 @@ function runRuntimeBackfills(sqlite: Database.Database): void {
   }
 }
 
-/** Idempotent trigger bootstrap — ensures cascade cleanup triggers exist on every startup. */
+/** Идемпотентная инициализация триггеров — гарантирует триггеры каскадной очистки при каждом запуске. */
+// Триггеры каскадной очистки. Внешние ключи в SQLite не удаляют зависимые строки сами,
+// поэтому целостность обеспечивается триггерами.
 function ensureTriggers(sqlite: Database.Database): void {
   const allTriggers = MIGRATIONS.flatMap((m) => m.triggers ?? []);
   for (const trigger of allTriggers) {
@@ -1422,34 +1486,36 @@ function ensureTriggers(sqlite: Database.Database): void {
   }
 }
 
-/** Idempotent index bootstrap for high-frequency query patterns. */
+/** Идемпотентная инициализация индексов для часто используемых шаблонов запросов. */
+// Индексы создаются отдельным проходом, а не в CREATE TABLE: так их можно добавлять к уже
+// существующим базам, не меняя таблицы.
 function ensureIndexes(sqlite: Database.Database): void {
   const indexDefs = [
-    // Coordinator picks tasks by status
+    // Координатор выбирает задачи по статусу
     "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
-    // Coordinator retry scan: blocked_external tasks with due retry_after
+    // Повторные попытки координатора: blocked_external с наступившим retry_after
     "CREATE INDEX IF NOT EXISTS idx_tasks_retry_after ON tasks(retry_after)",
-    // Task list queries filtered by project
+    // Запросы списка задач с фильтром по проекту
     "CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)",
-    // Composite: coordinator filters status + retry_after together
+    // Составной: координатор фильтрует status + retry_after вместе
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_retry ON tasks(status, retry_after)",
-    // Composite: task list ordering within a project by status and position
+    // Составной: порядок списка задач в проекте по статусу и позиции
     "CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status, position)",
-    // Owner-aware coordinator and participant task filters
+    // Фильтры задач координатора и участника с учётом владельца
     "CREATE INDEX IF NOT EXISTS idx_tasks_execution_owner_status ON tasks(execution_owner, status)",
-    // Task comments lookup by task
+    // Поиск комментариев по задаче
     "CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_task_comments_participant_id ON task_comments(participant_id)",
-    // Participant identity and active-role administration
+    // Идентификация участников и администрирование активной роли
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_normalized_username ON participants(normalized_username)",
     "CREATE INDEX IF NOT EXISTS idx_participants_active_role ON participants(active, role)",
-    // Session token resolution and participant-wide revocation
+    // Разрешение токена сессии и отзыв всех сессий участника
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_participant_sessions_token_digest ON participant_sessions(token_digest)",
     "CREATE INDEX IF NOT EXISTS idx_participant_sessions_participant ON participant_sessions(participant_id, revoked_at, expires_at)",
-    // Current assignment hydration and participant task filters
+    // Текущее назначение задачи и фильтры задач участника
     "CREATE INDEX IF NOT EXISTS idx_task_assignments_task ON task_assignments(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_task_assignments_participant ON task_assignments(participant_id, task_id)",
-    // Immutable executor timeline and audit lookups
+    // Неизменяемая лента исполнителей и запросы аудита
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_executor_history_revision ON task_executor_history(task_id, ownership_revision)",
     "CREATE INDEX IF NOT EXISTS idx_task_executor_history_created ON task_executor_history(task_id, created_at, id)",
     "CREATE INDEX IF NOT EXISTS idx_audit_events_task ON audit_events(task_id, created_at, id)",
@@ -1457,33 +1523,33 @@ function ensureIndexes(sqlite: Database.Database): void {
     "CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_kind, actor_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_github_issues_task ON github_issues(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_github_issues_pr ON github_issues(project_id, pr_number)",
-    // Task locking: find unlocked or stale-locked tasks
+    // Блокировки задач: поиск свободных или задач с устаревшей блокировкой
     "CREATE INDEX IF NOT EXISTS idx_tasks_locked ON tasks(locked_by, locked_until)",
-    // Coordinator scheduled-task scan: backlog tasks with due scheduled_at
+    // Отложенные задачи координатора: backlog с наступившим scheduled_at
     "CREATE INDEX IF NOT EXISTS idx_tasks_scheduled_at ON tasks(scheduled_at, status)",
-    // Runtime profile selection by project scope
+    // Выбор runtime-профиля по области проекта
     "CREATE INDEX IF NOT EXISTS idx_runtime_profiles_project_id ON runtime_profiles(project_id)",
-    // Runtime profile selection by runtime/provider
+    // Выбор runtime-профиля по runtime/provider
     "CREATE INDEX IF NOT EXISTS idx_runtime_profiles_runtime ON runtime_profiles(runtime_id, provider_id)",
-    // Runtime profile lookups for tasks
+    // Поиск runtime-профиля для задач
     "CREATE INDEX IF NOT EXISTS idx_tasks_runtime_profile_id ON tasks(runtime_profile_id)",
-    // Runtime profile lookups for chat sessions
+    // Поиск runtime-профиля для сессий чата
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_runtime_profile_id ON chat_sessions(runtime_profile_id)",
-    // Usage event scope lookups for per-entity aggregation queries and dashboards
+    // События учёта по областям для агрегирующих запросов по сущностям и дашбордов
     "CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events(project_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_usage_events_task ON usage_events(task_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_usage_events_chat_session ON usage_events(chat_session_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_usage_events_source ON usage_events(source, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_usage_events_runtime ON usage_events(runtime_id, provider_id, created_at)",
-    // Runtime warmup lookup and lifecycle scans.
+    // Поиск разогрева runtime-сессий и сканирования жизненного цикла.
     "CREATE INDEX IF NOT EXISTS idx_runtime_warmup_active_lookup ON runtime_warmup_sessions(project_id, runtime_profile_id, runtime_id, provider_id, transport, model, status, expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_runtime_warmup_expires ON runtime_warmup_sessions(status, expires_at)",
-    // Codex index: project session listing and session detail lookup.
+    // Индекс Codex: перечень сессий проекта и поиск деталей сессии.
     "CREATE INDEX IF NOT EXISTS idx_codex_sessions_project_root_updated ON codex_sessions(project_root, source_updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_codex_sessions_file_path ON codex_sessions(file_path)",
-    // Codex file-state reconcile scans.
+    // Сверка состояния файлов Codex.
     "CREATE INDEX IF NOT EXISTS idx_codex_session_files_session_id ON codex_session_files(session_id)",
-    // Codex latest-head and bounded-history lookups.
+    // Поиск последнего head Codex и ограниченной истории.
     "CREATE INDEX IF NOT EXISTS idx_codex_limit_heads_lookup ON codex_limit_heads(account_fingerprint, project_root, limit_id, observed_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_codex_limit_history_head ON codex_limit_history(head_key, observed_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_codex_limit_history_account ON codex_limit_history(account_fingerprint, project_root, limit_id, observed_at DESC)",
@@ -1504,13 +1570,15 @@ function ensureIndexes(sqlite: Database.Database): void {
   );
 }
 
-/** Create a fresh in-memory DB — useful for testing */
+/** Создаёт новую базу в памяти — удобно для тестов */
+// База в памяти для тестов: без файла и без миграций. Схема поднимается тем же
+// ensureTables, что и в рабочем режиме, поэтому тесты проверяют реальную структуру.
 export function createTestDb(): BetterSQLite3Database<typeof schema> {
   const sqlite = new Database(":memory:");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   ensureTables(sqlite);
-  // ensureTables already calls ensureIndexes at the end
+  // ensureTables уже вызывает ensureIndexes в конце
 
   const db = drizzle(sqlite, { schema });
   log.debug("Created in-memory test database");
@@ -1518,6 +1586,8 @@ export function createTestDb(): BetterSQLite3Database<typeof schema> {
   return db;
 }
 
+// Закрытие соединения. Ссылки обнуляются, чтобы следующий getDb открыл базу заново: это
+// нужно тестам и корректному завершению процесса.
 export function closeDb(): void {
   if (_sqlite) {
     _sqlite.close();

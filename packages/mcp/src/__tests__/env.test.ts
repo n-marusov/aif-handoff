@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const sharedEnvState = { participantsModeEnabled: false };
 
-// Mock getEnv before importing
+// Мокируем getEnv до импорта
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {

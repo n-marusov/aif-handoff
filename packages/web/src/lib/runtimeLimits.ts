@@ -17,7 +17,7 @@ export interface RuntimeLimitDisplay {
   shortLabel: string;
   summary: string;
   detail: string | null;
-  resetAt: string | null; // provider reset hint
+  resetAt: string | null; // подсказка сброса от провайдера
   resetText: string | null;
   taskRetryAt: string | null;
   taskRetryText: string | null;

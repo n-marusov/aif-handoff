@@ -1,19 +1,19 @@
 import { useEffect } from "react";
 
 interface ShortcutOptions {
-  /** Key code (e.g. "KeyK") or key name (e.g. "Escape") */
+  /** Код клавиши (например, "KeyK") или имя клавиши (например, "Escape") */
   key: string;
-  /** Require Cmd (Mac) / Ctrl (Windows) */
+  /** Требовать Cmd (Mac) / Ctrl (Windows) */
   meta?: boolean;
-  /** Require Shift */
+  /** Требовать Shift */
   shift?: boolean;
-  /** Only active when true (default: true) */
+  /** Активно только при true (по умолчанию: true) */
   enabled?: boolean;
 }
 
 /**
- * Registers a global keydown listener for the given shortcut.
- * Automatically calls `preventDefault()` on match.
+ * Регистрирует глобальный обработчик keydown для указанного сочетания.
+ * При совпадении вызывает `preventDefault()`.
  */
 export function useKeyboardShortcut(options: ShortcutOptions, handler: () => void) {
   const { key, meta = false, shift = false, enabled = true } = options;

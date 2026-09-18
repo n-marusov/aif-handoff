@@ -235,7 +235,7 @@ describe("task state machine", () => {
     expect(applyHumanTaskEvent(makeTask("done"), "request_plan_changes").ok).toBe(false);
   });
 
-  // --- RED tests: plan_review becomes the single plan gate ---
+  // --- RED-тесты: plan_review становится единственным гейтом плана ---
 
   it("allows start_implementation from plan_review when autoMode=false", () => {
     const result = applyHumanTaskEvent(

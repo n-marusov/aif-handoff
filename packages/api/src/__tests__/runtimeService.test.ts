@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeLimitSnapshot } from "@aif/runtime";
 import { resetEnvCache } from "@aif/shared";
 
-// Flag defaults to false (opt-in). These tests exercise the runtime limit
-// observation + broadcast pipeline which is fully gated, so enable it.
+// Флаг по умолчанию false (opt-in). Эти тесты идут конвейером наблюдения +
+// рассылки лимитов runtime, который полностью гейтится, поэтому включаем его.
 process.env.AIF_USAGE_LIMITS_ENABLED = "true";
 resetEnvCache();
 

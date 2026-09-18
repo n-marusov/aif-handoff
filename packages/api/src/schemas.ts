@@ -1,3 +1,18 @@
+/**
+ * Zod-схемы валидации входящих HTTP-запросов API.
+ *
+ * Почему модуль устроен именно так:
+ * - Схемы собраны в одном файле, потому что REST-маршруты и WebSocket-слой
+ *   обязаны проверять одинаковые формы; продублированные описания расходятся
+ *   и пропускают невалидные поля в базу.
+ * - Значения по умолчанию задаются здесь, а не в обработчиках: так
+ *   отсутствующее поле приходит в маршрут уже заполненным, и код не проверяет
+ *   undefined в каждом втором месте.
+ * - getEnv() вызывается на этапе разбора запроса, поэтому дефолты читают
+ *   окружение момента запроса, а не момента импорта модуля.
+ * - Схемы описывают только вход. Секреты (токены провайдеров, пароли) никогда
+ *   не выводятся через эти схемы наружу.
+ */
 import { z } from "zod";
 import { TASK_EVENTS, TASK_STATUSES, getEnv } from "@aif/shared";
 
@@ -6,6 +21,8 @@ export const participantLoginSchema = z.object({
   password: z.string().min(1).max(10_000),
 });
 
+// Порог в 12 символов выше, чем у обычного логина: пароль участника открывает
+// весь API, включая административные операции.
 const participantPasswordSchema = z.string().min(12).max(10_000);
 
 export const createParticipantSchema = z.object({
@@ -15,6 +32,8 @@ export const createParticipantSchema = z.object({
   role: z.enum(["admin", "member"]).default("member"),
 });
 
+// Пустое тело отвергается refine-ом ниже: запрос без изменений не должен
+// считаться успешным обновлением, иначе UI покажет ложное подтверждение.
 export const updateParticipantSchema = z
   .object({
     displayName: z.string().trim().min(1).max(200).optional(),
@@ -28,6 +47,8 @@ export const resetParticipantPasswordSchema = z.object({
   password: participantPasswordSchema,
 });
 
+// Требуем текущий пароль: смена только по активной сессии позволила бы
+// угнанной cookie молча переписать учетные данные.
 export const changeParticipantPasswordSchema = z
   .object({
     currentPassword: z.string().min(1).max(10_000),
@@ -38,27 +59,32 @@ export const changeParticipantPasswordSchema = z
     path: ["newPassword"],
   });
 
+// Query-параметры приходят строками, поэтому boolean разбирается через enum:
+// z.coerce.boolean() превратил бы строку "false" в true.
 export const listParticipantsQuerySchema = z.object({
   includeInactive: z
+    // Явное перечисление значений отсекает мусор вроде "1" вместо флага.
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .default(false),
 });
 
 /**
- * ISO-8601 datetime accepted with any offset, but **normalized to UTC `Z`**
- * before storage. We compare `scheduledAt` as TEXT in the DB (`<=` against
- * `new Date().toISOString()`), and lexical string compare only matches
- * instant compare when both sides use the same UTC `Z` form. Without
- * normalization, `+03:00` values would silently never trigger.
+ * Дату в формате ISO-8601 принимают с любым смещением, но перед
+ * сохранением **нормализуют к виду UTC `Z`**. В БД `scheduledAt`
+ * сравнивается как TEXT (`<=` против `new Date().toISOString()`), и
+ * лексикографическое сравнение строк совпадает со сравнением моментов
+ * времени, только если обе стороны в одиначной форме UTC `Z`. Без
+ * нормализации значения `+03:00` молча никогда не сработают.
  *
- * `null` is allowed to clear a previously-set schedule.
- * Past timestamps are rejected here so the scheduler is never asked to
- * fire something already overdue.
+ * `null` допустим, чтобы снять ранее назначенное выполнение.
+ * Прошедшие метки времени отклоняются здесь, чтобы планировщику никогда
+ * не приходилось запускать уже просроченное.
  */
 export const scheduledAtSchema = z
   .string()
   .datetime({ offset: true, message: "scheduledAt must be ISO-8601" })
+  // Приведение к UTC Z обязательно: сравнение с текущим временем идет по тексту.
   .transform((s) => new Date(s).toISOString())
   .refine((iso) => Date.parse(iso) > Date.now(), {
     message: "scheduledAt must be a future timestamp",
@@ -66,15 +92,20 @@ export const scheduledAtSchema = z
   .nullable()
   .optional();
 
+// Вложения ограничены по размеру и числу: контент приходит в JSON-теле, и без
+// границ такой запрос становится вектором отказа в обслуживании.
 const taskAttachmentSchema = z.object({
   name: z.string().min(1).max(500),
   mimeType: z.string().max(200),
   size: z.number().int().min(0).max(100_000_000),
+  // content == null означает, что файл уже лежит в storage/ и путь указан в path.
   content: z.string().max(2_000_000).nullable(),
-  /** Relative path in storage/ — present for file-backed attachments */
+  /** Относительный путь в storage/ — есть у вложений, сохранённых в файл */
   path: z.string().max(1000).optional(),
 });
 
+// Лимиты бюджета опциональны: отсутствие значения означает отсутствие
+// ограничения, а не нулевой бюджет.
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   rootPath: z.string().min(1).optional(),
@@ -94,6 +125,7 @@ export const githubConnectSchema = z.object({
     .string()
     .trim()
     .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "Repository must use owner/name format"),
+  // В базе хранится только имя переменной окружения, сам токен не сохраняется.
   tokenEnvVar: z
     .string()
     .trim()
@@ -103,6 +135,7 @@ export const githubConnectSchema = z.object({
     )
     .default("GITHUB_TOKEN"),
   enabled: z.boolean().default(true),
+  // Пустой фильтр означает импорт всех задач; значения сужают выборку.
   eligibility: z
     .object({
       labels: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
@@ -112,8 +145,11 @@ export const githubConnectSchema = z.object({
     .default({ labels: [], assignee: null, milestone: null }),
 });
 
+// Синхронизация не принимает полей: параметры берутся из настроек проекта.
 export const githubSyncSchema = z.object({});
 
+// Код публикуется в уже существующую ветку, поэтому коммит и логи
+// необязательны: при отсутствии сервер берет их из состояния задачи.
 export const githubPublishSchema = z.object({
   branch: z.string().trim().min(1).max(250),
   commitSha: z.string().trim().min(7).max(64).nullable().optional(),
@@ -122,9 +158,9 @@ export const githubPublishSchema = z.object({
 });
 
 /**
- * Body for publishing a Change Plan PR (plan-review mode). The plan body is
- * assembled server-side from the stored plan; the agent only forwards the
- * branch (and optionally the deterministic plan commit sha).
+ * Тело запроса публикации PR плана изменений (режим plan-review). Текст
+ * плана собирается на сервере из сохранённого плана; агент передаёт только
+ * ветку (и опционально детерминированный sha коммита плана).
  */
 export const githubPlanPublishSchema = z.object({
   branch: z.string().trim().min(1).max(250),
@@ -139,6 +175,7 @@ export const gitlabConnectSchema = z.object({
       /^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/,
       "Repository must use namespace/name format (nested groups supported)",
     ),
+  // Хранится только имя переменной окружения, сам токен в базу не попадает.
   tokenEnvVar: z
     .string()
     .trim()
@@ -148,6 +185,7 @@ export const gitlabConnectSchema = z.object({
     )
     .default("GITLAB_TOKEN"),
   enabled: z.boolean().default(true),
+  // Пустой фильтр означает импорт всех задач; значения сужают выборку.
   eligibility: z
     .object({
       labels: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
@@ -157,8 +195,11 @@ export const gitlabConnectSchema = z.object({
     .default({ labels: [], assignee: null, milestone: null }),
 });
 
+// Синхронизация не принимает полей: параметры берутся из настроек проекта.
 export const gitlabSyncSchema = z.object({});
 
+// Код публикуется в уже существующую ветку, поэтому коммит и логи
+// необязательны: при отсутствии сервер берет их из состояния задачи.
 export const gitlabPublishSchema = z.object({
   branch: z.string().trim().min(1).max(250),
   commitSha: z.string().trim().min(7).max(64).nullable().optional(),
@@ -167,14 +208,16 @@ export const gitlabPublishSchema = z.object({
 });
 
 /**
- * Body for publishing a Change Plan MR (plan-review mode). The MR description
- * is assembled server-side from the stored plan.
+ * Тело запроса публикации MR плана изменений (режим plan-review). Описание
+ * MR собирается на сервере из сохранённого плана.
  */
 export const gitlabPlanPublishSchema = z.object({
   branch: z.string().trim().min(1).max(250),
   commitSha: z.string().trim().min(7).max(64).nullable().optional(),
 });
 
+// Меняется только организация проекта: refine запрещает пустое тело, чтобы
+// PATCH без полей не выглядел успешной операцией.
 export const updateProjectOrganizationSchema = z
   .object({
     pinned: z.boolean().optional(),
@@ -199,6 +242,8 @@ export const createTaskSchema = z.object({
   planDocs: z.boolean().optional(),
   planTests: z.boolean().optional(),
   skipReview: z.boolean().optional(),
+  // Дефолт берется из окружения: поведение по умолчанию задает развертывание,
+  // а не конкретный клиент.
   useSubagents: z.boolean().default(getEnv().AGENT_USE_SUBAGENTS),
   runPlanImprove: z.boolean().default(false),
   runPostVerify: z.boolean().default(false),
@@ -218,6 +263,9 @@ export const createTaskSchema = z.object({
   scheduledAt: scheduledAtSchema,
 });
 
+// Отдельная схема вместо createTaskSchema.partial(): при обновлении доступны
+// поля, которых нет при создании (план, логи, heartbeat), а часть полей
+// создания (projectId, executionOwner) менять напрямую нельзя.
 export const updateTaskSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   description: z.string().optional(),
@@ -254,12 +302,16 @@ export const updateTaskSchema = z.object({
   scheduledAt: scheduledAtSchema,
 });
 
+// Список событий берется из общей константы: новый переход в стейт-машине
+// автоматически расширяет и валидацию API.
 export const taskEventSchema = z.object({
   event: z.enum(TASK_EVENTS),
   deletePlanFile: z.boolean().optional(),
   commitOnApprove: z.boolean().optional(),
 });
 
+// expected* поля реализуют оптимистичную блокировку: передача владения
+// отклоняется, если задачу успел изменить кто-то другой.
 export const handoffTaskSchema = z.object({
   executionOwner: z.enum(["ai", "human"]),
   assigneeIds: z.array(z.string().min(1)).max(100).default([]),
@@ -307,6 +359,8 @@ export const taskActivityPayloadSchema = z.object({
     .nullable(),
 });
 
+// Тело рассылки проверяется по типу события: payload допустим только для тех
+// типов, которые его реально несут, иначе клиенты получат мусор в WS-канале.
 export const broadcastTaskSchema = z
   .object({
     type: z
@@ -323,6 +377,8 @@ export const broadcastTaskSchema = z
       .union([taskHeartbeatPayloadSchema, taskUsagePayloadSchema, taskActivityPayloadSchema])
       .optional(),
   })
+  // Перекрестная проверка type/payload: сам union не связывает выбранный тип
+  // события с формой полезной нагрузки.
   .refine(
     (value) => {
       if (value.type === "task:heartbeat") {
@@ -357,15 +413,19 @@ export const roadmapImportSchema = z.object({
   roadmapAlias: z.string().min(1, "Roadmap alias is required").max(200),
 });
 
+// vision опционален: без него генерация опирается на сохраненное описание
+// проекта, с ним - на текст, введенный прямо в диалоге.
 export const roadmapGenerateSchema = z.object({
   roadmapAlias: z.string().min(1, "Roadmap alias is required").max(200),
   vision: z.string().max(10000).optional(),
 });
 
+// Границы ttl держат прогрев в разумных рамках: от минуты до суток.
 export const warmupCreateSchema = z.object({
   ttlSeconds: z.number().int().min(60).max(86_400).default(3_600),
 });
 
+// runtimeSessionId позволяет привязать чат к уже существующей сессии рантайма.
 export const createChatSessionSchema = z.object({
   projectId: z.string().min(1, "Project ID is required"),
   title: z.string().max(200).optional(),
@@ -379,6 +439,8 @@ export const updateChatSessionSchema = z.object({
   runtimeSessionId: z.string().min(1).nullable().optional(),
 });
 
+// null сбрасывает дефолт обратно к неявному выбору рантайма; отсутствие поля
+// означает, что значение не трогают.
 export const updateAppRuntimeDefaultsSchema = z
   .object({
     defaultTaskRuntimeProfileId: z.string().min(1).nullable().optional(),
@@ -397,6 +459,8 @@ export const chatAttachmentSchema = z.object({
   content: z.string().max(2_000_000).nullable(),
 });
 
+// sessionId и conversationId необязательны: первый адресует диалог рантайма,
+// второй - ветку в UI, и клиент может не знать ни одного из них.
 export const chatRequestSchema = z.object({
   projectId: z.string().min(1, "Project ID is required"),
   message: z.string().min(1, "Message is required").max(50_000),
@@ -409,6 +473,8 @@ export const chatRequestSchema = z.object({
   attachments: z.array(chatAttachmentSchema).max(100).optional(),
 });
 
+// Заголовки описаны как строковые пары: секреты подставляются по имени
+// переменной окружения, а не приходят в открытом виде с клиента.
 const runtimeHeadersSchema = z.record(z.string(), z.string());
 const runtimeOptionsSchema = z.record(z.string(), z.unknown());
 const runtimeEnvVarSchema = z
@@ -423,6 +489,7 @@ const runtimeEnvVarSchema = z
   .nullable()
   .optional();
 
+// projectId == null означает глобальный профиль, доступный всем проектам.
 export const createRuntimeProfileSchema = z.object({
   projectId: z.string().min(1).nullable().optional(),
   name: z.string().min(1).max(200),
@@ -437,6 +504,8 @@ export const createRuntimeProfileSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+// partial() разрешает точечные правки профиля, а refine не дает отправить
+// пустой PATCH, который молча ничего не изменит.
 export const updateRuntimeProfileSchema = createRuntimeProfileSchema
   .partial()
   .refine((payload) => Object.keys(payload).length > 0, {
@@ -449,11 +518,14 @@ export const runtimeProfileValidationSchema = z.object({
   profile: createRuntimeProfileSchema.optional(),
   modelOverride: z.string().max(200).nullable().optional(),
   runtimeOptions: runtimeOptionsSchema.nullable().optional(),
-  // Temporary credential for validation only. Never persisted.
+  // Временный ключ доступа, только для проверки. Никогда не сохраняется.
   apiKey: z.string().min(1).optional(),
+  // forceRefresh обходит кэш проверки подключения после смены ключа.
   forceRefresh: z.boolean().optional(),
 });
 
+// Отдельная от validation схема без обязательного profile: список моделей
+// запрашивают и для уже сохраненного профиля по profileId.
 export const runtimeProfileModelsSchema = z.object({
   projectId: z.string().min(1).optional(),
   profileId: z.string().min(1).optional(),
@@ -464,6 +536,8 @@ export const runtimeProfileModelsSchema = z.object({
   forceRefresh: z.boolean().optional(),
 });
 
+// Флаги остаются строками: маршрут сам решает, как трактовать "false" и
+// отсутствие значения, чтобы не терять разницу между ними.
 export const runtimeProfileListQuerySchema = z.object({
   projectId: z.string().min(1).optional(),
   includeGlobal: z.string().optional(),

@@ -1,3 +1,13 @@
+/**
+ * Создание базовой структуры каталога проекта: сам каталог и git-репозиторий.
+ *
+ * Каталог .ai-factory/ здесь НЕ создаётся намеренно: его создаёт только `ai-factory init`,
+ * и отсутствие этой папки служит корректным признаком того, что инициализация не
+ * завершилась и её можно безопасно повторить. Это низкоуровневый примитив: вызывающий код
+ * обычно использует runtime-осведомлённый initProject() из @aif/runtime, который
+ * дополнительно запускает `ai-factory init`.
+ */
+
 import { existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { execSync } from "node:child_process";
@@ -5,20 +15,11 @@ import { logger } from "./logger.js";
 
 const log = logger("project-init");
 
-/**
- * Initialize the base project directory structure: project root and git repo.
- *
- * Does NOT create `.ai-factory/` — that directory is created exclusively by
- * `ai-factory init` (invoked from `@aif/runtime` `initProject()`).
- * This ensures a missing `.ai-factory/` correctly signals that init has not
- * completed and can be retried.
- *
- * This is the low-level primitive — callers should use the runtime-aware
- * `initProject()` from `@aif/runtime` which also invokes `ai-factory init`.
- */
 export function initBaseProjectDirectory(projectRoot: string): void {
   mkdirSync(projectRoot, { recursive: true });
 
+  // Проверка существующего .git делает операцию идемпотентной: повторный вызов на
+  // уже инициализированном проекте не пересоздаёт историю и не затирает коммиты.
   const gitDir = resolve(projectRoot, ".git");
   if (!existsSync(gitDir)) {
     try {
@@ -30,6 +31,8 @@ export function initBaseProjectDirectory(projectRoot: string): void {
       });
       log.info({ projectRoot }, "Initialized git repo");
     } catch (err) {
+      // Ошибка git не прерывает инициализацию: каталог проекта уже создан, а
+      // отсутствие репозитория пользователь обнаружит позже и исправит вручную.
       log.warn({ projectRoot, err }, "git init failed");
     }
   }

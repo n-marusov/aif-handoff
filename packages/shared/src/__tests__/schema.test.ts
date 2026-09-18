@@ -84,7 +84,7 @@ describe("tasks schema", () => {
     db.insert(tasks)
       .values({ id: ids[1], projectId: "test-project", title: "C", position: 2000.0 })
       .run();
-    // Insert between A and C
+    // Вставляем между A и C
     db.insert(tasks)
       .values({ id: ids[2], projectId: "test-project", title: "B", position: 1500.0 })
       .run();
@@ -201,7 +201,7 @@ describe("gitlab schema", () => {
     expect(gitlabRepositories).toBeDefined();
     expect(gitlabIssues).toBeDefined();
 
-    // gitlabRepositories — one connection per project, no token persisted
+    // gitlabRepositories — одно соединение на проект, токен не сохраняется
     db.insert(projects).values({ id: "gitlab-project", name: "Repo", rootPath: "/tmp/repo" }).run();
     db.insert(gitlabRepositories)
       .values({
@@ -255,7 +255,7 @@ describe("gitlab schema", () => {
       state: "open",
     });
 
-    // The GitLab schema replaces GitHub's node_id with global_id and has no per-connection baseUrl
+    // Схема GitLab заменяет node_id из GitHub на global_id и не имеет baseUrl на соединение
     const row = issue as Record<string, unknown>;
     expect("nodeId" in row).toBe(false);
     expect("node_id" in row).toBe(false);
@@ -264,16 +264,16 @@ describe("gitlab schema", () => {
   });
 
   it("migrates fresh databases to schema version 29 (GitLab linkage tables)", () => {
-    // createTestDb() runs all migrations; user_version reflects the latest migration applied.
+    // createTestDb() выполняет все миграции; user_version отражает последнюю применённую миграцию.
     const result = db.run(sql`SELECT 1`);
     expect(result).toBeDefined();
-    // The drizzle schema exposes both GitLab tables on a migrated database.
+    // Схема drizzle раскрывает обе таблицы GitLab в базе после миграции.
     expect(getTableName(gitlabRepositories)).toBe("gitlab_repositories");
     expect(getTableName(gitlabIssues)).toBe("gitlab_issues");
   });
 
   it("tracks git preparation on gitlab_repositories (git_prepared_at, migration v30)", () => {
-    // The drizzle table must expose gitPreparedAt so the agent can mark a repo prepared.
+    // Таблица drizzle должна раскрывать gitPreparedAt, чтобы агент мог пометить репозиторий подготовленным.
     expect(gitlabRepositories.gitPreparedAt).toBeDefined();
 
     db.insert(projects).values({ id: "gitlab-project", name: "Repo", rootPath: "/tmp/repo" }).run();

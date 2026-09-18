@@ -45,7 +45,7 @@ function makeTask(overrides: Partial<TaskListItem> = {}): TaskListItem {
   };
 }
 
-// Mock useTasks to return controlled lightweight task list data.
+// Мок useTasks возвращает управляемые облегчённые данные списка задач.
 const mockTasks: TaskListItem[] = [
   makeTask(),
   makeTask({
@@ -385,7 +385,7 @@ describe("Board", () => {
   });
 
   it("should show roadmap alias sub-filters when roadmap filter is active", () => {
-    // Add roadmap tasks to mock data
+    // Добавляем roadmap-задачи в мок-данные
     const originalLength = mockTasks.length;
     mockTasks.push(
       makeTask({
@@ -414,29 +414,29 @@ describe("Board", () => {
       wrapper: Wrapper,
     });
 
-    // Activate roadmap filter
+    // Активируем фильтр roadmap
     fireEvent.click(screen.getByText("roadmap"));
 
-    // Sub-filter row should appear with alias chips
+    // Строка субфильтра должна появиться с чипами алиасов
     const aliasRow = screen.getByTestId("roadmap-alias-filters");
     expect(within(aliasRow).getByText("v1.0")).toBeDefined();
     expect(within(aliasRow).getByText("v2.0")).toBeDefined();
 
-    // Both roadmap tasks visible
+    // Обе roadmap-задачи видны
     expect(screen.getByText("Roadmap Task A")).toBeDefined();
     expect(screen.getByText("Roadmap Task B")).toBeDefined();
 
-    // Click v1.0 alias — only v1.0 tasks should remain
+    // Клик по алиасу v1.0 — должны остаться только задачи v1.0
     fireEvent.click(within(aliasRow).getByText("v1.0"));
     expect(screen.getByText("Roadmap Task A")).toBeDefined();
     expect(screen.queryByText("Roadmap Task B")).toBeNull();
 
-    // Click v1.0 again to deselect — both visible again
+    // Ещё клик по v1.0 снимает выбор — снова видны обе
     fireEvent.click(within(aliasRow).getByText("v1.0"));
     expect(screen.getByText("Roadmap Task A")).toBeDefined();
     expect(screen.getByText("Roadmap Task B")).toBeDefined();
 
-    // Cleanup
+    // Уборка
     mockTasks.splice(originalLength);
   });
 
@@ -459,18 +459,18 @@ describe("Board", () => {
       wrapper: Wrapper,
     });
 
-    // Activate roadmap filter, select alias
+    // Активируем фильтр roadmap, выбираем алиас
     fireEvent.click(screen.getByText("roadmap"));
     const aliasRow = screen.getByTestId("roadmap-alias-filters");
     fireEvent.click(within(aliasRow).getByText("v1.0"));
 
-    // Deactivate roadmap filter
+    // Деактивируем фильтр roadmap
     fireEvent.click(screen.getByText("roadmap"));
 
-    // Sub-filter row should disappear
+    // Строка субфильтра должна исчезнуть
     expect(screen.queryByTestId("roadmap-alias-filters")).toBeNull();
 
-    // Cleanup
+    // Уборка
     mockTasks.splice(originalLength);
   });
 

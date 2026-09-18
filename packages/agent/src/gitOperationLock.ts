@@ -1,14 +1,33 @@
 /**
- * Per-project git mutation lock.
+ * Блокировка git-мутаций в пределах проекта (keyed async mutex).
  *
- * Once Level 1 parallelism is enabled, two tasks for the same project can
- * concurrently run repo-mutating git operations (`fetch`, branch creation,
- * `worktree add/remove`, `prune`). Git's own ref locks make those calls flaky
- * rather than safe, so every repo-mutating operation is serialized per project
- * root through this keyed async mutex.
+ * Назначение: сериализовать операции, меняющие состояние репозитория, по ключу
+ * корня проекта, чтобы задачи одного проекта не сталкивались друг с другом.
  *
- * The lock is held ONLY for the git operation itself. Callers must never wrap
- * LLM/runtime execution in it — that would serialize the whole pipeline.
+ * Почему так:
+ * - Мьютекс построен на цепочке промисов (FIFO), а не на флаге занятости: так
+ *   очередь продвигается строго в порядке прихода и не требует активного опроса.
+ * - Ключ нормализуется (абсолютный путь, нижний регистр, срез хвостовых
+ *   разделителей). Иначе один и тот же каталог, записанный двумя способами,
+ *   получил бы две независимые блокировки и защита перестала бы работать.
+ * - Блокировка удерживается ТОЛЬКО вокруг самой git-команды. Оборачивать в неё
+ *   вызовы LLM или рантайма нельзя: это выстроило бы в очередь весь конвейер
+ *   обработки задач вместо короткой критической секции.
+ * - Освобождение вынесено в finally, поэтому исключение внутри колбэка не
+ *   оставляет ключ заблокированным навсегда.
+ */
+
+/**
+ * Git-лок мутаций на уровне проекта.
+ *
+ * После включения параллелизма Уровня 1 две задачи одного проекта могут
+ * одновременно запускать меняющие репозиторий git-операции (`fetch`, создание
+ * ветки, `worktree add/remove`, `prune`). Собственные ref-локи Git делают
+ * такие вызовы ненадёжными, а не безопасными, поэтому каждая меняющая
+ * репозиторий операция сериализуется по корню проекта через этот мьютекс.
+ *
+ * Лок удерживается ТОЛЬКО на время самой git-операции. Оборачивать в него
+ * исполнение LLM/runtime нельзя — это сериализует весь конвейер.
  */
 
 import { resolve } from "node:path";
@@ -16,18 +35,29 @@ import { logger } from "@aif/shared";
 
 const log = logger("git-operation-lock");
 
-/** Warn when a waiter spends longer than this queued behind other operations. */
+// Порог предупреждения, а не отказ: долгое ожидание говорит о пробке в
+// git-операциях, но само по себе ошибкой не является.
+/** Предупреждение, если ожидание в очереди за другими операциями дольше этого порога. */
 const LOCK_WAIT_WARN_MS = 15_000;
 
+// Состояние ключа: tail - хвост FIFO-цепочки, queued - число удерживающих и
+// ожидающих. Второе поле нужно только для сборки мусора: без него карта ключей
+// росла бы на каждый встреченный путь.
 interface ProjectLockState {
-  /** Tail of the FIFO chain; resolving it hands the lock to the next waiter. */
+  /** Хвост FIFO-цепочки; её разрешение передаёт лок следующему ожидающему. */
   tail: Promise<void>;
-  /** Current holder + queued waiters. Used to garbage-collect idle keys. */
+  /** Текущий держатель + ожидающие в очереди. Нужно для удаления простаивающих ключей. */
   queued: number;
 }
 
+// Карта живёт в памяти процесса: блокировка не переживает перезапуск агента и не
+// является межпроцессной. Этого достаточно, потому что git-операции запускает
+// только координатор.
 const locks = new Map<string, ProjectLockState>();
 
+// Канонизация ключа: resolve убирает относительность, срез хвостовых
+// разделителей склеивает "repo/" и "repo", toLowerCase гасит разницу регистров
+// файловой системы (актуально для Windows и macOS).
 function lockKey(projectRoot: string): string {
   return resolve(projectRoot)
     .replace(/[\\/]+$/, "")
@@ -36,38 +66,53 @@ function lockKey(projectRoot: string): string {
 
 export interface ProjectGitLockInput {
   projectRoot: string;
-  /** Short machine-readable label for diagnostics, e.g. "worktree-add". */
+  /** Короткая машиночитаемая метка для диагностики, например "worktree-add". */
   operation: string;
 }
 
 /**
- * Run `fn` while holding the project-wide git mutation lock. Tolerates both
- * sync and async callbacks; the lock is always released, including on throw.
+ * Выполняет `fn`, удерживая общий git-лок мутаций проекта. Допускаются и
+ * sync-, и async-колбэки; лок всегда освобождается, в том числе при исключении.
  */
 export async function withProjectGitLock<T>(
   input: ProjectGitLockInput,
   fn: () => T | Promise<T>,
 ): Promise<T> {
+  // Состояние переиспользуется, если ключ уже известен; новое создаётся только для
+  // первого вызова по этому пути.
+  // Учёт ожидающего идёт до ожидания: иначе освободившийся ключ мог бы быть удалён
+  // из карты, пока этот вызов ещё стоит в очереди.
   const key = lockKey(input.projectRoot);
   const state = locks.get(key) ?? { tail: Promise.resolve(), queued: 0 };
   const previous = state.tail;
   state.queued += 1;
   locks.set(key, state);
 
+  // gate и есть сам ключ: пока промис не разрешён, следующий ожидающий не начнёт
+  // работу. release! объявлен с definite assignment, потому что executor промиса
+  // выполняется синхронно и гарантированно заполняет переменную.
   let release!: () => void;
   const gate = new Promise<void>((resolveGate) => {
     release = resolveGate;
   });
+  // Продолжение цепочки ставится до ожидания: иначе два одновременных вызова
+  // увидели бы один и тот же previous и вошли бы в критическую секцию вместе.
+  // Обработчик ошибки во втором аргументе нужен, чтобы падение предшественника не
+  // обрушило очередь.
   state.tail = previous.then(
     () => gate,
     () => gate,
   );
 
+  // Замер начинается до ожидания, чтобы в лог попало реальное время в очереди, а
+  // не только время удержания.
   const waitStartedAt = Date.now();
   log.debug(
     { projectRoot: input.projectRoot, operation: input.operation, queued: state.queued },
     "Waiting for project git lock",
   );
+  // Ожидание с погашенной ошибкой: предшественник уже обработал свою ошибку сам, и
+  // проброс здесь заставил бы ожидающего упасть, так и не начав работу.
   await previous.catch(() => undefined);
 
   const waitMs = Date.now() - waitStartedAt;
@@ -82,13 +127,19 @@ export async function withProjectGitLock<T>(
     );
   }
 
+  // Критическая секция. Колбэк может быть синхронным, поэтому результат
+  // оборачивается в await.
   try {
     return await fn();
   } finally {
+    // Счётчик уменьшается до сравнения, а сравнение ссылки защищает от удаления
+    // состояния, которое успел создать новый вызов после освобождения ключа.
     state.queued -= 1;
     if (state.queued <= 0 && locks.get(key) === state) {
       locks.delete(key);
     }
+    // Разрешение gate передаёт ход следующему в цепочке; логирование идёт после,
+    // чтобы запись в лог не задерживала очередь.
     release();
     log.debug(
       { projectRoot: input.projectRoot, operation: input.operation, waitMs },
@@ -97,7 +148,9 @@ export async function withProjectGitLock<T>(
   }
 }
 
-/** Test-only: drop all in-flight lock bookkeeping. */
+/** Только для тестов: сбрасывает весь учёт активных локов. */
+// Сброс нужен тестам: между кейсами карта должна быть пустой, иначе счётчики и
+// цепочки протекают из одного теста в другой.
 export function resetProjectGitLocks(): void {
   locks.clear();
 }

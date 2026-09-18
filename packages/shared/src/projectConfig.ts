@@ -1,3 +1,13 @@
+// Конфигурация проекта: пути к артефактам, правила workflow, настройки git и язык
+// артефактов.
+//
+// Значения по умолчанию - это контракт структуры проекта: они позволяют работать с
+// проектом до появления .ai-factory/config.yaml. Файл конфигурации лишь
+// переопределяет часть полей, поэтому чтение всегда идёт через слияние с
+// умолчаниями, а не заменой объекта целиком.
+//
+// Модуль серверный: использует node:fs и YAML, в браузерный вход не входит.
+
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -36,40 +46,43 @@ export interface AifProjectGit {
   create_branches: boolean;
   branch_prefix: string;
   /**
-   * When true, `/aif-commit` (and approve-done auto-commit flow) must create a
-   * commit but NOT push. When false (default), also push to the current branch
-   * after committing. Surfaced in the web settings UI.
+   * Если true, `/aif-commit` (и авто-коммит при approve-done) должен создать
+   * коммит без push. Если false (по умолчанию), после коммита выполняется push
+   * в текущую ветку. Параметр отображается в настройках web-интерфейса.
    */
   skip_push_after_commit: boolean;
   /**
-   * Policy for `git pull --ff-only origin <base_branch>` before creating a
-   * feature branch. When false (default), a failed pull is best-effort:
-   * Handoff logs a warning and branches from the local base. When true, a
-   * failed pull is a hard `BranchIsolationError("base_update_failed")` and
-   * the task is parked as `blocked_external` — useful for projects that
-   * require feature branches to start from an up-to-date base.
+   * Политика `git pull --ff-only origin <base_branch>` перед созданием
+   * feature-ветки. Если false (по умолчанию), неуспешный pull обрабатывается
+   * по принципу best-effort: Handoff пишет предупреждение и ветвится от
+   * локальной базы. Если true, неуспешный pull превращается в
+   * `BranchIsolationError("base_update_failed")`, а задача переводится в
+   * `blocked_external`. Подходит проектам, где feature-ветка должна
+   * начинаться только от актуальной базы.
    */
   strict_base_update: boolean;
 }
 
 export interface AifProjectLanguage {
-  /** Locale for UI prompts (currently informational; reserved for future UI). */
+  /** Локаль для UI-подсказок (пока информационная, зарезервирована для развития UI). */
   ui: string;
   /**
-   * Locale in which AI should produce artifacts: task descriptions, plans,
-   * review notes, commit messages, roadmap items, chat replies.
-   * BCP-47-ish language code, lowercased. "en" (default) means no directive is
-   * injected and the model picks its native default.
+   * Локаль, в которой ИИ должен генерировать артефакты: описания задач,
+   * планы, заметки ревью, сообщения коммита, элементы roadmap и ответы чата.
+   * Используется код языка в стиле BCP-47 в нижнем регистре. "en"
+   * (по умолчанию) означает, что дополнительная директива не внедряется.
    */
   artifacts: string;
   /**
-   * Policy for technical tokens (identifiers, API names, file paths, CLI flags,
-   * code snippets). "keep" — leave them in English even when artifacts language
-   * is non-English. "translate" — translate alongside the rest.
+   * Политика для технических токенов (идентификаторы, имена API, пути,
+   * флаги CLI, фрагменты кода). "keep" — оставлять на английском даже при
+   * нерусском языке артефактов. "translate" — переводить вместе с остальным.
    */
   technical_terms: "keep" | "translate";
 }
 
+// Полная разрешённая конфигурация проекта: то, что видят потребители после слияния
+// файла с умолчаниями.
 export interface AifProjectConfig {
   paths: AifProjectPaths;
   workflow: AifProjectWorkflow;
@@ -77,6 +90,8 @@ export interface AifProjectConfig {
   language: AifProjectLanguage;
 }
 
+// Пути относительны корня проекта и намеренно повторяют раскладку ai-factory: так
+// файлы остаются совместимы с внешним инструментом инициализации.
 const DEFAULT_PATHS: AifProjectPaths = {
   plan: ".ai-factory/PLAN.md",
   plans: ".ai-factory/plans/",
@@ -105,6 +120,8 @@ const DEFAULT_WORKFLOW: AifProjectWorkflow = {
   verify_mode: "normal",
 };
 
+// Умолчания git подобраны так, чтобы не делать ничего неожиданного: ветки создаются,
+// push после коммита разрешён, строгая проверка актуальности базы выключена.
 const DEFAULT_GIT: AifProjectGit = {
   enabled: true,
   base_branch: "main",
@@ -121,13 +138,17 @@ const DEFAULT_LANGUAGE: AifProjectLanguage = {
 };
 
 /**
- * Conservative BCP-47-ish tag: 2-3 letter primary subtag optionally followed
- * by one or more `-`/`_` separated alphanumeric subtags (2-8 chars each).
- * Catches typos and garbage values so they don't leak into the injected
- * system directive as-is (e.g. `"ru1"` or `"русский"` would be rejected).
+ * Консервативная проверка тега языка в стиле BCP-47: первичный под-тег 2-3
+ * символа и опциональные под-теги через `-`/`_` (по 2-8 символов).
+ * Отсекает опечатки и мусорные значения, чтобы они не попадали как есть
+ * в системную директиву (например, `"ru1"` или `"русский"`).
  */
+// Проверка нужна, чтобы мусор из конфигурации не попадал в системную директиву для
+// модели дословно: значение вида "ru1" или "русский" вместо кода языка сбивало бы её.
 const BCP47_TAG = /^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/;
 
+// Невалидное значение молча заменяется значением по умолчанию: конфигурация - не то
+// место, где стоит останавливать работу проекта из-за опечатки в коде языка.
 function normalizeLanguageTag(raw: unknown, fallback: string): string {
   if (typeof raw !== "string") return fallback;
   const trimmed = raw.trim().toLowerCase();
@@ -139,8 +160,8 @@ function normalizeLanguage(raw: unknown): AifProjectLanguage {
   const obj = (raw ?? {}) as Partial<AifProjectLanguage>;
   const ui = normalizeLanguageTag(obj.ui, DEFAULT_LANGUAGE.ui);
   const artifacts = normalizeLanguageTag(obj.artifacts, DEFAULT_LANGUAGE.artifacts);
-  // Mirror the lenient parsing of `ui`/`artifacts` so `"Translate"` or
-  // `" translate "` don't silently revert to `keep`.
+  // Повторяем мягкий разбор `ui`/`artifacts`, чтобы варианты вроде
+  // `"Translate"` или `" translate "` не откатывались молча к `keep`.
   const technicalRaw =
     typeof obj.technical_terms === "string" ? obj.technical_terms.trim().toLowerCase() : "";
   const technicalTerms =
@@ -148,18 +169,23 @@ function normalizeLanguage(raw: unknown): AifProjectLanguage {
   return { ui, artifacts, technical_terms: technicalTerms };
 }
 
-/** Cached configs keyed by projectRoot to avoid re-reading on every call */
+/** Кеш конфигураций по projectRoot, чтобы не перечитывать файл на каждый вызов. */
+// Вместе с конфигом хранится время изменения файла: без этого правка config.yaml не
+// подхватилась бы до перезапуска процесса. Кэш живёт в памяти процесса -
+// межпроцессной согласованности здесь не требуется.
 const configCache = new Map<string, { config: AifProjectConfig; mtimeMs: number }>();
 
 /**
- * Load resolved config for a project.
- * If `.ai-factory/config.yaml` exists, its values override defaults.
- * Results are cached per projectRoot and invalidated when mtime changes.
+ * Загружает итоговую конфигурацию проекта.
+ * Если есть `.ai-factory/config.yaml`, его значения переопределяют умолчания.
+ * Результаты кешируются по projectRoot и сбрасываются при изменении mtime.
  */
 export function getProjectConfig(projectRoot: string): AifProjectConfig {
   const configPath = join(projectRoot, ".ai-factory", "config.yaml");
 
   if (!existsSync(configPath)) {
+    // Возвращаются копии, а не сами объекты умолчаний: иначе вызывающий код мог бы
+    // случайно изменить глобальные значения сразу для всех проектов.
     return {
       paths: { ...DEFAULT_PATHS },
       workflow: { ...DEFAULT_WORKFLOW },
@@ -168,6 +194,8 @@ export function getProjectConfig(projectRoot: string): AifProjectConfig {
     };
   }
 
+  // Сравнение по mtimeMs, а не по содержимому: один stat дешевле, чем чтение и
+  // разбор YAML на каждый вызов.
   const stat = statSync(configPath);
   const cached = configCache.get(projectRoot);
   if (cached && cached.mtimeMs === stat.mtimeMs) {
@@ -181,6 +209,9 @@ export function getProjectConfig(projectRoot: string): AifProjectConfig {
   const yamlWorkflow = (parsed?.workflow ?? {}) as Partial<AifProjectWorkflow>;
   const yamlGit = (parsed?.git ?? {}) as Partial<AifProjectGit>;
 
+  // Слияние поверхностное, по секциям: незаданные поля внутри секции берут значения
+  // по умолчанию. Благодаря этому уже существующий config.yaml продолжает работать
+  // после добавления новых параметров.
   const config: AifProjectConfig = {
     paths: { ...DEFAULT_PATHS, ...yamlPaths },
     workflow: { ...DEFAULT_WORKFLOW, ...yamlWorkflow },
@@ -192,7 +223,9 @@ export function getProjectConfig(projectRoot: string): AifProjectConfig {
   return config;
 }
 
-/** Clear the cached config for a project (useful after writing config.yaml) */
+/** Очищает кеш конфигурации проекта (полезно после записи config.yaml). */
+// Вызывается после записи config.yaml: mtime в кэше обновится только при следующем
+// чтении файла, а вызывающий код обычно ждёт изменений немедленно.
 export function clearProjectConfigCache(projectRoot?: string): void {
   if (projectRoot) {
     configCache.delete(projectRoot);

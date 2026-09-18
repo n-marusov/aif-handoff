@@ -1,4 +1,15 @@
-// Schema
+// Node-точка входа пакета `@aif/shared` (основной подпуть `.`).
+//
+// Здесь собран публичный API, который импортируют api, agent и runtime: схема БД,
+// типы домена, доступ к базе, валидация окружения, правила состояний, работа с git.
+// Файл почти целиком состоит из реэкспортов и служит картой публичной поверхности
+// пакета: чтобы понять, что доступно потребителям, достаточно прочитать его.
+//
+// ВАЖНО: этот вход тянет Node-зависимости (SQLite, pino, node:fs), поэтому фронтенду
+// он недоступен. Браузерный код обязан импортировать `@aif/shared/browser`, а
+// серверный доступ к базе - `@aif/shared/server`.
+
+// Схема БД
 export {
   projects,
   appSettings,
@@ -24,6 +35,9 @@ export {
   codexLimitHistory,
   codexIndexCursors,
 } from "./schema.js";
+// Отдельный блок типов строк: их выводит Drizzle из таблиц, поэтому они всегда
+// соответствуют схеме и не пишутся руками. Потребители используют их при работе с
+// результатами запросов.
 export type {
   ProjectRow,
   NewProjectRow,
@@ -74,7 +88,9 @@ export type {
   NewCodexIndexCursorRow,
 } from "./schema.js";
 
-// Types
+// Доменные типы и наборы допустимых значений (статусы, роли, владельцы, состояния
+// ревью). Именно они, а не таблицы базы, являются контрактом между пакетами.
+// Типы
 export {
   TASK_STATUSES,
   type TaskStatus,
@@ -178,14 +194,19 @@ export {
   type ChatSessionMessage,
 } from "./types.js";
 
-// Database
+// База данных
+// Прямой экспорт доступа к базе нужен только серверному коду: api, agent и runtime
+// обязаны ходить в базу через @aif/data, а не вызывать эти функции напрямую.
 export { getDb, createTestDb, closeDb } from "./db.js";
 
-// Environment
+// Окружение
+// getEnv отдаёт уже проверенные и закэшированные переменные, а resetEnvCache нужен
+// тестам: без него подменённое окружение не было бы перечитано.
 export { getEnv, validateEnv, resetEnvCache } from "./env.js";
 export type { Env } from "./env.js";
 
-// Constants
+// Константы
+// Единые подписи, цвета и порядок статусов: один источник правды и для сервера, и для UI.
 export {
   STATUS_CONFIG,
   ORDERED_STATUSES,
@@ -198,6 +219,9 @@ export {
   type WarmupWorkflowKind,
   type WarmupProfileMode,
 } from "./constants.js";
+// Правила жизненного цикла: что можно сделать с задачей в текущем статусе и кто
+// имеет на это право. Модуль экспортируется и в браузерный вход - доска считает
+// доступные пользователю действия теми же функциями, что и сервер.
 export {
   applyHumanTaskEvent,
   resolveTaskAction,
@@ -211,13 +235,13 @@ export {
   type TransitionResult,
 } from "./stateMachine.js";
 
-// Logger
+// Логгер
 export { logger, rootLogger } from "./logger.js";
 
-// Monorepo root resolution
+// Определение корня монорепозитория
 export { findMonorepoRoot, findMonorepoRootFromUrl } from "./monorepoRoot.js";
 
-// Project initialization
+// Инициализация проекта
 export { initBaseProjectDirectory } from "./projectInit.js";
 export {
   slugify,
@@ -228,10 +252,13 @@ export {
 export type { GeneratePlanPathOptions } from "./planFile.js";
 export { persistTaskPlan } from "./taskPlan.js";
 
-// Path validation
+// Валидация путей
 export { validateProjectRootPath } from "./pathValidation.js";
 
-// Git/worktree isolation utilities (Node-only)
+// Утилиты изоляции задач через git/worktree (только Node)
+// Изоляция задач по git-worktree: каждая задача получает собственную рабочую копию и
+// ветку, поэтому параллельные исполнители не мешают друг другу. Модуль серверный -
+// использует node:child_process.
 export {
   BranchIsolationError,
   applyGitIdentity,
@@ -274,7 +301,8 @@ export {
 
 export { buildAutoQueueCommitPrompt, buildCommitPrompt } from "./commitWorkflow.js";
 
-// Attachment utilities
+// Работа с вложениями
+// Разбор вложений из JSON-колонки и подготовка их текста для промпта агента.
 export {
   parseAttachments,
   isFileBackedAttachment,
@@ -284,10 +312,13 @@ export {
   type ParsedAttachment,
 } from "./attachments.js";
 
-// Task usage metrics
+// Метрики расхода токенов задач
+// Приведение отчётов SDK о токенах к единому виду: разные рантаймы присылают данные
+// в snake_case и camelCase.
 export { parseTaskTokenUsage, type TaskTokenUsage } from "./taskUsage.js";
 
-// Sync utilities
+// Утилиты синхронизации
+// Разметка плана ссылками на задачи: аннотации переживают правки Markdown.
 export {
   type SyncDirection,
   type ConflictResolution,
@@ -297,7 +328,8 @@ export {
   insertPlanAnnotation,
 } from "./sync.js";
 
-// Project config (config.yaml)
+// Конфигурация проекта (config.yaml)
+// Разрешённая конфигурация проекта: умолчания плюс значения из config.yaml.
 export {
   getProjectConfig,
   clearProjectConfigCache,
@@ -308,22 +340,26 @@ export {
   type AifProjectLanguage,
 } from "./projectConfig.js";
 
-// Telegram notifications
+// Уведомления Telegram
 export {
   escapeMarkdown,
   sendTelegramNotification,
   type TelegramNotificationOptions,
 } from "./telegram.js";
 
-// Planner mode defaults
+// Значения по умолчанию режимов планировщика
+// Набор флагов планирования по режиму (full/fast): одинаков для UI и для сервера.
 export { defaultsForMode } from "./plannerDefaults.js";
 export type { PlannerMode, PlannerFlagDefaults } from "./plannerDefaults.js";
 
-// Utilities
+// Утилиты
 export { withTimeout } from "./withTimeout.js";
 export { parseMcpPortSetting, type ParsedMcpPortSetting } from "./mcpPort.js";
 
-// Runtime-limit shared helpers
+// Общие утилиты лимитов runtime
+// Нормализация, подписывание и санитизация данных о лимитах рантайма. Функции
+// редакции (redact*, sanitize*) обязательны перед записью в логи или отдачей в UI:
+// в исходных данных встречаются служебные поля провайдера.
 export {
   buildRuntimeLimitSignature,
   mapSafeRuntimeErrorReason,
@@ -341,6 +377,8 @@ export {
   type SafeRuntimeErrorReason,
 } from "./runtimeLimitUtils.js";
 
-// Loop-detection classification
+// Классификация для обнаружения циклов
+// Импорт и реэкспорт разделены намеренно: так видно, что значения объявлены в другом
+// модуле, а здесь только публикуются.
 import { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS } from "./loopDetection.js";
 export { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS };

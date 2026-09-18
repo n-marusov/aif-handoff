@@ -1,18 +1,37 @@
+// Валидация и нормализация переменных окружения.
+//
+// Это барьер между "сырым" process.env и типизированным кодом: значения приходят
+// строками, а падать нужно на старте и с понятным сообщением, а не в середине работы
+// задачи. Схема zod описывает все поддерживаемые переменные сразу с приведением типов
+// и значениями по умолчанию, поэтому чтение окружения в других модулях сводится к
+// getEnv() и не требует ручных проверок.
+//
+// Новая переменная добавляется здесь, а не читается из process.env напрямую: иначе она
+// не попадёт ни в валидацию, ни в документацию конфигурации.
+
 import { z } from "zod";
 import { logger } from "./logger.js";
 import { AUTO_REVIEW_STRATEGIES } from "./types.js";
 
 const log = logger("env");
+// Переменные окружения всегда строки, поэтому "false" и "0" без приведения типа
+// оказались бы истинными. Наборы задают все принимаемые текстовые формы.
 const BOOLEAN_TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const BOOLEAN_FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
+// Режимы записи журнала активности: sync - писать сразу, batch - копить пачками.
+// Константа объявлена отдельно, чтобы её же можно было использовать в z.enum ниже.
 const ACTIVITY_LOG_MODES = ["sync", "batch"] as const;
 
-/** Accepted fan-out width for intra-issue implement workers. */
+/** Допустимая ширина распараллеливания исполнителей реализации в пределах задачи. */
+// Границы экспортируются, потому что те же числа нужны в UI и в тестах: дублировать
+// их означало бы рассинхронизировать валидацию и подсказку в интерфейсе.
 export const IMPLEMENT_MAX_WORKERS_MIN = 1;
 export const IMPLEMENT_MAX_WORKERS_MAX = 10;
 export const IMPLEMENT_MAX_WORKERS_DEFAULT = 2;
 
+// Принимает и массив (при программной передаче), и строку с запятыми (из окружения).
+// Пустые элементы отбрасываются: значение вида "a,,b," должно дать два модуля, а не четыре.
 function parseRuntimeModules(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -31,6 +50,9 @@ function parseRuntimeModules(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
+// Функция повторяет логику parseRuntimeModules. Дублирование оставлено намеренно: у этих
+// переменных разный смысл, и общий парсер со временем могли бы "улучшить" так, что
+// поведение одного из потребителей изменилось бы незаметно.
 function parseCommaSeparatedValues(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -46,6 +68,8 @@ function parseCommaSeparatedValues(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
+// preprocess переводит известные текстовые формы в boolean, а всё остальное отдаёт
+// схеме как есть - тогда z.boolean() честно сообщит об ошибке вместо тихой подстановки.
 const booleanEnvSchema = z.preprocess((value) => {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
@@ -55,6 +79,9 @@ const booleanEnvSchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+// CORS-источник проверяется строго: только схема http(s), хост и необязательный порт.
+// Сравнение с parsed.origin отсекает пути, query и завершающий слэш, а звёздочка
+// запрещена намеренно - иначе проверка происхождения теряет смысл.
 const exactOriginSchema = z.string().transform((value, context) => {
   const trimmed = value.trim().replace(/\/$/, "");
   if (trimmed === "*") {
@@ -83,6 +110,9 @@ const exactOriginSchema = z.string().transform((value, context) => {
   }
 });
 
+// Единая схема всех переменных окружения приложения. optional() означает, что переменная
+// необязательна (обычно у рантайм-провайдеров); default() задаёт безопасное значение,
+// при котором приложение работает без дополнительной настройки.
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_AUTH_TOKEN: z.string().optional(),
@@ -114,14 +144,18 @@ const envSchema = z.object({
   AGENT_QUERY_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
   AGENT_QUERY_START_RETRY_DELAY_MS: z.coerce.number().default(1000),
   AGENT_FIRST_ACTIVITY_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
-  // Timeout for the internal publish fetch to the API. The API's publish
-  // handler runs several upstream GitLab/GitHub calls sequentially (30s each
-  // plus retries), so a 30s client timeout aborts before the API responds.
+  // Таймаут внутреннего обращения публикации к API. Обработчик публикации в API
+  // выполняет несколько последовательных запросов к GitLab/GitHub (по 30 с
+  // с учётом повторов), поэтому клиентский таймаут 30 с прерывал бы вызов до ответа.
   AGENT_GIT_PUBLISH_TIMEOUT_MS: z.coerce.number().default(120 * 1000),
   API_RUNTIME_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
   API_RUNTIME_RUN_TIMEOUT_MS: z.coerce.number().default(120 * 1000),
   DATABASE_URL: z.string().default("./data/aif.sqlite"),
+  // Здесь допускается "*", а exactOriginSchema применяется там, где нужен строгий список
+  // источников: по умолчанию приложение открыто, а ужесточение - выбор развёртывания.
   CORS_ORIGIN: z.string().default("*"),
+  // Включение режима участников переводит приложение на аутентификацию и роли.
+  // По умолчанию выключено, чтобы уже работающие развёртывания не сломались.
   PARTICIPANTS_MODE_ENABLED: booleanEnvSchema.default(false),
   PARTICIPANT_SESSION_TTL_SECONDS: z.coerce
     .number()
@@ -150,6 +184,8 @@ const envSchema = z.object({
       return value;
     }, z.boolean())
     .default(true),
+  // Токен внутреннего канала оповещений между API и агентом. Необязателен при локальном
+  // запуске, но обязателен для развёртываний, доступных извне.
   INTERNAL_BROADCAST_TOKEN: z.string().optional(),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("debug"),
   ACTIVITY_LOG_MODE: z
@@ -169,6 +205,9 @@ const envSchema = z.object({
   ACTIVITY_LOG_BATCH_SIZE: z.coerce.number().min(1).default(20),
   ACTIVITY_LOG_BATCH_MAX_AGE_MS: z.coerce.number().min(100).default(5000),
   ACTIVITY_LOG_QUEUE_LIMIT: z.coerce.number().min(1).default(500),
+  // Соглашение об именах: флаги возможностей оканчиваются на _ENABLED, и все они по
+  // умолчанию выключены. Новая возможность включается явно, поэтому обновление
+  // приложения не меняет поведение уже работающего развёртывания.
   AGENT_WAKE_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {
@@ -275,15 +314,17 @@ const envSchema = z.object({
       return value;
     }, z.boolean())
     .default(false),
-  // Root folder that hosts branch-scoped task worktrees. When unset the agent
-  // uses `<dirname(projectRoot)>/.worktrees`. Deployments that mount a separate
-  // volume for worktrees set this to that mount (e.g. /home/www/.worktrees).
+  // Корневой каталог рабочих деревьев задач, привязанных к ветке. Без значения
+  // агент использует `<dirname(projectRoot)>/.worktrees`. Развёртывания с отдельным
+  // томом для worktree указывают здесь путь к этому тому (например, /home/www/.worktrees).
   AIF_WORKTREE_ROOT: z.string().min(1).max(4096).optional(),
-  // Bounded intra-issue worker fan-out width. The container is CPU/memory
-  // constrained (cpus: 2 / memory: 1G), so out-of-range values fall back to
-  // the default with a WARN rather than failing env validation.
+  // Ограниченная ширина распараллеливания исполнителей внутри задачи. Контейнер
+  // ограничен по CPU/памяти (cpus: 2 / memory: 1G), поэтому значения вне диапазона
+  // откатываются к значению по умолчанию с WARN вместо падения валидации окружения.
   AIF_IMPLEMENT_MAX_WORKERS: z
     .preprocess((value) => {
+      // Пустое значение трактуется как "не задано", а не как ошибка: контейнер может
+      // передать переменную без значения.
       if (value === undefined || value === null || value === "") {
         return IMPLEMENT_MAX_WORKERS_DEFAULT;
       }
@@ -293,6 +334,8 @@ const envSchema = z.object({
         parsed < IMPLEMENT_MAX_WORKERS_MIN ||
         parsed > IMPLEMENT_MAX_WORKERS_MAX
       ) {
+        // Значение вне диапазона не считается фатальной ошибкой: контейнер ограничен по
+        // ресурсам, и предсказуемый откат к умолчанию лучше отказа стартовать вообще.
         log.warn(
           {
             value,
@@ -307,6 +350,9 @@ const envSchema = z.object({
       return parsed;
     }, z.number().int().min(IMPLEMENT_MAX_WORKERS_MIN).max(IMPLEMENT_MAX_WORKERS_MAX))
     .default(IMPLEMENT_MAX_WORKERS_DEFAULT),
+  // Ниже повторяется та же логика приведения boolean, что и в booleanEnvSchema.
+  // Исторически эти флаги разбирались до появления общей схемы; функционально они
+  // эквивалентны, поэтому значение можно задавать как "1"/"true"/"yes"/"on".
   AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {
@@ -320,15 +366,15 @@ const envSchema = z.object({
   AIF_GITHUB_ISSUE_PR_ENABLED: booleanEnvSchema.default(false),
   GIT_PROVIDER: z.enum(["github", "gitlab"]).default("github"),
   AIF_GITLAB_ISSUE_MR_ENABLED: booleanEnvSchema.default(false),
-  // Plan-review gate: when enabled, VCS-issue-linked tasks pause in
-  // plan_review after a plan-only PR/MR is published, and only start
-  // implementation after human approval in the VCS. Off by default so the
-  // legacy auto-implement flow is preserved for existing deployments.
+  // Гейт план-ревью: когда включён, задачи, связанные с issue в VCS, замирают в
+  // plan_review после публикации PR/MR только с планом и начинают
+  // реализацию лишь после ручного одобрения в VCS. По умолчанию выключен, чтобы
+  // существующим развёртываниям сохранился прежний поток авто-реализации.
   AIF_PLAN_REVIEW_PR_ENABLED: booleanEnvSchema.default(false),
   AIF_GITLAB_BASE_URL: z.string().default("https://gitlab.com/api/v4"),
-  // Runtime-profile bootstrap: auto-provision a global runtime profile (and
-  // optionally app-wide defaults) from env at API startup. Off by default so
-  // existing installs (e.g. Codex OAuth login) keep their behavior.
+  // Bootstrap runtime-профиля: при старте API автоматически заводит глобальный
+  // runtime-профиль (и опционально общесистемные значения по умолчанию) из окружения.
+  // Выключен по умолчанию, чтобы существующие установки (например, Codex OAuth login) не сменили поведение.
   AIF_BOOTSTRAP_RUNTIME_PROFILE_ENABLED: booleanEnvSchema.default(false),
   AIF_BOOTSTRAP_RUNTIME_PROFILE_NAME: z.string().min(1).max(200).default("Bootstrap (Codex CLI)"),
   AIF_BOOTSTRAP_RUNTIME_ID: z.string().min(1).max(100).default("codex"),
@@ -339,9 +385,9 @@ const envSchema = z.object({
   AIF_BOOTSTRAP_DEFAULT_MODEL: z.string().max(200).optional(),
   AIF_BOOTSTRAP_SET_DEFAULTS: booleanEnvSchema.default(true),
   AIF_BOOTSTRAP_FORCE_UPDATE: booleanEnvSchema.default(false),
-  // Git identity for commits made by the agent (bot attribution). When both
-  // are set, the agent applies them as the global git user.name/user.email so
-  // subagent commits are attributed to the bot account.
+  // Git-идентичность для коммитов агента (атрибуция боту). Когда заданы оба
+  // значения, агент применяет их как глобальные git user.name/user.email, чтобы
+  // коммиты сабагентов относились на аккаунт бота.
   AIF_GIT_BOT_NAME: z.string().min(1).max(200).optional(),
   AIF_GIT_BOT_EMAIL: z.string().min(1).max(320).optional(),
   AIF_RUNTIME_SESSION_FORK_ENABLED: z
@@ -392,10 +438,17 @@ const envSchema = z.object({
   TELEGRAM_USER_ID: z.string().optional(),
 });
 
+// Тип окружения выводится из схемы: добавили переменную в схему - она сразу доступна
+// в типах, и разойтись они не могут.
 export type Env = z.infer<typeof envSchema>;
 
+// Кэш проверенного окружения на процесс.
 let _env: Env | null = null;
 
+// Предупреждения, а не ошибки: приложение продолжает работать, но конфигурация выглядит
+// подозрительно - обычно это недонастроенный прокси или забытый ключ. Здесь же ловится
+// дублирование модулей рантайма, которое иначе проявилось бы повторной загрузкой
+// одного и того же адаптера.
 function warnOnRuntimeDefaults(env: Env): void {
   if (env.ANTHROPIC_BASE_URL && !env.ANTHROPIC_API_KEY && !env.ANTHROPIC_AUTH_TOKEN) {
     log.warn(
@@ -430,9 +483,13 @@ function warnOnRuntimeDefaults(env: Env): void {
   }
 }
 
+// Кэширующий доступ к проверенному окружению. Кэш обязателен: схема разбирает сотни
+// переменных, а окружение процесса считается неизменным после старта.
 export function getEnv(): Env {
   if (_env) return _env;
 
+  // safeParse вместо parse: нужны сразу все ошибки в структурированном виде, чтобы
+  // сообщение о неудаче было понятным без чтения стека.
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     const formatted = result.error.flatten().fieldErrors;
@@ -440,6 +497,8 @@ export function getEnv(): Env {
     throw new Error(`Environment validation failed: ${JSON.stringify(formatted)}`);
   }
 
+  // Кэш заполняется только после успешной проверки: неудачный разбор не должен
+  // оставлять частично валидное окружение.
   _env = result.data;
   warnOnRuntimeDefaults(_env);
   log.debug({ port: _env.PORT, dbUrl: _env.DATABASE_URL }, "Environment loaded");
@@ -466,16 +525,20 @@ export function getEnv(): Env {
   return _env;
 }
 
-/** Validate env without caching — useful for testing */
+/** Проверяет окружение без кэширования — удобно для тестов */
+// Отличие от getEnv: разбирается переданный объект (или текущее окружение), результат
+// не кэшируется, поэтому функция годится для проверки произвольных наборов в тестах.
 export function validateEnv(env: Record<string, string | undefined> = process.env): Env {
   return envSchema.parse(env);
 }
 
 /**
- * Drop the cached env so the next `getEnv()` re-parses `process.env`. Intended
- * for tests that toggle feature flags at runtime — never call in production
- * code paths, which assume env is a stable compile-time constant.
+ * Сбрасывает кэш окружения, чтобы следующий `getEnv()` заново разобрал `process.env`.
+ * Предназначен для тестов, переключающих флаги возможностей во время выполнения, —
+ * никогда не вызывайте его в рабочем коде, где окружение считают стабильной константой.
  */
 export function resetEnvCache(): void {
+  // Сброс кэша нужен тестам, которые включают и выключают флаги по ходу выполнения.
+  // В рабочем коде окружение считается постоянным, поэтому такой вызов был бы ошибкой.
   _env = null;
 }

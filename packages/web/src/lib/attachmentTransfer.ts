@@ -1,5 +1,5 @@
-// Folder-aware DataTransfer traversal. webkitGetAsEntry expands directories
-// into their contents recursively so a single drop yields every nested file.
+// Обход DataTransfer с поддержкой папок: webkitGetAsEntry рекурсивно раскрывает
+// каталоги в их содержимое, чтобы одно попадание мышью отдало все вложенные файлы.
 
 interface FileSystemEntryLike {
   isFile: boolean;

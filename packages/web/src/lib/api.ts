@@ -110,10 +110,10 @@ const REQUEST_TIMEOUT_MS = 15_000;
 export const PLAN_FAST_FIX_TIMEOUT_MS = 200_000;
 const CHAT_TIMEOUT_MS = 300_000;
 const IMPORT_ROADMAP_TIMEOUT_MS = 300_000;
-// GitLab connect/sync runs a synchronous git-prepare on the agent (clone/fetch/
-// checkout/commit) that can take well over the default 15s request timeout. The
-// agent bridge allows up to 120s for prepare; connect adds a GitLab API check on
-// top, and sync adds paginated issue/MR API calls, so give both a generous budget.
+// Подключение/синхронизация GitLab выполняют синхронный git-prepare на агенте
+// (clone/fetch/checkout/commit), что может занимать заметно больше дефолтных
+// 15 с таймаута запроса. Мост агента даёт до 120 с на prepare; connect добавляет
+// проверку GitLab API, а sync — постраничные вызовы issue/MR API, поэтому бюджет щедрый.
 const GITLAB_CONNECT_TIMEOUT_MS = 180_000;
 const GITLAB_SYNC_TIMEOUT_MS = 300_000;
 const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -434,11 +434,11 @@ async function request<T>(
   }
 }
 
-// Task list fetch. projectId is required: the board/list view is always scoped.
-// The dashboard moved to GET /projects/overview (see #139), so the bare no-arg
-// listTasks() path has no remaining caller and is removed. The server route
-// still answers bare requests for backward compatibility, but the web client
-// never calls it.
+// Загрузка списка задач. projectId обязателен: вид доски/списка всегда скоупится.
+// Дашборд переехал на GET /projects/overview (см. #139), поэтому путь
+// listTasks() без аргументов остался без вызывающих и удалён. Серверный роут
+// всё ещё отвечает на bare-запросы для обратной совместимости, но веб-клиент
+// его не вызывает.
 function listTasks(projectId: string): Promise<TaskListItem[]> {
   const qs = `?projectId=${encodeURIComponent(projectId)}`;
   return request<TaskListItem[]>(`${API_BASE}${qs}`);
@@ -533,7 +533,7 @@ export const api = {
     });
   },
 
-  // Projects
+  // Проекты
   listProjects(): Promise<Project[]> {
     return request<Project[]>("/projects");
   },
@@ -689,7 +689,7 @@ export const api = {
     return request<ClearProjectWarmupResponse>(`/projects/${id}/warmup`, { method: "DELETE" });
   },
 
-  // Tasks
+  // Задачи
   listTasks,
 
   getTask(id: string): Promise<Task> {
@@ -875,7 +875,7 @@ export const api = {
     }
   },
 
-  // Chat Sessions
+  // Сессии чата
   listChatSessions(projectId: string): Promise<ChatSession[]> {
     return request<ChatSession[]>(`/chat/sessions?projectId=${projectId}`);
   },
@@ -911,7 +911,7 @@ export const api = {
     return request(`/chat/sessions/${id}`, { method: "DELETE" });
   },
 
-  // Runtime profiles
+  // Runtime-профили
   listRuntimeProfiles(params?: {
     projectId?: string;
     includeGlobal?: boolean;
@@ -1028,7 +1028,7 @@ export const api = {
     return request(`/runtime-profiles/effective/chat/${projectId}`);
   },
 
-  // Codex login proxy (feature-flagged)
+  // Прокси логина Codex (под флагом функции)
   getCodexLoginCapabilities(): Promise<{ loginProxyEnabled: boolean }> {
     return request("/auth/codex/capabilities");
   },

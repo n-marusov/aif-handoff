@@ -3,11 +3,11 @@ import { render, screen } from "@testing-library/react";
 import type { Project, ProjectTaskOverview } from "@aif/shared/browser";
 import { ProjectsOverview } from "@/components/project/ProjectsOverview";
 
-// Regression test for the empty-project loading behavior.
+// Регрессия загрузки пустого проекта.
 //
-// ProjectsOverview derives `isLoading` from the overview query state, so a
-// project with zero tasks must render its card (0 / 0 badge) instead of
-// hanging on skeleton cards forever.
+// ProjectsOverview выводит `isLoading` из состояния overview-запроса, поэтому
+// проект с нулём задач должен рендерить свою карточку (бейдж 0 / 0) вместо
+// бесконечных скелетон-карточек.
 
 const emptyProject: Project = {
   id: "proj-empty",
@@ -77,8 +77,8 @@ const emptyOverview: ProjectTaskOverview = {
 
 describe("ProjectsOverview empty-project loading regression", () => {
   it("does not stay in loading state when a project has zero tasks", () => {
-    // Simulate the resolved state of useProjectTaskOverviews: the overview
-    // query resolved successfully with a zero-task project (no loading).
+    // Симулируем разрешённое состояние useProjectTaskOverviews:
+    // overview-запрос успешно завершился для проекта без задач (без загрузки).
     vi.mock("@/hooks/useProjects", () => ({
       useProjectTaskOverviews: () => ({
         data: [emptyOverview],
@@ -88,11 +88,11 @@ describe("ProjectsOverview empty-project loading regression", () => {
 
     render(<ProjectsOverview projects={[emptyProject]} onSelectProject={() => {}} />);
 
-    // The project card must render (not skeleton cards). The "0 / 0" badge
-    // confirms the empty project resolved to a real, non-loading card.
+    // Карточка проекта должна отрендериться (не скелетоны). Бейдж "0 / 0"
+    // подтверждает: пустой проект разрешился в настоящую карточку без загрузки.
     expect(screen.getByText("Empty Project")).toBeDefined();
     expect(screen.getByText("0 / 0")).toBeDefined();
-    // No skeleton should be rendered.
+    // Скелетоны рендериться не должны.
     expect(screen.queryByRole("status")).toBeNull();
   });
 });

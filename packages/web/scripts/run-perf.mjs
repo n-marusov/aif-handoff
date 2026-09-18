@@ -63,7 +63,7 @@ async function waitForReady(child) {
       const response = await fetch(READY_URL, { method: "HEAD" });
       if (response.status >= 200 && response.status < 500) return;
     } catch {
-      // Server is still booting.
+      // Сервер ещё поднимается.
     }
 
     await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));

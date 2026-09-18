@@ -1,3 +1,8 @@
+// Контракт приёмника данных об использовании токенов.
+//
+// Реестр рантаймов вызывает приёмник после каждого успешного запуска, вернувшего usage,
+// поэтому это единственная точка сохранения учёта токенов и стоимости во всей системе.
+
 import type {
   RuntimeTransport,
   RuntimeUsage,
@@ -6,48 +11,53 @@ import type {
 } from "./types.js";
 
 /**
- * Event recorded by the registry wrapper after every successful adapter run
- * that returned a non-null `usage`. The sink is the single point of persistence
- * for token/cost accounting across the whole system.
+ * Событие, записываемое обёрткой реестра после каждого успешного запуска адаптера,
+ * вернувшего ненулевой `usage`. Sink — единая точка персистентности
+ * учёта токенов/стоимости во всей системе.
  */
 export interface RuntimeUsageEvent {
-  /** Scope metadata passed in via `RuntimeRunInput.usageContext`. */
+  /** Метаданные области, переданные через `RuntimeRunInput.usageContext`. */
   context: RuntimeUsageContext;
-  /** Which runtime produced this usage. */
+  /** Какой runtime произвёл это использование. */
   runtimeId: string;
   providerId: string;
   profileId?: string | null;
   transport?: RuntimeTransport;
-  /** Workflow kind declared on the run (planner, chat, commit, ...). */
+  /** Вид workflow, заявленный на запуске (planner, chat, commit, ...). */
   workflowKind?: string;
-  /** Adapter's declared usage-reporting contract at the time of recording. */
+  /** Контракт usage-reporting, заявленный адаптером на момент записи. */
   usageReporting: UsageReporting;
-  /** Concrete token counts and cost from the run. */
+  /** Конкретные счётчики токенов и стоимость запуска. */
   usage: RuntimeUsage;
-  /** When the wrapper observed the event. */
+  /** Момент, когда обёртка увидела событие. */
   recordedAt: Date;
 }
 
 /**
- * Usage sink contract. Implementations persist the event (typically into a
- * `usage_events` table and rolled-up aggregates on projects/tasks/chat-sessions).
+ * Контракт usage sink. Реализации сохраняют событие (обычно в таблицу
+ * `usage_events` и агрегаты по проектам/задачам/чат-сессиям).
  *
- * `record` must be synchronous and non-throwing — the wrapper calls it in the
- * hot path of every run, and a failure here must never break the caller.
- * Implementations should catch and log their own errors internally.
+ * `record` обязан быть синхронным и не бросать исключений — обёртка зовёт его
+ * в горячем пути каждого запуска, и сбой здесь не должен рвать вызывающего.
+ * Реализации обязаны сами ловить и логировать собственные ошибки.
  */
+// Требования к реализации не случайны: приёмник вызывается в горячем пути каждого
+// запуска, поэтому учёт токенов не должен быть способен сорвать работу задачи.
+// Исключения перехватываются и логируются внутри самой реализации.
 export interface RuntimeUsageSink {
   record(event: RuntimeUsageEvent): void;
 }
 
 /**
- * No-op sink used when no explicit sink is configured (tests, isolated tools).
- * Discards every event silently.
+ * No-op sink при отсутствии явно настроенного (тесты, изолированные
+ * инструменты). События отбрасываются молча.
  */
+// Заглушка для тестов и изолированных инструментов: события отбрасываются молча, чтобы
+// вызывающий код не различал "приёмника нет" и "приёмник ничего не делает".
 export function createNoopUsageSink(): RuntimeUsageSink {
   return {
     record() {
-      /* intentionally empty */
+      /* намеренно пусто */
     },
   };
 }

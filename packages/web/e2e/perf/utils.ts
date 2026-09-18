@@ -21,7 +21,7 @@ export interface NetworkSample {
   resourceType: string;
 }
 
-/** Capture browser Navigation Timing entries for the current document. */
+/** Считывает метрики Navigation Timing для текущего документа. */
 export async function readNavigationTiming(page: Page): Promise<NavigationTimingMetrics> {
   return await page.evaluate(() => {
     const entry = performance.getEntriesByType("navigation")[0] as
@@ -47,9 +47,9 @@ export async function readNavigationTiming(page: Page): Promise<NavigationTiming
 }
 
 /**
- * Read FCP (first-contentful-paint) and the current largest-contentful-paint
- * observed by the browser. LCP is finalized on page hide in practice; for
- * synthetic perf we snapshot the last-known value after the page has settled.
+ * Считывает FCP и текущее значение LCP, зафиксированное браузером.
+ * На практике LCP финализируется при скрытии страницы; для синтетических
+ * замеров берётся последнее доступное значение после стабилизации.
  */
 export async function readWebVitals(page: Page): Promise<WebVitals> {
   return await page.evaluate(
@@ -77,8 +77,9 @@ export async function readWebVitals(page: Page): Promise<WebVitals> {
 }
 
 /**
- * Attach network listeners that record request/response durations for URLs
- * matching `predicate`. Call the returned `stop()` to detach and collect.
+ * Подключает сетевые слушатели, которые измеряют длительность запросов/ответов
+ * для URL, подходящих под `predicate`. Возвращаемый `stop()` снимает слушатели
+ * и возвращает собранные измерения.
  */
 export function recordNetwork(
   page: Page,
@@ -119,15 +120,15 @@ export function recordNetwork(
 }
 
 /**
- * Budgets enforced by every perf spec. Tune these after a few runs on the
- * target hardware so that regressions (not natural variance) trigger failures.
+ * Бюджеты производительности, обязательные для всех perf-спецификаций.
+ * Подбираются по нескольким прогонам на целевом железе так, чтобы падения
+ * сигнализировали о регрессиях, а не о естественном разбросе.
  */
-// Budgets are calibrated for the full dev stack running (api + web + agent
-// poller) — the agent's 2s tick adds contention on shared caches, so cold
-// numbers here are noticeably higher than a curl-against-idle-server baseline.
-// Tune after a handful of local runs; they should catch 10× regressions
-// (the original "v13 schema miss" bug pushed cold /runtime-profiles to ~14s),
-// not natural variance.
+// Бюджеты откалиброваны для полного dev-стека (api + web + agent poller).
+// Тик агента каждые 2с создаёт конкуренцию за общие кеши, поэтому холодные
+// значения здесь выше, чем у одиночного запроса к простаивающему серверу.
+// Порог должен ловить кратные регрессии (например, инцидент "v13 schema miss"
+// поднимал холодный /runtime-profiles примерно до 14с), а не естественный шум.
 export const PERF_BUDGETS = {
   dashboardLcpMs: 3_000,
   dashboardDomReadyMs: 4_000,

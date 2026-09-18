@@ -1,21 +1,21 @@
 import { expect, test } from "@playwright/test";
 import { PERF_BUDGETS, recordNetwork } from "./utils";
 
-// Measures the `/runtime-profiles` request from inside the browser: this is
-// the real user path through fetch → React Query → render, not a raw curl.
-// We hit the endpoint twice: first call covers cold caches (server-side scan
-// of ~/.codex/sessions); second call should hit the per-endpoint memory cache.
+// Измеряет запрос `/runtime-profiles` изнутри браузера: это реальный путь
+// пользователя (fetch -> React Query -> render), а не сырой curl.
+// Запрос выполняется дважды: первый вызов проверяет холодный кеш
+// (включая серверный обход ~/.codex/sessions), второй — кеш в памяти эндпоинта.
 test.describe("runtime-profiles endpoint timing", () => {
   test("cold and warm reads stay under their budgets", async ({ page, request }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
     const network = recordNetwork(page, (url) => url.includes("/runtime-profiles"));
 
-    // Cold call from inside the page so cookies/origin match any session the
-    // app is relying on. Fire-and-wait, not page-triggered, so we isolate the
-    // endpoint cost from React render work.
-    // Go through the Vite proxy (same origin) so there is no CORS or cookie
-    // drift — this mirrors how the real app talks to the API in dev.
+    // Холодный вызов выполняется из страницы, чтобы cookies/origin совпадали
+    // с контекстом приложения. Вызов прямой, не через UI-триггер, чтобы
+    // отделить стоимость эндпоинта от рендера React.
+    // Идём через прокси Vite (same origin), чтобы исключить CORS и рассинхрон
+    // cookies — это повторяет реальный dev-сценарий общения с API.
     const coldStart = Date.now();
     const coldResponse = await page.evaluate(async () => {
       const started = performance.now();
@@ -49,8 +49,8 @@ test.describe("runtime-profiles endpoint timing", () => {
     expect(coldResponse.ms).toBeLessThan(PERF_BUDGETS.runtimeProfilesColdMs);
     expect(warmResponse.ms).toBeLessThan(PERF_BUDGETS.runtimeProfilesWarmMs);
 
-    // Baseline from the node-side request API hits the API directly (no proxy)
-    // so that a broken Vite dev proxy surfaces as a diff between the two.
+    // Базовая проверка через request API Node ходит напрямую в API (без прокси),
+    // чтобы поломка dev-прокси Vite проявлялась как разница между измерениями.
     const baseline = await request.get("http://localhost:3009/runtime-profiles?includeGlobal=true");
     expect(baseline.ok()).toBeTruthy();
   });

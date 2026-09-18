@@ -34,8 +34,8 @@ function writeConfig(root: string, yaml: string): void {
   writeFileSync(join(dir, "config.yaml"), yaml);
 }
 
-/** Stage + commit any pending changes so the work tree is clean before
- *  exercising `ensureFeatureBranch` (which now hard-gates on dirty). */
+/** Индексирует и коммитит всё незакоммиченное, чтобы рабочее дерево было чистым
+ *  перед проверкой `ensureFeatureBranch` (он теперь жёстко блокирует на грязном). */
 function commitAll(root: string, message: string): void {
   execFileSync("git", ["add", "-A"], { cwd: root, stdio: "ignore" });
   execFileSync("git", ["commit", "-m", message, "--no-verify"], { cwd: root, stdio: "ignore" });
@@ -181,7 +181,7 @@ describe("gitBranch helpers", () => {
 
   it("ensureFeatureBranch throws BranchIsolationError(dirty_worktree) when tree is dirty", async () => {
     initRepo(root);
-    // Introduce an uncommitted change
+    // Вносим незакоммиченное изменение
     writeFileSync(join(root, "dirty.txt"), "dirty\n");
     const { ensureFeatureBranch: fn, BranchIsolationError } = await import("../gitBranch.js");
     expect(() => fn({ projectRoot: root, taskId: "t1", title: "X" })).toThrow(BranchIsolationError);
@@ -218,7 +218,7 @@ describe("gitBranch helpers", () => {
         expect(err.kind).toBe("branch_missing");
       }
     }
-    // HEAD must still be on main — no silent create
+    // HEAD всё ещё на main — молчаливое создание исключено
     expect(getCurrentBranch(root)).toBe("main");
   });
 
@@ -256,7 +256,7 @@ describe("gitBranch helpers", () => {
 
   it("ensureFeatureBranch throws base_branch_unavailable when base is missing", async () => {
     initRepo(root);
-    // rename main away so base can't be found
+    // переименовываем main, чтобы base-ветка не нашлась
     execFileSync("git", ["branch", "-m", "main", "trunk"], { cwd: root, stdio: "ignore" });
     const { ensureFeatureBranch: fn, isBranchIsolationError } = await import("../gitBranch.js");
     try {
@@ -323,7 +323,7 @@ describe("gitBranch helpers", () => {
 
   it("ensureFeatureBranch throws invalid_branch_name when prefix is empty", async () => {
     initRepo(root);
-    // Write a config with branch_prefix=""
+    // Пишем конфиг с branch_prefix=""
     const dir = join(root, ".ai-factory");
     mkdirSync(dir, { recursive: true });
     writeFileSync(
@@ -393,7 +393,7 @@ describe("gitBranch helpers", () => {
     const { restorePersistedBranch, getCurrentBranch: curr } = await import("../gitBranch.js");
     restorePersistedBranch({ projectRoot: root, taskId: "t1", persistedBranchName: "feature/ok" });
     expect(curr(root)).toBe("feature/ok");
-    // Idempotent
+    // Идемпотентность
     restorePersistedBranch({ projectRoot: root, taskId: "t1", persistedBranchName: "feature/ok" });
     expect(curr(root)).toBe("feature/ok");
   });

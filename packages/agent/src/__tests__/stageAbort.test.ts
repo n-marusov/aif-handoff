@@ -76,7 +76,7 @@ describe("stageAbort", () => {
     expect(abort2.signal.aborted).toBe(true);
     expect(getActiveStageAbortController("task-1")).toBeNull();
     expect(getActiveStageAbortController("task-2")).toBeNull();
-    // Locks released for each active task
+    // Локи отпущены для каждой активной задачи
     expect(mockReleaseTaskClaim).toHaveBeenCalledWith("task-1");
     expect(mockReleaseTaskClaim).toHaveBeenCalledWith("task-2");
     expect(mockReleaseTaskClaim).toHaveBeenCalledTimes(2);

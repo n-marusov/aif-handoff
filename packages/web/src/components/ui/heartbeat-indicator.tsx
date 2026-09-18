@@ -6,9 +6,10 @@ interface HeartbeatIndicatorProps {
 }
 
 /**
- * Lightweight working/hung indicator. Uses opacity animation only
- * (`animate-pulse`) for the working dot; no box-shadow/backdrop-filter per
- * project UI rules. Hung state renders a danger icon instead of a dot.
+ * Лёгкий индикатор "работает/зависло".
+ * Для рабочего состояния используется только анимация прозрачности
+ * (`animate-pulse`) без box-shadow/backdrop-filter согласно правилам UI.
+ * В состоянии зависания показывается предупреждающая иконка вместо точки.
  */
 export function HeartbeatIndicator({ progress }: HeartbeatIndicatorProps) {
   if (progress === "idle") return null;

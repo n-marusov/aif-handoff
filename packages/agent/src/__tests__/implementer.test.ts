@@ -165,7 +165,7 @@ describe("runImplementer rework behavior", () => {
     expect(queryMock).toHaveBeenCalledTimes(1);
     const call = queryMock.mock.calls[0]?.[0] as { prompt: string };
 
-    // Rework header is the very first content of the coordinator prompt
+    // Шапка доработки — самое первое содержимое промпта Координатора
     const firstLine = call.prompt.split("\n")[0] ?? "";
     expect(firstLine.startsWith("====")).toBe(true);
     expect(call.prompt).toContain("REWORK REQUEST — THIS IS THE PRIMARY TASK");
@@ -179,7 +179,7 @@ describe("runImplementer rework behavior", () => {
     expect(call.prompt).toContain("Rework handling protocol:");
     expect(call.prompt).toContain("blocking finding IDs from BLOCKING_FINDINGS_SNAPSHOT");
 
-    // Coordinator lead line is still present further down the prompt
+    // Вводная строка Координатора остаётся ниже по тексту промпта
     expect(call.prompt).toContain("Implement the task using the provided plan.");
     expect(call.prompt).toContain("HANDOFF_MODE: 1");
     expect(call.prompt).toContain("HANDOFF_TASK_ID: task-2");
@@ -257,7 +257,7 @@ describe("runImplementer rework behavior", () => {
       prompt: string;
       options: { resume?: string };
     };
-    // Restart reuses the worktree but never the previous model context.
+    // Перезапуск переиспользует рабочее дерево, но никогда — прежний контекст модели.
     expect(call.options.resume).toBeUndefined();
   });
 
@@ -484,11 +484,11 @@ describe("runImplementer rework behavior", () => {
       options: { resume?: string };
     };
 
-    // Slash command stays on the first line so Claude Code can expand it
+    // Слэш-команда остаётся на первой строке, чтобы Claude Code мог её развернуть
     const firstLine = call.prompt.split("\n")[0] ?? "";
     expect(firstLine).toBe("/aif-implement @.ai-factory/PLAN.md");
 
-    // Rework header + comment + protocol are still injected into the body
+    // Шапка доработки + комментарий + протокол по-прежнему внедряются в тело
     expect(call.prompt).toContain("REWORK REQUEST — THIS IS THE PRIMARY TASK");
     expect(call.prompt).toContain("<<<REWORK_COMMENT");
     expect(call.prompt).toContain("<<<FULL_REVIEW_COMMENTS");
@@ -497,7 +497,7 @@ describe("runImplementer rework behavior", () => {
     expect(call.prompt).toContain("Rework handling protocol:");
     expect(call.prompt).toContain("Rework mode: true");
 
-    // Stored session must NOT be resumed for rework, even in skill mode
+    // Сохранённая сессия НЕ должна возобновляться при доработке, даже в skill-режиме
     expect(call.options.resume).toBeUndefined();
   });
 
@@ -575,8 +575,8 @@ describe("runImplementer rework behavior", () => {
 
       await runImplementer("task-plan-approved", projectRoot);
 
-      // Plan-review implementation that produces no worktree changes triggers
-      // one corrective retry before the final result is written.
+      // Реализация plan-review без изменений в рабочем дереве запускает
+      // один корректирующий повтор перед записью финального результата.
       expect(queryMock).toHaveBeenCalledTimes(2);
     } finally {
       delete process.env.AIF_PLAN_REVIEW_PR_ENABLED;
@@ -612,7 +612,7 @@ describe("runImplementer feature branch routing", () => {
       cwd: projectRoot,
       stdio: "ignore",
     });
-    // Pre-create the task's feature branch so implementer can switch to it
+    // Заранее создаём feature-ветку задачи, чтобы исполнитель мог на неё переключиться
     execFileSync("git", ["checkout", "-b", "feature/my-task"], {
       cwd: projectRoot,
       stdio: "ignore",
@@ -639,7 +639,7 @@ describe("runImplementer feature branch routing", () => {
       })
       .run();
 
-    // HEAD is on main before run
+    // До запуска HEAD находится на main
     const before = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
@@ -679,9 +679,9 @@ describe("runImplementer feature branch routing", () => {
 
   it("restores branch BEFORE no-op early return (so plan is read from the right branch)", async () => {
     const db = testDb.current;
-    // Plan text on feature branch shows pending work; plan text on main
-    // (current HEAD before implementer runs) would be "all done" — if we
-    // evaluated pending-task count on main, we'd wrongly early-return.
+    // Текст плана в feature-ветке показывает незавершённую работу; текст плана в main
+    // (текущий HEAD до запуска исполнителя) был бы «всё сделано» — если бы
+    // число незакрытых задач считалось в main, был бы ошибочный ранний выход.
     db.insert(tasks)
       .values({
         id: "task-b-3",
@@ -694,7 +694,7 @@ describe("runImplementer feature branch routing", () => {
       })
       .run();
 
-    // HEAD on main — restore must happen before any config/plan read.
+    // HEAD на main — восстановление ветки должно произойти до любого чтения config/plan.
     const before = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
@@ -708,8 +708,8 @@ describe("runImplementer feature branch routing", () => {
       encoding: "utf8",
     }).trim();
     expect(after).toBe("feature/my-task");
-    // Subagent WAS invoked (pending task remains) — if branch restore ran
-    // after the no-op check on a stale plan, the test would see 0 calls.
+    // Сабагент БЫЛ вызван (незакрытая задача осталась) — если бы восстановление ветки шло
+    // после no-op проверки на устаревшем плане, тест увидел бы 0 вызовов.
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
 
@@ -737,7 +737,7 @@ describe("runImplementer feature branch routing", () => {
         expect(err.kind).toBe("branch_missing");
       }
     }
-    // Subagent was NOT invoked — stage aborted before prompt build
+    // Сабагент НЕ вызывался — стадия прервана до сборки промпта
     expect(queryMock).not.toHaveBeenCalled();
   });
 
@@ -755,7 +755,7 @@ describe("runImplementer feature branch routing", () => {
       })
       .run();
 
-    // Simulate subagent switching HEAD off the task branch during its run
+    // Симулируем переключение HEAD сабагентом с ветки задачи во время его работы
     queryMock.mockReset();
     queryMock.mockImplementation(() => {
       execFileSync("git", ["checkout", "main"], { cwd: projectRoot, stdio: "ignore" });

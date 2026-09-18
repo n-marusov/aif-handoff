@@ -1,3 +1,37 @@
+/**
+ * Implementer-субагент: стадия "Implementing" в жизненном цикле задачи.
+ *
+ * Модуль собирает промпт для реализации утвержденного плана, прогоняет его через
+ * executeSubagentQuery внутри рабочего дерева задачи и формирует артефакты, которых ждет
+ * координатор: implementationLog, обновленный план и признаки для решения о переходе дальше.
+ *
+ * Почему модуль устроен именно так:
+ *
+ * 1. Ветка - это контракт, а не деталь реализации. Планировщик фиксирует task.branchName, и все
+ *    последующие стадии обязаны оказаться именно на ней. Поэтому restorePersistedBranch
+ *    вызывается до любых чтений конфига и плана, а assertCurrentBranch - после каждого прогона
+ *    модели, включая служебный sync-запрос. Иначе чужие диффы приписывались бы задаче.
+ *
+ * 2. Модель - ненадежный исполнитель. Она может заявить об успехе без единой правки файлов,
+ *    переключить ветку или вернуть текст про отсутствие прав на запись. Поэтому модуль не
+ *    доверяет прозе ответа: факт изменений измеряется по git, а затем сверяется с файлами,
+ *    объявленными в плане.
+ *
+ * 3. Проверки намеренно не останавливают конвейер целиком. Незакрытый чеклист, выход за
+ *    объявленный скоуп и пропущенные файлы превращаются в примечания к implementationLog и
+ *    уходят дальше к ревьюеру, вместо тихого пропуска или жесткого падения.
+ *
+ * 4. Два режима исполнения. При useSubagents=true работает нативный координатор с воркерами и
+ *    слоями (fan-out), при false - обычный запуск со слэш-командой. Промпт собирается одним
+ *    выражением, чтобы порядок блоков был детерминированным и не зависел от ветвлений.
+ *
+ * 5. Свежая сессия на каждый запуск. Перезапущенная задача живет в том же worktree, но не должна
+ *    тянуть контекст предыдущей попытки, поэтому sessionReusePolicy всегда равен "never".
+ *
+ * Готча: IMPLEMENTATION_NOOP_MARKER - часть внешнего контракта. Строку читают координатор и UI,
+ * поэтому ее текст нельзя менять, не обновив всех читателей.
+ */
+
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -35,11 +69,20 @@ import {
 } from "../planLayers.js";
 import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
 
+// Имя агента держится на уровне модуля: оно используется и как agentName для subagentQuery, и
+// как agentDefinitionName в нативном режиме, поэтому единый источник исключает расхождение
+// между режимами исполнения.
 const log = logger("implementer");
 const AGENT_NAME = "implement-coordinator";
+// Маркер вынесен в экспортируемую константу, а не оставлен литералом на месте использования:
+// эту строку распознают снаружи (координатор, UI) как признак пустого прогона, поэтому
+// формулировку нельзя менять в одностороннем порядке.
 export const IMPLEMENTATION_NOOP_MARKER =
   "[error] The approved plan expected implementation changes but NO files were changed";
 
+// Отдельная функция, чтобы координатор и тесты применяли ровно ту же логику распознавания, что
+// и запись маркера ниже. Сравнение через includes, потому что перед маркером может стоять
+// пояснительный текст модели.
 export function hasImplementationNoOp(implementationLog: string | null | undefined): boolean {
   return implementationLog?.includes(IMPLEMENTATION_NOOP_MARKER) ?? false;
 }
@@ -52,7 +95,12 @@ function formatReworkCommentForPrompt(
     attachments: string | null;
   } | null,
 ): string {
+  // Отсутствие комментария доработки - легитимный случай (например, ручной перезапуск), поэтому
+  // возвращается явная строка-заглушка вместо null: промпт всегда должен получить хоть какой-то
+  // текст, иначе модель начнет додумывать контекст доработки.
   if (!comment) return "No rework comments found for rework request.";
+  // Формат совпадает с остальными блоками промпта: плоский текст без markdown-оберток, чтобы
+  // вложения не конкурировали с заголовками самого промпта.
   return [
     `[${comment.createdAt}] ${comment.author}`,
     `message: ${comment.message}`,
@@ -71,10 +119,14 @@ function formatAutoReviewStateForPrompt(
     | null
     | undefined,
 ): string {
+  // Отсутствие снапшота и пустой снапшот трактуются одинаково: для промпта важно лишь наличие
+  // конкретных findings для разбора, а различать эти случаи модели незачем.
   if (!state || state.findings.length === 0) {
     return "No persisted blocking findings snapshot.";
   }
 
+  // Строка на каждый finding, а не JSON: модель увереннее удерживает плоские списки, а
+  // идентификаторы остаются различимыми, чтобы в ответе можно было сослаться на конкретный id.
   return [
     `strategy: ${state.strategy}`,
     `iteration: ${state.iteration}`,
@@ -83,6 +135,10 @@ function formatAutoReviewStateForPrompt(
   ].join("\n");
 }
 
+// Эвристика по свободному тексту ответа, а не классификация структурированной ошибки: адаптеры
+// не всегда возвращают типизированный отказ при проблемах с правами записи, и единственным
+// наблюдаемым сигналом остается формулировка модели. Совпадение приводит к исключению наверх -
+// задача не должна считаться реализованной, если модель сообщила о невозможности писать файлы.
 function isBlockedImplementationResult(resultText: string): boolean {
   const normalized = resultText.toLowerCase();
   return (
@@ -99,7 +155,12 @@ function readCanonicalPlan(
   task: { isFix: boolean; planPath: string },
   projectRoot: string,
 ): string | null {
+  // Конфиг читается здесь, а не передается аргументом: путь к плану - производная от конвенций
+  // проекта, и вызывающий код не должен знать про fix_plan/plan.
   const cfg = getProjectConfig(projectRoot);
+  // Сначала проверяется путь, соответствующий типу задачи, и только затем путь другого типа. Это
+  // сохраняет совместимость с задачами, которые мигрировали между fix- и обычным потоком, не
+  // меняя поле planPath.
   const preferredPath = resolve(
     projectRoot,
     task.isFix ? cfg.paths.fix_plan : task.planPath || cfg.paths.plan,
@@ -109,12 +170,17 @@ function readCanonicalPlan(
     if (content.length > 0) return content;
   }
 
+  // Резервный путь нужен, чтобы не потерять план, лежащий во втором по приоритету месте. Пустое
+  // содержимое при этом не считается планом: проверка длины отделяет "файл есть, но пуст" от
+  // реального плана.
   const fallbackPath = resolve(projectRoot, task.isFix ? cfg.paths.plan : cfg.paths.fix_plan);
   if (existsSync(fallbackPath)) {
     const content = readFileSync(fallbackPath, "utf8").trim();
     if (content.length > 0) return content;
   }
 
+  // null, а не пустая строка: вызывающий код различает "плана нет" и "план пуст" и подставляет
+  // task.plan как последний источник через оператор ??.
   return null;
 }
 
@@ -122,7 +188,11 @@ function getChecklistProgress(planText: string | null): {
   parsedTaskCount: number;
   pendingTaskCount: number;
 } {
+  // Отсутствие плана и план без задач для вызывающего кода эквивалентны: оба случая означают,
+  // что автосинхронизацию чеклиста запускать не нужно.
   if (!planText) return { parsedTaskCount: 0, pendingTaskCount: 0 };
+  // План разбирается дважды - целиком и только по незакрытым пунктам. Благодаря этому сравнение
+  // прогресса до и после синхронизации опирается на одну и ту же логику разбора.
   const parsed = computePlanLayers(planText);
   const pending = computePendingPlanLayers(planText);
   return {
@@ -131,6 +201,10 @@ function getChecklistProgress(planText: string | null): {
   };
 }
 
+// Намеренно "тупой" отдельный прогон модели: без доступа к инструментам он только приводит
+// чекбоксы плана в соответствие с фактическим логом реализации. Вынесено из основного промпта,
+// потому что главный исполнитель склонен переписывать структуру плана, а здесь ее нужно
+// сохранить дословно (проверку делает вызывающий код через looksLikeFullPlanUpdate).
 async function runChecklistSyncQuery(input: {
   task: TaskRow;
   projectRoot: string;
@@ -180,6 +254,8 @@ Requirements:
     workflowSpec,
     workflowKind: "implementer_checklist_sync",
   });
+  // Пустой ответ означает, что модель проигнорировала требование вернуть markdown. Молча
+  // вернуть прежний план нельзя: вызывающий код принял бы это за успешную синхронизацию.
   const normalizedResult = resultText.trim();
   if (!normalizedResult) {
     throw new Error("Checklist sync did not return plan markdown");
@@ -187,7 +263,12 @@ Requirements:
   return normalizedResult;
 }
 
+// Точка входа стадии реализации. Функция ничего не возвращает: результат фиксируется через
+// setTaskFields, а координатор принимает решение по состоянию задачи, а не по возвращенному
+// значению. Исключения выбрасываются только там, где продолжать выполнение нельзя.
 export async function runImplementer(taskId: string, projectRoot: string): Promise<void> {
+  // Задача перечитывается из БД, а не принимается готовым объектом: между постановкой в очередь
+  // и запуском стадии поля могли измениться (ветка, флаг rework, бюджет).
   const task = findTaskById(taskId);
 
   if (!task) {
@@ -195,11 +276,13 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     throw new Error(`Task ${taskId} not found`);
   }
 
-  // Plan-review gate guard (defense in depth). The coordinator only routes
-  // approved plan-review tasks to the implementer stage, but a task can still
-  // reach this runner without an approved plan (a legacy VCS task after the
-  // feature flag was enabled, a manual status move, or a direct invocation).
-  // Refuse to touch product files until the plan PR/MR is approved.
+  // Страж гейта plan-review (защита вглубь). Координатор направляет на стадию
+  // исполнителя только одобренные plan-review задачи, но задача может попасть
+  // в этот раннер без одобренного плана (legacy VCS-задача после включения
+  // фича-флага, ручной перевод статуса или прямой вызов).
+  // Отказываемся трогать продуктовые файлы, пока PR/MR плана не одобрен.
+  // Возврат без исключения оставляет задачу на план-ревью gate, и координатор перепроверит ее на
+  // следующем тике. Это устойчивее к гонке с одобрением, чем падение и перевод задачи в error.
   if (taskRequiresPlanReview(taskId) && task.planReviewState !== "approved") {
     log.warn(
       { taskId, status: task.status, planReviewState: task.planReviewState ?? null },
@@ -208,17 +291,18 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     return;
   }
 
-  // Branch restore MUST happen before any repo/config/plan read. If the
-  // planner prepared a feature branch but auto-queue (or a chat/manual
-  // action) moved HEAD between stages, every downstream read — config,
-  // canonical plan, pending-task detection, no-op early return — would
-  // operate on the wrong branch and silently ship incorrect state.
+  // Восстановление ветки ОБЯЗАТЕЛЬНО до любого чтения repo/config/plan. Если
+  // planner подготовил feature-ветку, но auto-queue (или действие чата/человека)
+  // сдвинул HEAD между стадиями, каждое последующее чтение — конфиг,
+  // канонический план, поиск незакрытых задач, ранний no-op-выход —
+  // работало бы на неправильной ветке и молча отдавало бы некорректное
+  // состояние.
   //
-  // `task.branchName` is a source-of-truth contract: once planner set it,
-  // every subsequent stage MUST land on that branch or fail loud. Config
-  // drift (git.enabled / create_branches toggled off between stages) cannot
-  // release us to the current HEAD — `restorePersistedBranch` throws instead
-  // of the "skipped" shortcut `ensureFeatureBranch` uses.
+  // `task.branchName` — контракт источника истины: раз planner его задал,
+  // каждая последующая стадия ОБЯЗАНА оказаться на этой ветке или упасть громко.
+  // Дрейф конфига (git.enabled / create_branches, выключенные между стадиями)
+  // не может отпустить нас на текущий HEAD — `restorePersistedBranch` бросает
+  // исключение вместо shortcut "skipped", который использует `ensureFeatureBranch`.
   if (task.branchName && !task.isFix) {
     restorePersistedBranch({
       projectRoot,
@@ -228,14 +312,20 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
   }
 
+  // Бюджет и режим исполнения читаются один раз, до сборки промпта: оба влияют на
+  // workflowSpec, а повторное чтение в середине прогона могло бы дать рассогласование.
   const project = findProjectById(task.projectId);
   const implementerBudget = project?.implementerMaxBudgetUsd ?? null;
   const useSubagents = task.useSubagents;
   const executionName = useSubagents ? AGENT_NAME : "aif-implement";
   const cfg = getProjectConfig(projectRoot);
+  // Канонический план с диска приоритетнее поля в БД: файл - источник истины для чеклиста, а
+  // task.plan может оказаться устаревшим снимком момента постановки задачи.
   const canonicalPlan = readCanonicalPlan(task, projectRoot);
   const selectedPlan = canonicalPlan ?? task.plan;
   const effectivePlanPath = task.isFix ? cfg.paths.fix_plan : task.planPath || cfg.paths.plan;
+  // Путь отдается модели как @-упоминание: так одна и та же строка годится и для тела промпта, и
+  // для слэш-команды, и для system-подсказки.
   const planSection = `@${effectivePlanPath}`;
   const layerComputation = selectedPlan
     ? computePendingPlanLayers(selectedPlan)
@@ -245,23 +335,34 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     : { tasks: [], layers: [] };
   const parsedTaskCount = parsedPlanComputation.tasks.length;
   const pendingTaskCount = layerComputation.tasks.length;
+  // Объединение через Set: один и тот же файл может быть объявлен и в структурированной задаче, и
+  // в свободном тексте плана; дубликаты исказили бы сравнение с фактически измененными файлами.
   const expectedPlanFiles = Array.from(
     new Set([
       ...collectDeclaredFiles(parsedPlanComputation.tasks),
       ...collectDeclaredFilesFromPlanText(selectedPlan),
     ]),
   ).sort();
+  // Намерение изменить файлы складывается из трех независимых сигналов: незакрытые задачи
+  // слоев, объявленные пути и незавершенные пункты чеклиста. Любой из них означает, что прогон
+  // без правок файлов - ошибка, а не легитимный no-op.
   const planHasImplementationIntent =
     pendingTaskCount > 0 || expectedPlanFiles.length > 0 || hasPendingChecklistItems(selectedPlan);
   const requiresPlanReviewImplementationEvidence = taskRequiresPlanReview(taskId);
   const shouldEnforceImplementationChanges =
     requiresPlanReviewImplementationEvidence && planHasImplementationIntent;
+  // Комментарий доработки запрашивается только в режиме rework: на обычном прогоне лишний запрос
+  // к БД бессмыслен, а null здесь означает "доработки нет", не "доработка без текста".
   const latestReworkComment = task.reworkRequested
     ? (getLatestReworkComment(taskId) ?? null)
     : null;
+  // Снапшот замечаний авто-ревью берётся из сохраненного состояния задачи, а не пересчитывается
+  // заново: промпт должен видеть ровно тот список, по которому принималось решение о доработке.
   const blockingFindingsSnapshot = task.reworkRequested
     ? formatAutoReviewStateForPrompt(task.autoReviewState)
     : "No persisted blocking findings snapshot.";
+  // Ответственность за выполнение попадает в промпт, чтобы модель понимала, кто инициировал
+  // запуск: при ручном переназначении это меняет ожидаемую трактовку результата.
   const latestOwnershipEntry = listTaskExecutorHistory(taskId).at(-1);
   const handoffResponsibility = latestOwnershipEntry
     ? [
@@ -275,6 +376,10 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
       ].join("; ")
     : "No executor handoff history.";
 
+  // Ранний выход для полностью выполненного плана. Без него реализатор каждый раз поднимал бы
+  // модель, та не находила бы работы, а прогон затем попадал бы под проверку "изменений нет" и
+  // засорял лог ошибкой. Условие намеренно строгое: любое незакрытое намерение (rework,
+  // объявленные файлы, незавершенный чеклист) отменяет выход.
   if (
     selectedPlan &&
     parsedTaskCount > 0 &&
@@ -287,6 +392,8 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     const noOpResult =
       "No pending tasks detected in plan (all tasks already completed). " +
       "Implementer skipped coordinator execution.";
+    // План все равно перезаписывается, и лог фиксируется: координатор и UI должны увидеть
+    // осмысленный результат стадии, а не отсутствие артефактов.
     persistTaskPlanForTask({
       taskId,
       planText: selectedPlan,
@@ -307,14 +414,22 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
 
   log.info({ taskId, title: task.title, useSubagents }, "Starting implementation stage");
 
-  // Level 2 planning: validate that each execution layer's tasks touch
-  // disjoint files before allowing fan-out, and surface the worker contract.
+  // Планирование Уровня 2: до допуска fan-out проверяем, что задачи каждого
+  // слоя исполнения затрагивают непересекающиеся файлы, и показываем контракт воркеров.
+  // Анализ пересечений решает, можно ли распараллелить воркеров внутри слоя. Вердикт считается
+  // до запуска модели, потому что именно от него зависит текст промпта (контракт воркеров).
   const layerAnalyses = analyzeLayerDisjointness(layerComputation.layers, layerComputation.tasks);
   const declaredFiles = collectDeclaredFiles(layerComputation.tasks);
   const maxWorkers = getEnv().AIF_IMPLEMENT_MAX_WORKERS;
+  // Источник значения различается для диагностики: env означает явную настройку оператора,
+  // default - встроенное ограничение. По одному лишь числу эти случаи неразличимы.
   const maxWorkersSource = process.env.AIF_IMPLEMENT_MAX_WORKERS?.trim() ? "env" : "default";
+  // Флаг переиспользуется позже при проверке скоупа: контроль объявленных границ имеет смысл
+  // только тогда, когда слой действительно отправлялся на параллельный fan-out.
   const hasParallelLayer = layerAnalyses.some((layer) => layer.decision === "parallel");
-  // Baseline for post-run scope validation (declared-vs-actual touched files).
+  // Базовая точка для пост-валидации скоупа (объявленные vs фактические файлы).
+  // Базовая точка для git-диффа: без нее нельзя отделить правки этой стадии от изменений,
+  // накопленных на той же ветке предыдущими задачами.
   const layerBaselineSha = task.branchName && !task.isFix ? getHeadCommitSha(projectRoot) : null;
   log.debug(
     {
@@ -330,6 +445,8 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     },
     "Resolved implementer fan-out plan",
   );
+  // Решения по слоям логируются до запуска, чтобы при разборе инцидента было видно, почему
+  // слой пошел последовательно, а не параллельно, и какие файлы пересеклись.
   for (const layer of layerAnalyses) {
     if (layer.tasks.length <= 1) continue;
     if (layer.decision === "parallel") {
@@ -351,6 +468,8 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
     }
   }
 
+  // Слои и решения по ним идут одним блоком: модель должна видеть разбиение и вердикт рядом,
+  // иначе она начнет выводить параллельность самостоятельно.
   const layerPlanSection =
     layerAnalyses.length > 0
       ? `
@@ -362,8 +481,12 @@ Layer decisions (AUTHORITATIVE — obey them):
 ${formatLayerDecisions(layerAnalyses)}`
       : "\n\nExecution layers: none parsed from the plan — run the checklist sequentially.";
 
+  // Строка встраивается внутрь блока правил, поэтому содержит маркер списка и не содержит
+  // переводов строки - иначе она разорвала бы нумерацию пунктов промпта.
   const fanOutLine = `- Worker fan-out: at most ${maxWorkers} implement-worker subagent(s) per parallel layer (AIF_IMPLEMENT_MAX_WORKERS).`;
 
+  // Контракт добавляется только при наличии параллельного слоя: в последовательном режиме лишние
+  // ограничения лишь размывают промпт и провоцируют отговорки про чужие файлы.
   const workerContractBlock = hasParallelLayer
     ? `
 
@@ -377,17 +500,27 @@ Parallel worker contract (mandatory for layers marked "parallel"):
 - Take one checkpoint per layer so a failed layer can be rolled back before the next one starts.`
     : "";
 
+  // Ограничение рабочего каталога попадает в промпт дважды: в тело и в system-приложение.
+  // Модель, потерявшая эту рамку, пишет файлы вне репозитория задачи.
   const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}
 All files must be created and modified inside this directory. Do NOT create files outside of it.`;
+  // Одна и та же строка служит и первым сообщением промпта, и fallback-командой для рантайма,
+  // поэтому она собирается заранее, а не по месту каждого использования.
   const implementSlashCommand = `/aif-implement ${planSection}`;
+  // Контекст handoff передается отдельным блоком и только в режиме субагентов: слэш-команда
+  // несет те же данные через собственный механизм подстановки.
   const handoffContext = `HANDOFF_MODE: 1
 HANDOFF_TASK_ID: ${taskId}
 HANDOFF_SKIP_REVIEW: ${task.skipReview ? "1" : "0"}`;
 
+  // Локальная переменная вместо прямых обращений к полю: признак доработки используется в
+  // нескольких блоках промпта, и одно место чтения упрощает аудит ветвлений.
   const isRework = task.reworkRequested;
 
-  // Rework header is surfaced loudly so the model cannot miss that this is
-  // a reopened task with an explicit human/agent rework comment.
+  // Шапка доработки подаётся громко, чтобы модель не могла пропустить, что это
+  // возвращённая задача с явным human/agent комментарием на доработку.
+  // Текст собирается один раз, а место вставки выбирается позже по режиму (см. ниже): так
+  // версии для координатора и для слэш-команды не расходятся по содержанию.
   const reworkHeaderBlock = isRework
     ? `================================================
   REWORK REQUEST — THIS IS THE PRIMARY TASK
@@ -411,6 +544,8 @@ BLOCKING_FINDINGS_SNAPSHOT
 `
     : "";
 
+  // Протокол заставляет модель явно перечислить, что именно исправлено и что осталось
+  // незакрытым. Без этого доработка легко превращается в отписку "все готово".
   const reworkProtocolBlock = isRework
     ? `
 
@@ -423,19 +558,27 @@ Rework handling protocol:
 6) In the final result text, explicitly list which blocking finding IDs from BLOCKING_FINDINGS_SNAPSHOT were addressed and which IDs remain unresolved.`
     : "";
 
+  // Ключевая установка дублируется в system-части: тело промпта может быть усечено рантаймом
+  // при больших задачах, а системная часть переживает усечение.
   const reworkSystemAppend = isRework
     ? "\n\nREWORK MODE: A previously-completed task has been reopened. The rework comment inside the prompt is the primary instruction. Do not treat a fully-checked plan as 'nothing to do'."
     : "";
 
+  // Порядок конкатенации значим: ограничение каталога задает рамку, а режим доработки лишь
+  // уточняет ее поверх.
   const effectiveSystemAppend = `${scopeConstraint}${reworkSystemAppend}`;
 
-  // For coordinator mode the rework header goes at the very top of the prompt
-  // so it cannot be buried below the lead line. For skill mode we keep the
-  // slash command on the first line so Claude Code still expands it, and
-  // surface the rework header inside the body instead.
+  // В режиме координатора шапка доработки идёт самым верхом промпта, чтобы не
+  // утонуть под вводной строкой. В skill-режиме первую строку сохраняет
+  // слэш-команда, чтобы Claude Code её развернул, а шапка доработки
+  // переезжает в тело промпта.
+  // Заголовок доработки не может стоять первым в режиме слэш-команды: Claude Code распознает
+  // команду только в начале сообщения, поэтому заголовок переезжает в тело промпта.
   const topReworkHeader = useSubagents ? reworkHeaderBlock : "";
   const bodyReworkHeader = useSubagents ? "" : reworkHeaderBlock;
 
+  // Пошаговая инструкция нужна только там, где нет нативного агента с определением: слэш-команда
+  // опирается на собственный текст, и без явных шагов модель ограничивается описанием действий.
   const nonSubagentExecutionBlock = useSubagents
     ? ""
     : `AUTOMATED EXECUTION INSTRUCTIONS (read carefully):
@@ -451,6 +594,8 @@ describe what should be done — actually do it.
 5. If tests are required by the plan, run them and report results.
 6. Output a brief summary of what was created/modified.`;
 
+  // Промпт собирается одним шаблоном без промежуточных склеек: так виден итоговый порядок
+  // блоков, а условные фрагменты заранее сведены к пустым строкам.
   const prompt = `${topReworkHeader}${useSubagents ? "Implement the task using the provided plan." : implementSlashCommand}
 
 ${
@@ -484,6 +629,8 @@ Execution rules:
 - IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.${fanOutLine}${layerPlanSection}${workerContractBlock}${
     useSubagents ? "" : `\n\n${nonSubagentExecutionBlock}`
   }${reworkProtocolBlock}`;
+  // Требования к возможностям рантайма зависят от режима: нативному координатору нужны
+  // определения агентов и инструменты рабочего пространства, слэш-команде - только инструменты.
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "implementer",
     prompt,
@@ -494,10 +641,12 @@ Execution rules:
     fallbackSlashCommand: implementSlashCommand,
     fallbackStrategy: useSubagents ? "slash_command" : "none",
     executionMode: useSubagents ? "native_subagents" : "standard",
-    // A restarted task reuses the same worktree but must NOT carry stale model
-    // context from the previous attempt — always start a fresh session.
+    // Перезапущенная задача переиспользует то же рабочее дерево, но НЕ должна нести
+    // устаревший контекст модели с прошлой попытки — всегда начинаем свежую сессию.
     sessionReusePolicy: "never",
     systemPromptAppend: effectiveSystemAppend,
+    // Метаданные уходят в аудит рантайма: по ним видно, что именно координатор знал о задаче в
+    // момент запуска, уже после того как состояние в БД изменилось.
     metadata: {
       reworkRequested: task.reworkRequested,
       skipReview: task.skipReview ?? false,
@@ -507,6 +656,8 @@ Execution rules:
     },
   });
 
+  // Явная запись причины новой сессии: при разборе расхождений важно убедиться, что модель не
+  // получила контекст предыдущей попытки на том же worktree.
   log.info(
     {
       taskId,
@@ -516,9 +667,14 @@ Execution rules:
     "Implementer starting a fresh session",
   );
 
+  // Флаг попытки ретрая объявлен рядом с результатом, а не внутри замыкания: он нужен после
+  // прогона при формировании итоговых примечаний.
   let runResultText = "";
   let noOpRetryAttempted = false;
 
+  // Обертка над executeSubagentQuery. Помимо запуска она проверяет ветку сразу после ответа
+  // модели: это самая ранняя точка, где переключение ветки субагентом еще можно приписать именно
+  // ему, а не последующим действиям координатора.
   const executeImplementationRun = async (runPrompt: string): Promise<string> => {
     const { resultText } = await executeSubagentQuery({
       taskId,
@@ -547,6 +703,9 @@ Execution rules:
 
   runResultText = await executeImplementationRun(prompt);
 
+  // Объединение изменений относительно базовой точки и текущего рабочего дерева: первое ловит
+  // правки поверх уже закоммиченного, второе - незакоммиченные и новые файлы. Ни один из
+  // источников по отдельности не дает полной картины.
   const changedFilesAfterFirstRun = Array.from(
     new Set([
       ...(layerBaselineSha && task.branchName && !task.isFix
@@ -556,6 +715,9 @@ Execution rules:
     ]),
   ).sort();
 
+  // Единственная автоматическая повторная попытка. Она оправдана только для задач с
+  // утвержденным планом и явным намерением изменений: в остальных случаях пустой дифф легитимен,
+  // и ретрай лишь сжег бы бюджет.
   if (shouldEnforceImplementationChanges && changedFilesAfterFirstRun.length === 0) {
     noOpRetryAttempted = true;
     const expectedFilesLine =
@@ -577,6 +739,8 @@ Execution rules:
       `[FIX] Implementer produced no file changes; retrying approved plan execution. Expected files: ${expectedFilesLine}`,
     );
 
+    // В corrective-промпт подставляется ответ предыдущей попытки: модель должна увидеть свои
+    // собственные слова, иначе велик шанс получить тот же результат.
     const correctivePrompt = `${prompt}
 
 ================================================
@@ -600,24 +764,34 @@ Rules for this retry:
     runResultText = await executeImplementationRun(correctivePrompt);
   }
 
-  // Post-run drift check: if the subagent switched branches during execution
-  // (e.g. a rogue skill ran `git checkout` or plan-polisher followed legacy
-  // Step 1.4), we MUST block before persisting plan/log — otherwise we
-  // attribute diffs from a different branch to this task.
+  // Пост-проверка дрейфа: если сабагент переключил ветку во время исполнения
+  // (например, буйный skill выполнил `git checkout` или plan-polisher последовал
+  // legacy Шагу 1.4), обязаны заблокироваться до записи плана/лога — иначе
+  // припишем этой задаче диффы с чужой ветки.
+  // Проверка повторяется именно здесь, потому что между стартом и этим местом прошел ответ
+  // модели - увести HEAD мог только он.
   if (task.branchName && !task.isFix) {
     assertCurrentBranch(projectRoot, task.branchName);
   }
 
+  // Базовый текст ответа сохраняется отдельно: ниже он дополняется служебными примечаниями, но
+  // проверки должны смотреть на то, что вернула модель, без наших добавок.
   let finalResultText = runResultText;
 
+  // Исключение, а не запись в лог: без прав на запись стадия бессмысленна, и задача должна
+  // остановиться с явной причиной, а не продолжиться с пустым результатом.
   if (isBlockedImplementationResult(runResultText)) {
     throw new Error("Implementer blocked by permissions");
   }
 
+  // План перечитывается с диска: модель могла отредактировать его в ходе реализации, и именно
+  // эта версия должна уйти в автосинхронизацию чеклиста.
   let syncedPlan = readCanonicalPlan(task, projectRoot) ?? task.plan;
   let checklistAutoSynced = false;
   const checklistBeforeSync = getChecklistProgress(syncedPlan);
 
+  // Автосинхронизация запускается только при реально незакрытых пунктах: лишний прогон модели
+  // тратит бюджет и рискует переписать план без необходимости.
   if (
     syncedPlan &&
     checklistBeforeSync.parsedTaskCount > 0 &&
@@ -629,6 +803,8 @@ Rules for this retry:
       planText: syncedPlan,
       implementationResult: finalResultText,
     });
+    // Ответ принимается только если он похож на полный план. Иначе сохраняется прежний текст:
+    // частичный ответ модели затер бы структуру плана.
     if (looksLikeFullPlanUpdate(syncedPlan, repairedPlan)) {
       syncedPlan = repairedPlan;
       checklistAutoSynced = true;
@@ -640,18 +816,21 @@ Rules for this retry:
     }
   }
 
-  // Second post-run drift check: `runChecklistSyncQuery` itself spawns a
-  // subagent. Even if the main implementer ended on the right HEAD, the sync
-  // pass can switch branches mid-flow. Re-assert before persisting plan/log.
+  // Вторая пост-проверка дрейфа: сам `runChecklistSyncQuery` запускает
+  // сабагента. Даже если основной исполнитель закончил на правильном HEAD, проход
+  // синка может переключить ветку посреди процесса. Перепроверяем до записи плана/лога.
   if (task.branchName && !task.isFix) {
     assertCurrentBranch(projectRoot, task.branchName);
   }
 
-  // Scope enforcement (Level 2 safety). When a layer actually fanned out, the
-  // run's touched files must stay inside the union of declared change scopes.
-  // The coordinator cannot attribute individual files to individual workers, so
-  // a violation is surfaced loudly (log + reviewer note) instead of being
-  // committed silently.
+  // Контроль скоупа (безопасность Уровня 2). Когда слой реально расходился
+  // веером, затронутые файлы прогона обязаны остаться внутри объединения
+  // объявленных областей изменений. Координатор не может приписать отдельные
+  // файлы отдельным воркерам, поэтому нарушение показывается громко (лог +
+  // заметка ревьюеру) вместо молчаливого коммита.
+  // Нарушения не выбрасывают исключение: параллельный слой мог законно задеть общий файл, и
+  // решение остается за ревьюером. Роль координатора - сделать факт заметным, а не решать за
+  // него, поэтому нарушения превращаются в примечание ниже.
   const scopeViolations: string[] = [];
   if (hasParallelLayer && declaredFiles.length > 0 && layerBaselineSha) {
     const touchedFiles = listChangedFiles(projectRoot, layerBaselineSha);
@@ -675,6 +854,8 @@ Rules for this retry:
     }
   }
 
+  // Прогресс пересчитывается после синхронизации, а не переиспользуется прежний: сама
+  // синхронизация могла не сработать, и в этом случае предупреждение должно остаться.
   const checklistAfterSync = getChecklistProgress(syncedPlan);
   const checklistWarning =
     syncedPlan && checklistAfterSync.parsedTaskCount > 0 && checklistAfterSync.pendingTaskCount > 0
@@ -687,6 +868,8 @@ Rules for this retry:
     );
   }
 
+  // Примечания собираются в массив и приклеиваются к ответу модели: так ревьюер в одном логе
+  // видит и ее текст, и машинно проверенные факты о прогоне.
   const finalResultNotes: string[] = [];
   if (noOpRetryAttempted) {
     finalResultNotes.push(
@@ -707,18 +890,22 @@ Rules for this retry:
     );
   }
 
-  // Concrete change summary — surface exactly which files this implementer
-  // run touched so the PR/activity clearly reflects the plan work instead of
-  // relying on the model's prose (which can claim success without any edits).
-  // `listChangedFiles(projectRoot, ref)` only reports tracked changes, so also
-  // capture untracked files (new files created but not yet `git add`ed) via
-  // the porcelain variant and merge both lists.
+  // Конкретная сводка изменений — показываем точно, какие файлы затронул этот
+  // прогон исполнителя, чтобы PR/активность отражали работу по плану, а не
+  // зависели от прозы модели (которая может заявить успех без единой правки).
+  // `listChangedFiles(projectRoot, ref)` сообщает только об отслеживаемых
+  // изменениях, поэтому собираем ещё untracked-файлы (созданные, но не
+  // `git add`-нутые) через porcelain-вариант и объединяем оба списка.
+  // Список файлов включается в лог только при непустом результате: пустой раздел читался бы как
+  // "изменений нет" и дублировал бы предупреждение ниже.
   const trackedChanges =
     layerBaselineSha && task.branchName && !task.isFix
       ? listChangedFiles(projectRoot, layerBaselineSha)
       : [];
   const allDirty = listChangedFiles(projectRoot);
   const changedFiles = Array.from(new Set([...trackedChanges, ...allDirty])).sort();
+  // Проверка на непустоту стоит перед добавлением примечания, чтобы не плодить раздел с пустым
+  // списком: отсутствие изменений уже описано отдельным предупреждением ниже.
   if (changedFiles.length > 0) {
     finalResultNotes.push(
       `[files] Files changed by this implementation:\n${changedFiles
@@ -727,9 +914,11 @@ Rules for this retry:
     );
   }
 
-  // Change verification — if the plan expected product changes but this run
-  // touched nothing, surface a loud warning so an empty "I implemented it"
-  // result cannot pass silently. Uses the union of tracked + untracked files.
+  // Верификация изменений — если план ожидал продуктовых правок, а прогон
+  // ничего не затронул, выводим громкое предупреждение, чтобы пустое «я
+  // реализовал» не прошло молча. Используем объединение tracked + untracked файлов.
+  // Проверки ниже взаимоисключающие: либо не изменен ни один файл (ошибка), либо изменены не
+  // все объявленные (предупреждение о пропущенных).
   const planDeclaredFiles = expectedPlanFiles;
   if (shouldEnforceImplementationChanges && changedFiles.length === 0) {
     const scope =
@@ -751,6 +940,8 @@ Rules for this retry:
       "Implementer completed without changing any files despite pending plan tasks",
     );
   } else if (planDeclaredFiles.length > 0) {
+    // Сравнение идет со списком объявленных файлов, а не с задачами плана: пути - единственная
+    // единица, сопоставимая между текстом плана и рабочим деревом.
     const missed = planDeclaredFiles.filter((file) => !changedFiles.includes(file));
     if (missed.length > 0) {
       finalResultNotes.push(
@@ -759,11 +950,15 @@ Rules for this retry:
     }
   }
 
+  // Ответ модели и служебные примечания склеиваются один раз: дальше это единый артефакт,
+  // который видят координатор, ревьюер и UI.
   const enrichedResult =
     finalResultNotes.length > 0
       ? `${finalResultText}\n\n${finalResultNotes.join("\n")}`
       : finalResultText;
 
+  // Единая метка времени на все записи стадии: heartbeat и updatedAt должны совпадать, иначе
+  // мониторинг зависших задач увидит искусственный разрыв.
   const nowIso = new Date().toISOString();
   if (syncedPlan) {
     persistTaskPlanForTask({
@@ -776,6 +971,8 @@ Rules for this retry:
     });
   }
 
+  // Сброс признака доработки происходит только здесь - после успешной записи результата. Сбрось
+  // мы его раньше, при падении стадии задача потеряла бы признак доработки.
   setTaskFields(taskId, {
     implementationLog: enrichedResult,
     reworkRequested: false,

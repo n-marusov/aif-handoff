@@ -70,7 +70,7 @@ describe("InlineEditor", () => {
     fireEvent.click(screen.getByTestId("save-btn"));
 
     expect(onSave).toHaveBeenCalledWith("world");
-    // Returns to view mode after save
+    // После сохранения возврат в режим просмотра
     expect(screen.getByTestId("edit-btn")).toBeInTheDocument();
   });
 
@@ -128,10 +128,10 @@ describe("InlineEditor", () => {
 
     fireEvent.click(screen.getByTestId("edit-btn"));
 
-    // Draft starts with initial value
+    // Черновик начинается с начального значения
     expect(screen.getByTestId("edit-input")).toHaveValue("initial");
 
-    // Update draft multiple times
+    // Несколько обновлений черновика
     fireEvent.change(screen.getByTestId("edit-input"), { target: { value: "step1" } });
     expect(screen.getByTestId("edit-input")).toHaveValue("step1");
 

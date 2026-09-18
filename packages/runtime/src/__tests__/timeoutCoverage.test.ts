@@ -1,10 +1,10 @@
 /**
- * Integration test guard: verifies that all built-in runtime adapter transports
- * have timeout coverage. When a new adapter is added without timeout support,
- * this test fails.
+ * Интеграционный тест-страж: проверяет, что все транспорты встроенных
+ * runtime-адаптеров покрыты таймаутами. Если новый адаптер добавят без
+ * поддержки таймаутов, этот тест упадёт.
  *
- * The test inspects adapter source code for timeout utility usage patterns
- * rather than making actual network calls.
+ * Тест ищет паттерны использования timeout-утилит в исходниках адаптеров,
+ * а не делает реальные сетевые вызовы.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,14 +12,14 @@ import { describe, expect, it } from "vitest";
 
 const ADAPTERS_DIR = resolve(import.meta.dirname, "../adapters");
 
-/** Read a source file relative to the adapters directory. */
+/** Читает исходник относительно каталога adapters. */
 function readAdapterSource(relativePath: string): string {
   return readFileSync(resolve(ADAPTERS_DIR, relativePath), "utf-8");
 }
 
 /**
- * Timeout patterns that indicate an adapter file handles timeouts.
- * At least one of these must appear in each transport implementation.
+ * Паттерны таймаутов, показывающие, что файл адаптера их обрабатывает.
+ * Хотя бы один обязан встречаться в каждой реализации транспорта.
  */
 const STREAM_TIMEOUT_PATTERNS = ["withStreamTimeouts", "startTimeoutMs", "startTimer"];
 

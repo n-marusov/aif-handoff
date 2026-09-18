@@ -19,12 +19,12 @@ import { register as registerAnnotatePlan } from "./tools/annotatePlan.js";
 const log = logger("mcp");
 
 /**
- * Build the shared tool context (rate limiter) once at startup.
+ * Собирает общий контекст инструментов (ограничитель частоты) один раз при запуске.
  *
- * In HTTP mode a fresh {@link McpServer} is created per request, but every
- * request MUST share this context: the {@link RateLimiter} keeps stateful
- * in-memory token buckets, so rebuilding it per request would reset the buckets
- * and silently disable rate limiting.
+ * В HTTP-режиме на каждый запрос создаётся новый {@link McpServer}, но каждый
+ * запрос обязан делить этот контекст: {@link RateLimiter} хранит stateful-корзины
+ * токенов в памяти, поэтому пересоздание на каждый запрос сбрасывало бы корзины
+ * и молча отключало лимитирование частоты.
  */
 export function createToolContext(env: McpEnv): ToolContext {
   const rateLimiter = new RateLimiter(
@@ -44,8 +44,8 @@ export function createToolContext(env: McpEnv): ToolContext {
 }
 
 /**
- * Create an {@link McpServer} and register all tools against the shared context.
- * Cheap to call — safe to invoke per request in stateless HTTP mode.
+ * Создаёт {@link McpServer} и регистрирует все инструменты в общем контексте.
+ * Дёшево вызывать — безопасно создавать новый на запрос в stateless HTTP-режиме.
  */
 export function createMcpServer(context: ToolContext): McpServer {
   const server = new McpServer(
@@ -60,13 +60,13 @@ export function createMcpServer(context: ToolContext): McpServer {
     },
   );
 
-  // Register read-only tools
+  // Регистрация инструментов только для чтения
   registerListTasks(server, context);
   registerGetTask(server, context);
   registerSearchTasks(server, context);
   registerListProjects(server, context);
 
-  // Register write tools
+  // Регистрация инструментов записи
   registerCreateTask(server, context);
   registerUpdateTask(server, context);
   registerSyncStatus(server, context);
@@ -95,16 +95,16 @@ function tokensMatch(candidate: string | null, configured: string): boolean {
 }
 
 /**
- * Build the Node HTTP request handler. Exposed (with the factories above) for
- * tests so routing + transport wiring can be exercised without binding a port
- * or importing the process entry (`index.ts` self-runs `main()` on import).
+ * Собирает Node-обработчик HTTP-запросов. Открыт (вместе с фабриками выше) для
+ * тестов, чтобы маршрутизацию и связывание транспорта можно было проверять
+ * без привязки порта и без импорта точки входа (`index.ts` сам запускает `main()` при импорте).
  *
- * Routing (`/health`, `/mcp`, 404) is shared; the `/mcp` behavior is selected
- * ONCE, at handler-build time, by `env.httpMultiSession`:
- *  - `true`  → stateless per-request server/transport (multiple clients connect
- *              concurrently — see {@link createStatelessMcpDispatcher}).
- *  - `false` → legacy single shared stateful transport, preserving the previous
- *              behavior (see {@link createSingleSessionMcpDispatcher}).
+ * Маршрутизация (`/health`, `/mcp`, 404) общая; поведение `/mcp` выбирается
+ * ОДИН РАЗ, при сборке обработчика, по `env.httpMultiSession`:
+ *  - `true`  → stateless server/transport на каждый запрос (несколько клиентов
+ *              подключаются параллельно — см. {@link createStatelessMcpDispatcher}).
+ *  - `false` → legacy один общий stateful-транспорт, сохраняющий прежнее
+ *              поведение (см. {@link createSingleSessionMcpDispatcher}).
  */
 export function createMcpHttpHandler(env: McpEnv, context: ToolContext) {
   const handleMcp = env.httpMultiSession
@@ -154,21 +154,21 @@ export function createMcpHttpHandler(env: McpEnv, context: ToolContext) {
 }
 
 /**
- * Multi-session transport (opt-in via `AIF_MCP_HTTP_MULTI_SESSION_ENABLED`).
+ * Мультисессионный транспорт (opt-in через `AIF_MCP_HTTP_MULTI_SESSION_ENABLED`).
  *
- * A {@link StreamableHTTPServerTransport} with no `sessionIdGenerator` handles
- * exactly ONE request, so a fresh server + transport is created per POST. This
- * lets every client (each Claude Code window) initialize independently instead
- * of colliding on a single shared stateful session (which returned -32600
- * "Server already initialized" for the 2nd client). Server->client events do not
- * travel through this transport — they are pushed via the API broadcast
- * endpoint — so no session tracking is needed.
+ * {@link StreamableHTTPServerTransport} без `sessionIdGenerator` обслуживает
+ * ровно ОДИН запрос, поэтому на каждый POST создаётся свежая пара server + transport.
+ * Так каждый клиент (каждое окно Claude Code) инициализируется независимо, а не
+ * сталкивается на одной общей stateful-сессии (вторая получала -32600
+ * "Server already initialized"). События server->client не проходят через этот
+ * транспорт — они публикуются через broadcast-эндпоинт API — поэтому
+ * отслеживание сессий не требуется.
  *
- * The stateless path is request/response only: it accepts `POST` and rejects
- * other methods with `405`. The SDK client opens an optional `GET /mcp` SSE
- * stream after initialization and treats `405` as "server does not offer SSE";
- * refusing it avoids holding an idle server/transport open per connected client
- * for events we never push through this transport.
+ * Stateless-путь работает только как запрос/ответ: принимает `POST` и отклоняет
+ * остальные методы кодом `405`. Клиент SDK после инициализации открывает
+ * необязательный `GET /mcp` SSE-поток и трактует `405` как «сервер не предлагает
+ * SSE»; отказ от GET не держит простой server/transport на каждого подключённого
+ * клиента ради событий, которые через этот транспорт не публикуются вовсе.
  */
 function createStatelessMcpDispatcher(context: ToolContext): McpDispatcher {
   return async (req, res) => {
@@ -205,14 +205,14 @@ function createStatelessMcpDispatcher(context: ToolContext): McpDispatcher {
 }
 
 /**
- * Legacy single-session transport (default, off-by-default flag).
+ * Legacy односессионный транспорт (по умолчанию, флаг выключен).
  *
- * ONE server + ONE stateful transport shared across the whole process, connected
- * once (lazily) on the first request. This preserves the pre-multi-session
- * behavior: a second client's `initialize` still returns -32600 "Server already
- * initialized". Kept behind `AIF_MCP_HTTP_MULTI_SESSION_ENABLED` so enabling
- * concurrent clients is an explicit, intentional rollout rather than an
- * unconditional change to the external MCP transport contract.
+ * ОДИН server + ОДИН stateful-транспорт, общие на весь процесс, подключаемые
+ * один раз (лениво) на первом запросе. Это сохраняет поведение до мультисессий:
+ * `initialize` второго клиента по-прежнему возвращает -32600 "Server already
+ * initialized". Оставлено за `AIF_MCP_HTTP_MULTI_SESSION_ENABLED`, чтобы включение
+ * параллельных клиентов было явным, осознанным развёртыванием, а не
+ * безусловной сменой внешнего контракта MCP-транспорта.
  */
 function createSingleSessionMcpDispatcher(context: ToolContext): McpDispatcher {
   const server = createMcpServer(context);
@@ -237,7 +237,7 @@ function createSingleSessionMcpDispatcher(context: ToolContext): McpDispatcher {
   };
 }
 
-/** Send a JSON-RPC internal-error response unless headers were already sent. */
+/** Отправляет JSON-RPC-ответ с внутренней ошибкой, если заголовки ещё не отправлены. */
 function respondInternalError(res: ServerResponse): void {
   if (res.headersSent) return;
   res.writeHead(500, { "Content-Type": "application/json" });

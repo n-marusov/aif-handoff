@@ -1,3 +1,13 @@
+/**
+ * Центр переходов статусов задачи.
+ *
+ * Это единственная точка, где меняется статус в доменном конвейере задач.
+ * Переход выполняется атомарно: проверка инвариантов, запись статуса и событие
+ * аудита фиксируются одной транзакцией.
+ *
+ * Потенциальное улучшение: формализовать правила переходов в отдельный
+ * policy-слой, чтобы уменьшить когнитивную нагрузку в этом модуле.
+ */
 import { and, asc, eq } from "drizzle-orm";
 import {
   auditEvents,
@@ -19,16 +29,20 @@ import {
 import { getDb } from "@aif/shared/server";
 import { createAuditEventValues } from "./audit.js";
 
+// Логгер переходов статусов в слое данных.
 const log = logger("data:task-transitions");
 
+// Повторный вход improve -> plan_review сбрасывает метаданные plan review.
+// Иначе новая версия плана будет смешана с прошлым решением гейта.
 /**
- * When re-entering plan_review from improve (after replanning), reset the plan
- * review metadata so the publisher starts from a clean slate.
+ * При повторном входе в plan_review из improve (после перепланирования) метаданные ревью
+ * плана сбрасываются, чтобы публикация начиналась с чистого состояния.
  */
 function planReviewResetForReplan(
   fromStatus: TaskStatus,
   toStatus: TaskStatus,
 ): Partial<typeof tasks.$inferInsert> {
+  // Сброс применяется только к improve -> plan_review.
   if (fromStatus === "improve" && toStatus === "plan_review") {
     return {
       planReviewState: null,
@@ -41,6 +55,7 @@ function planReviewResetForReplan(
   return {};
 }
 
+// Дополнительный patch перехода без служебных полей владения и идентичности.
 export type TaskTransitionExtra = Partial<
   Omit<
     TaskRow,
@@ -55,6 +70,7 @@ export type TaskTransitionExtra = Partial<
   autoReviewState?: AutoReviewState | null;
 };
 
+// Структурированные коды отказа перехода (без классификации по message-тексту).
 export type TaskTransitionConflictCode =
   | "not_found"
   | "status_conflict"
@@ -64,6 +80,8 @@ export type TaskTransitionConflictCode =
   | "ai_handoff_required"
   | "blocked_status_missing";
 
+// Ожидаемые доменные отказы возвращаются как union-результат.
+// Исключения оставлены для инфраструктурных сбоев транзакции.
 export type TaskTransitionResult =
   | { ok: true; task: TaskRow; fromStatus: TaskStatus; toStatus: TaskStatus }
   | {
@@ -73,6 +91,8 @@ export type TaskTransitionResult =
       currentStatus?: TaskStatus;
     };
 
+// expectedStatus задаёт CAS-предусловие: переход применим только к ожидаемому
+// состоянию задачи.
 export interface TransitionTaskStatusInput {
   taskId: string;
   status: TaskStatus;
@@ -84,6 +104,8 @@ export interface TransitionTaskStatusInput {
   now?: Date;
 }
 
+// Пользовательский путь: входом служит событие задачи, а статус/patch решает
+// общий конечный автомат resolveTaskAction.
 export interface ApplyTaskActionInput {
   taskId: string;
   event: TaskEvent;
@@ -97,6 +119,7 @@ export interface ApplyTaskActionInput {
   now?: Date;
 }
 
+// Нормализация patch к колонкам БД с повторным отсечением защищённых полей.
 function normalizeExtra(
   extra: TaskTransitionExtra | Omit<TransitionPatch, "status">,
 ): Partial<typeof tasks.$inferInsert> {
@@ -117,6 +140,7 @@ function normalizeExtra(
     projectId?: unknown;
     createdAt?: unknown;
   };
+  // autoReviewState сериализуется отдельно в autoReviewStateJson.
   return {
     ...rest,
     ...(autoReviewState === undefined
@@ -128,6 +152,7 @@ function normalizeExtra(
   };
 }
 
+// Снимок исполнителей берётся в той же транзакции для согласованного аудита.
 function listAssigneesInTransaction(
   tx: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0],
   taskId: string,
@@ -146,6 +171,7 @@ function listAssigneesInTransaction(
     .all();
 }
 
+// Запись события аудита перехода в той же транзакции, что и смена статуса.
 function appendTransitionAudit(
   tx: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0],
   input: {
@@ -172,6 +198,7 @@ function appendTransitionAudit(
         statusSnapshot: input.toStatus,
         actor: input.actor,
         reason: input.reason,
+        // ownershipRevision фиксируется для трассировки handoff-поколения.
         metadata: {
           fromStatus: input.fromStatus,
           toStatus: input.toStatus,
@@ -183,6 +210,7 @@ function appendTransitionAudit(
     .run();
 }
 
+// Стандартизированный ответ для CAS-конфликта статуса.
 function statusConflict(task: TaskRow): TaskTransitionResult {
   return {
     ok: false,
@@ -208,12 +236,15 @@ export function transitionTaskStatus(
     "Evaluating atomic task status transition",
   );
 
+  // Переход статуса, проверка и аудит выполняются одной транзакцией SQLite.
   try {
     return getDb().transaction((tx) => {
+      // Чтение в транзакции исключает устаревшее состояние между проверкой и записью.
       const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
       if (!task) {
         return { ok: false, code: "not_found", message: "Task not found" } as const;
       }
+      // CAS-проверка expectedStatus защищает от перезаписи более свежего состояния.
       if (input.expectedStatus !== undefined && task.status !== input.expectedStatus) {
         log.warn(
           {
@@ -226,6 +257,7 @@ export function transitionTaskStatus(
         );
         return statusConflict(task);
       }
+      // Участник не меняет status напрямую: для этого используется applyTaskAction.
       if (input.actor.kind === "participant") {
         return {
           ok: false,
@@ -234,6 +266,7 @@ export function transitionTaskStatus(
           currentStatus: task.status,
         } as const;
       }
+      // Агент может менять статус только у AI-owned задачи.
       if (input.actor.kind === "agent" && task.executionOwner !== "ai") {
         return {
           ok: false,
@@ -243,10 +276,13 @@ export function transitionTaskStatus(
         } as const;
       }
 
+      // Снимок исполнителей фиксируется до изменения для корректного аудита.
       const assignees = listAssigneesInTransaction(tx, task.id);
 
+      // Для improve -> plan_review добавляется сброс метаданных plan review.
       const planReviewReset = planReviewResetForReplan(task.status, input.status);
 
+      // При смене статуса sessionId сбрасывается; lastHeartbeatAt обновляется.
       const updated = tx
         .update(tasks)
         .set({
@@ -257,6 +293,7 @@ export function transitionTaskStatus(
           lastHeartbeatAt: nowIso,
           updatedAt: nowIso,
         })
+        // Повторная CAS-проверка в WHERE гарантирует атомарность на уровне БД.
         .where(
           and(
             eq(tasks.id, task.id),
@@ -265,8 +302,10 @@ export function transitionTaskStatus(
         )
         .returning()
         .get();
+      // Нет обновлённой строки — CAS-конфликт, переход не применён.
       if (!updated) return statusConflict(task);
 
+      // Аудит пишется до commit в той же транзакции, что и статус.
       appendTransitionAudit(tx, {
         task,
         assignees,
@@ -277,6 +316,7 @@ export function transitionTaskStatus(
         reason: input.reason ?? null,
         createdAt: nowIso,
       });
+      // Лог служит наблюдаемости; источником истины остаётся запись аудита.
       log.info(
         {
           taskId: task.id,
@@ -304,6 +344,7 @@ export function transitionTaskStatus(
       },
       "Task status transition transaction failed",
     );
+    // Ошибка транзакции пробрасывается вызывающему коду для решения о retry.
     throw error;
   }
 }
@@ -334,12 +375,14 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
       }
 
       const assignees = listAssigneesInTransaction(tx, task.id);
+      // Контекст действия передаётся в автомат вместе с ролью/активностью актора.
       const context: TaskActionContext = {
         participantsModeEnabled: input.participantsModeEnabled,
         actor: input.actor,
         participantRole: input.participantRole,
         participantActive: input.participantActive,
       };
+      // resolveTaskAction — единый автомат жизненного цикла для API и агента.
       const resolution = resolveTaskAction(
         {
           status: task.status,
@@ -353,6 +396,7 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
         input.event,
         context,
       );
+      // Недопустимое действие возвращает доменный отказ без записи в БД.
       if (!resolution.ok) {
         log.warn(
           {
@@ -374,6 +418,8 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
         } as const;
       }
 
+      // Патч автомата имеет приоритет над внешним extra.
+      // activeRuntime* сбрасываются при обычном переходе, но сохраняются на retry_from_blocked.
       const updated = tx
         .update(tasks)
         .set({
@@ -390,9 +436,11 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
           lastHeartbeatAt: nowIso,
           updatedAt: nowIso,
         })
+        // WHERE по прежнему статусу реализует атомарный CAS при переходе-действии.
         .where(and(eq(tasks.id, task.id), eq(tasks.status, task.status)))
         .returning()
         .get();
+      // Если row не обновлена, аудит не пишется: переход не состоялся.
       if (!updated) return statusConflict(task);
 
       appendTransitionAudit(tx, {
@@ -405,6 +453,7 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
         reason: input.reason ?? null,
         createdAt: nowIso,
       });
+      // После commit лог отражает уже согласованное состояние status+audit.
       log.info(
         {
           taskId: task.id,
@@ -428,24 +477,28 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
       { error, taskId: input.taskId, event: input.event },
       "Task action transaction failed",
     );
+    // Ошибка транзакции не маскируется доменным отказом.
     throw error;
   }
 }
 
+// Служебный audit-актор для решений Plan Review Gate.
 const AGENT_ACTOR_DEFAULTS = {
   kind: "agent",
   id: "plan-review-gate",
   displayNameSnapshot: "Plan Review Gate",
 } as const;
 
+// Явный actor имеет приоритет; иначе используется системный actor гейта.
 function resolvePlanReviewActor(actor: AuditActor | undefined): AuditActor {
   return actor ?? { ...AGENT_ACTOR_DEFAULTS };
 }
 
 /**
- * Stamp a task's plan as published without changing its `plan_review` status.
- * Re-publishing after replanning overwrites the previous plan commit and
- * clears stale approval/feedback.
+ * Отметка плана как опубликованного без изменения статуса `plan_review`.
+ *
+ * Повторная публикация после перепланирования перезаписывает предыдущий коммит плана и
+ * очищает устаревшие одобрение и отзыв.
  */
 export function markTaskPlanPublished(input: {
   taskId: string;
@@ -453,8 +506,10 @@ export function markTaskPlanPublished(input: {
   actor?: AuditActor;
   now?: Date;
 }): TaskTransitionResult {
+  // now можно задать явно для тестов и репроцессинга внешних VCS-событий.
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
+  // В логах сохраняем метаданные, но не содержимое review-текста.
   log.info(
     {
       taskId: input.taskId,
@@ -463,6 +518,8 @@ export function markTaskPlanPublished(input: {
     },
     "Marking task plan published",
   );
+  // Публикация плана не меняет status (plan_review -> plan_review),
+  // но проходит через общий transition для CAS и аудита.
   return transitionTaskStatus({
     taskId: input.taskId,
     status: "plan_review",
@@ -482,8 +539,8 @@ export function markTaskPlanPublished(input: {
 }
 
 /**
- * Accept an approved plan: move the task from `plan_review` into `implementing`
- * and record the approval timestamp.
+ * Принятие одобренного плана: задача переводится из `plan_review` в `implementing`, и
+ * фиксируется время одобрения.
  */
 export function markTaskPlanApproved(input: {
   taskId: string;
@@ -493,6 +550,7 @@ export function markTaskPlanApproved(input: {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   log.info({ taskId: input.taskId, action: "task.plan_review.approved" }, "Marking task plan approved");
+  // Одобрение плана переводит plan_review -> implementing только при CAS-совпадении.
   return transitionTaskStatus({
     taskId: input.taskId,
     status: "implementing",
@@ -509,9 +567,11 @@ export function markTaskPlanApproved(input: {
 }
 
 /**
- * Route VCS "changes requested" back into `planning` for replanning while
- * keeping the branch/PR linkage. Persists the reviewer feedback for the next
- * planner run; logs only the feedback length, never the body.
+ * Обработка запроса изменений от VCS: задача возвращается в `planning` на перепланирование
+ * с сохранением связи с веткой и PR.
+ *
+ * Отзыв ревьюера сохраняется для следующего запуска планировщика; в лог попадает только
+ * длина отзыва, но не его текст.
  */
 export function markTaskPlanChangesRequested(input: {
   taskId: string;
@@ -520,6 +580,7 @@ export function markTaskPlanChangesRequested(input: {
   now?: Date;
 }): TaskTransitionResult {
   const now = input.now ?? new Date();
+  // Логируем длину feedback, не его содержимое.
   log.info(
     {
       taskId: input.taskId,
@@ -528,6 +589,7 @@ export function markTaskPlanChangesRequested(input: {
     },
     "Plan changes requested; returning task to planning",
   );
+  // Changes requested возвращает задачу в planning для полного перепланирования.
   return transitionTaskStatus({
     taskId: input.taskId,
     status: "planning",
@@ -545,9 +607,10 @@ export function markTaskPlanChangesRequested(input: {
 }
 
 /**
- * Persist accumulated plan review feedback without changing task status.
- * Used when a plan-mode PR/MR receives new review comments that do not yet
- * flip the gate decision. Returns the refreshed task row.
+ * Сохранение накопленного отзыва по плану без изменения статуса задачи.
+ *
+ * Используется, когда в PR/MR режима плана приходят новые комментарии ревью, ещё не
+ * меняющие решение гейта. Возвращается обновлённая строка задачи.
  */
 export function recordTaskPlanReviewFeedback(input: {
   taskId: string;
@@ -555,6 +618,7 @@ export function recordTaskPlanReviewFeedback(input: {
   now?: Date;
 }): TaskRow | undefined {
   const nowIso = (input.now ?? new Date()).toISOString();
+  // Feedback-only update не меняет статус, поэтому не требует transition-аудита.
   getDb()
     .update(tasks)
     .set({ planReviewFeedback: input.feedback, updatedAt: nowIso })
@@ -568,5 +632,6 @@ export function recordTaskPlanReviewFeedback(input: {
     },
     "Plan review feedback recorded",
   );
+  // Возвращаем перечитанную строку задачи после update.
   return getDb().select().from(tasks).where(eq(tasks.id, input.taskId)).get();
 }

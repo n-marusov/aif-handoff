@@ -1,3 +1,21 @@
+/**
+ * Подготовка локального git-репозитория под подключение GitHub.
+ *
+ * Назначение: довести каталог проекта до рабочего состояния (origin, помощник
+ * учётных данных, safe.directory, определение ветки по умолчанию, каркас AI Factory)
+ * одним синхронным вызовом.
+ *
+ * Почему так:
+ * - Общий алгоритм живёт в repositoryPrepare.ts, здесь остаётся только специфика
+ *   провайдера. Файл намеренно симметричен gitlabPrepare.ts: правки в одной половине
+ *   почти всегда нужно повторять в другой, иначе провайдеры разойдутся в поведении.
+ * - Отличий от GitLab ровно два: форма URL удалённого репозитория и имя пользователя
+ *   в учётных данных. Всё остальное обязано совпадать.
+ * - Ошибки не подавляются и не повторяются: первый сбой превращается в
+ *   типизированный RepositoryPrepareError, потому что частично подготовленный
+ *   репозиторий опаснее явного отказа.
+ */
+
 import { findGitHubRepository, findProjectById, markGitHubRepositoryPrepared } from "@aif/data";
 import { logger } from "@aif/shared";
 import type { GitHubRepositoryConnection } from "@aif/shared";
@@ -10,9 +28,13 @@ export interface PrepareGitHubInput {
   connection: GitHubRepositoryConnection;
 }
 
+// URL строится из htmlUrl, а не из отдельного поля: так адреса GitHub Enterprise
+// работают без дополнительной настройки.
+// Хвостовые разделители срезаются, а суффикс .git добавляется ровно один раз - иначе
+// повторная подготовка дала бы ссылку вида repo.git.git.
 /**
- * HTTPS clone URL for the connected repository, derived from `htmlUrl` so
- * GitHub Enterprise hosts work without a separate configuration field.
+ * HTTPS clone URL подключённого репозитория, выведенный из `htmlUrl`, чтобы
+ * хосты GitHub Enterprise работали без отдельного поля конфигурации.
  */
 export function buildGitHubRemoteUrl(connection: GitHubRepositoryConnection): string {
   const base = connection.htmlUrl.trim().replace(/\/+$/, "");
@@ -20,15 +42,18 @@ export function buildGitHubRemoteUrl(connection: GitHubRepositoryConnection): st
 }
 
 /**
- * Auto-prepare the local git repo for a GitHub connection (standard git only):
- * origin, credential helper, safe.directory, default-branch extraction, and
- * AI Factory scaffold init (committed). This is the GitHub counterpart of the
- * GitLab auto git-prepare flow — it closes the parity gap that previously
- * required a manual clone. Runs synchronously; throws a typed error on the
- * first failure (no silent retries).
+ * Авто-подготовка локального git-репозитория для подключения GitHub (только
+ * стандартный git): origin, credential helper, safe.directory, определение
+ * ветки по умолчанию и init скаффолдинга AI Factory (с коммитом). Это
+ * GitHub-аналог GitLab-потока авто-подготовки — закрывает разрыв
+ * паритета, ранее требовавший ручного клона. Выполняется синхронно;
+ * при первом сбое бросает типизированную ошибку (без молчаливых повторов).
  */
 export function prepareGitHubRepository(input: PrepareGitHubInput): { gitPreparedAt: string } {
   const { projectRoot, connection } = input;
+  // credentialUsername фиксирован: x-access-token - соглашение GitHub для доступа по
+  // токену через стандартный git credential helper. Симметричное место в GitLab
+  // использует oauth2.
   const { preparedAt } = prepareRepository({
     projectId: connection.projectId,
     projectRoot,
@@ -39,15 +64,22 @@ export function prepareGitHubRepository(input: PrepareGitHubInput): { gitPrepare
     defaultBranch: connection.defaultBranch,
   });
 
+  // Отметка в базе идёт после успешной подготовки: при исключении выше она не
+  // выставляется, поэтому частичный результат не выглядит завершённым.
   const prepared = markGitHubRepositoryPrepared(connection.projectId);
   log.info({ projectId: connection.projectId }, "GitHub repository prepared");
+  // Приоритет у значения из базы: оно отражает фактическую запись, а preparedAt из
+  // алгоритма - только момент выполнения работы. Резерв нужен для случая, когда
+  // отметка не вернула строку.
   return { gitPreparedAt: prepared?.gitPreparedAt ?? preparedAt };
 }
 
 /**
- * HTTP-triggered prepare: load project + connection, run the algorithm, return
- * the prepared timestamp. Throws on any failure.
+ * Подготовка по HTTP: загружает проект + подключение, запускает алгоритм и
+ * возвращает отметку времени подготовки. Бросает при любом сбое.
  */
+// HTTP-путь: сначала находятся проект и подключение, и только потом запускается
+// подготовка. Разделение даёт различимые коды ошибок для вызывающего.
 export function prepareGitHubRepositoryForProject(projectId: string): { gitPreparedAt: string } {
   const project = findProjectById(projectId);
   if (!project) {
@@ -58,6 +90,8 @@ export function prepareGitHubRepositoryForProject(projectId: string): { gitPrepa
       "github",
     );
   }
+  // Отдельная ошибка на отсутствующее подключение: клиент может предложить
+  // подключить репозиторий, а не искать проблему в самом проекте.
   const connection = findGitHubRepository(projectId);
   if (!connection) {
     throw new RepositoryPrepareError(

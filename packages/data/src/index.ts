@@ -1,3 +1,14 @@
+/**
+ * Пакет @aif/data: единственный разрешённый слой доступа к базе данных.
+ *
+ * Пакеты api, agent и runtime не имеют права импортировать drizzle-orm напрямую - запрет
+ * проверяется правилом ESLint. Поэтому любое чтение и любая запись в SQLite проходят через
+ * функции этого модуля, и здесь же сосредоточены знания о схеме и о том, какие изменения
+ * должны быть атомарными.
+ *
+ * Модуль построен по принципу "одна функция = одно намерение": вызывающий код не собирает
+ * SQL-фрагменты сам, а выбирает подходящую операцию.
+ */
 import {
   and,
   asc,
@@ -98,7 +109,14 @@ import {
 import { transitionTaskStatus as transitionTaskStatusAtomic } from "./taskTransitions.js";
 import { createAuditEventValues } from "./audit.js";
 
+// Реэкспорты ниже собирают публичную поверхность пакета из тематических модулей,
+// чтобы внешние пакеты импортировали всё из одной точки (@aif/data) и не зависели
+// от внутренней раскладки файлов.
+// Позиции карточек в бэклоге нормализуются отдельным модулем: это пересчёт всего
+// списка, а не точечная мутация.
 export * from "./normalizeBacklogPositions.js";
+// Интеграции с внешними трекерами вынесены отдельно: они ходят по сети и их
+// отказы не должны заражать транзакции локальной БД.
 export * from "./github.js";
 export * from "./gitlab.js";
 export {
@@ -161,8 +179,13 @@ export {
 } from "./taskTransitions.js";
 
 const log = createLogger("data");
+// Множества-справочники нужны для проверки значений, пришедших из JSON-колонок.
+// В SQLite такие колонки не типизированы, поэтому валидность приходится
+// восстанавливать вручную при чтении, а не полагаться на схему таблицы.
 const AUTO_REVIEW_STRATEGY_SET = new Set<string>(AUTO_REVIEW_STRATEGIES);
 const AUTO_REVIEW_FINDING_SOURCE_SET = new Set<string>(AUTO_REVIEW_FINDING_SOURCES);
+// Таблица appSettings всегда содержит ровно одну строку с настройками приложения.
+// Фиксированный идентификатор — это инвариант схемы, а не бизнес-значение.
 const APP_SETTINGS_ID = 1;
 
 export type TaskRow = typeof tasks.$inferSelect;
@@ -176,12 +199,18 @@ export type CodexSessionFileIndexRow = typeof codexSessionFiles.$inferSelect;
 export type CodexLimitHeadIndexRow = typeof codexLimitHeads.$inferSelect;
 export type CodexLimitHistoryIndexRow = typeof codexLimitHistory.$inferSelect;
 export type CodexIndexCursorRow = typeof codexIndexCursors.$inferSelect;
+// "Гидратированная" строка задачи — это задача, к которой уже подгружены связанные
+// данные (исполнители) и разобраны JSON-колонки. Отдельный тип нужен, чтобы
+// вызывающий код видел разницу между сырой строкой БД и подготовленной сущностью.
 export type HydratedTaskRow = TaskRow & {
   assignees: TaskAssigneeSummary[];
   autoReviewState?: AutoReviewState | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 };
 
+// Контекст действия для сценариев без аутентификации (фоновые задачи, миграции).
+// Он сохраняет поведение до появления режима участников: проверки прав не
+// выполняются, а в аудит пишется анонимный актор.
 const LEGACY_TASK_ACTION_CONTEXT: TaskActionContext = {
   participantsModeEnabled: false,
   actor: {
@@ -227,7 +256,7 @@ export interface CreateRuntimeWarmupSessionInput extends RuntimeWarmupScopeInput
   createdAt?: string;
 }
 
-/** DB-level patch: all mutable task columns with their storage types (attachments/tags as JSON strings). */
+/** Патч уровня БД: все изменяемые колонки задачи с их типами хранения (attachments/tags как JSON-строки). */
 export type TaskFieldsPatch = Partial<
   Omit<
     TaskRow,
@@ -242,7 +271,7 @@ export type TaskFieldsPatch = Partial<
   autoReviewState?: AutoReviewState | null;
 };
 
-/** API-level update: domain types (attachments as array, tags as string[]). Serialization handled by data layer. */
+/** Обновление уровня API: доменные типы (attachments как массив, tags как string[]). Сериализацией занимается слой данных. */
 export type TaskFieldsUpdate = {
   title?: string;
   description?: string;
@@ -291,6 +320,8 @@ export type TaskFieldsUpdate = {
   worktreePath?: string | null;
 };
 
+// Разбиение по строкам перед редактированием: редакция работает построчно,
+// иначе одна длинная строка могла бы склеить соседние фрагменты.
 function redactTaskTextForExternalUse(text: string | null | undefined): string | null {
   if (typeof text !== "string") {
     return text ?? null;
@@ -309,10 +340,16 @@ function parseTaskRuntimeLimitSnapshot(
   return snapshot ? sanitizeRuntimeLimitSnapshotForExposure(snapshot, "task") : null;
 }
 
+// Внешний ответ всегда собирается из строки БД заново, а не отдаётся как есть.
+// Здесь же выполняется очистка текста от данных провайдера и пересчёт прав:
+// права зависят от статуса и контекста действия, поэтому их нельзя кэшировать
+// в строке таблицы.
 export function toTaskResponse(
   task: TaskRow & { assignees?: TaskAssigneeSummary[] },
   actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
 ): Task {
+// Внутренние ссылки рантайма не покидают процесс: в ответе они отбрасываются,
+// а из JSON-колонок раскрываются только те поля, которые нужны клиенту.
   const {
     attachments,
     tags,
@@ -350,6 +387,9 @@ export function toTaskResponse(
   };
 }
 
+// Разбор JSON-массива тегов. Повреждённое значение не считается фатальной ошибкой:
+// карточка должна открываться даже при частично испорченных данных, поэтому
+// возвращается пустой список, а не исключение.
 function parseTags(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
@@ -360,6 +400,9 @@ function parseTags(raw: string | null | undefined): string[] {
   }
 }
 
+// Универсальный разбор JSON-объекта из колонки. Отличие от parseTags в том, что
+// здесь важен именно объект: массивы и примитивы считаются невалидными, потому
+// что вызывающий код ожидает словарь полей выбора рантайма.
 function parseRuntimeObject(raw: string | null | undefined): Record<string, unknown> | null {
   if (!raw) return null;
   try {
@@ -400,6 +443,10 @@ function readOptionalString(value: Record<string, unknown>, key: string): string
   return typeof raw === "string" ? raw : undefined;
 }
 
+// Строгий разбор сохранённого выбора рантайма. Любое расхождение с ожидаемой
+// формой (неизвестный транспорт, пропущенное поле, не тот тип) приводит к null:
+// снимок мог быть записан более старой версией приложения, и лучше откатиться
+// к профилю по умолчанию, чем запустить задачу с неполной конфигурацией.
 function parseTaskActiveRuntimeSelection(
   raw: string | null | undefined,
 ): TaskActiveRuntimeSelection | null {
@@ -775,6 +822,9 @@ function taskCommentSelection() {
   };
 }
 
+// Комментарий может быть создан агентом или системой, тогда participant_id пуст.
+// При left join все четыре поля участника обнуляются одновременно, поэтому одной
+// проверки на null достаточно — частично заполненной связи быть не может.
 function hydrateCommentSelection(
   row: {
     comment: CommentRow;
@@ -816,6 +866,9 @@ function findHydratedTaskComment(commentId: string): HydratedCommentRow | undefi
   return row ? hydrateCommentSelection(row) : undefined;
 }
 
+// Гидратация списка задач делается одним дополнительным запросом на весь пакет
+// строк (listTaskAssigneesByTaskIds), а не запросом на каждую задачу. Так один
+// вызов списка не превращается в N+1 обращений к БД.
 function hydrateTaskRows(rows: TaskRow[]): HydratedTaskRow[] {
   const assigneesByTaskId = listTaskAssigneesByTaskIds(rows.map((row) => row.id));
   return rows.map((row) => ({
@@ -837,6 +890,8 @@ export function listTasks(
   ownershipFilters: TaskOwnershipFilters = {},
 ): HydratedTaskRow[] {
   const db = getDb();
+  // Фильтр по проекту опционален, поэтому undefined отбрасывается до сборки
+  // условия: drizzle иначе добавил бы пустое условие в and().
   const conditions = [
     projectId ? eq(tasks.projectId, projectId) : undefined,
     ...buildTaskOwnershipConditions(ownershipFilters),
@@ -864,6 +919,10 @@ type TaskListItemRow = Pick<TaskRow,
   | "scheduledAt" | "createdAt" | "updatedAt"
 > & { hasPlan: boolean | number };
 
+// Проекция для списков и поиска намеренно перечисляет колонки явно: тяжёлые
+// текстовые поля (описание, план, логи) в неё не попадают, чтобы не гонять их
+// из БД ради карточки на доске. Вместо самого плана считается булев признак
+// hasPlan — проверка непустоты выполняется на стороне SQLite.
 const TASK_LIST_COLUMNS = {
   id: tasks.id,
   projectId: tasks.projectId,
@@ -915,6 +974,10 @@ const TASK_STATUS_ORDER = new Map<TaskStatus, number>(
   TASK_STATUSES.map((status, index) => [status, index]),
 );
 
+// Сравнение для сортировки в памяти: сначала по месту статуса в каноническом
+// списке TASK_STATUSES (это порядок колонок на доске), затем по позиции внутри
+// статуса. Неизвестный статус получает индекс за пределами списка и уезжает вниз,
+// а не ломает сортировку — полезно при чтении БД, записанной более новой версией.
 function compareTaskListRows(a: TaskListItemRow, b: TaskListItemRow): number {
   const statusOrder =
     (TASK_STATUS_ORDER.get(a.status) ?? TASK_STATUSES.length) -
@@ -972,6 +1035,9 @@ export function listTaskListItems(
     .select(TASK_LIST_COLUMNS)
     .from(tasks)
     .where(and(...conditions))
+    // SQL сортирует только по позиции; порядок статусов задан порядком колонок
+    // на доске и не выражается средствами ORDER BY, поэтому финальная сортировка
+    // выполняется в памяти уже после выборки и объединения с исполнителями.
     .orderBy(asc(tasks.position))
     .all();
   const assigneesByTaskId = listTaskAssigneesByTaskIds(rows.map((row) => row.id));
@@ -1005,7 +1071,7 @@ export function getMaxBacklogPosition(projectId: string): number | null {
   return row?.maxPos == null ? null : Number(row.maxPos);
 }
 
-/** Summary projection — excludes heavy text fields for list/search responses. */
+/** Проекция сводки — исключает тяжёлые текстовые поля для ответов списка/поиска. */
 export type TaskSummaryRow = Pick<TaskRow,
   | "id" | "projectId" | "title" | "status" | "priority" | "position"
   | "autoMode" | "executionOwner" | "ownershipRevision"
@@ -1061,8 +1127,10 @@ export interface PaginatedResult<T> {
 }
 
 /**
- * List tasks with pagination and optional filters.
- * Returns summary rows (no plan, description, logs) to keep payloads small.
+ * Список задач с пагинацией и необязательными фильтрами.
+ *
+ * Возвращаются сводные строки без плана, описания и логов: карточке на доске эти поля не
+ * нужны, а размер ответа вырос бы на порядок.
  */
 export function listTasksPaginated(options: {
   projectId?: string;
@@ -1109,7 +1177,7 @@ export function listTasksPaginated(options: {
 }
 
 /**
- * Search tasks with pagination. Returns summary rows.
+ * Поиск задач с пагинацией. Возвращаются сводные строки, как и в listTasksPaginated.
  */
 export function searchTasksPaginated(options: {
   query: string;
@@ -1157,7 +1225,7 @@ export function searchTasksPaginated(options: {
   };
 }
 
-/** Convert a TaskSummaryRow to a JSON-safe object (parse tags). */
+/** Преобразует TaskSummaryRow в JSON-безопасный объект (разбор tags). */
 export function toTaskSummary(
   row: TaskSummaryRow,
   actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
@@ -1231,7 +1299,8 @@ export function createTask(input: {
     displayNameSnapshot: "System",
   };
 
-  // Auto-compute planPath for full mode when no explicit path is provided
+  // Для полного режима путь к плану вычисляется автоматически, если он не задан явно:
+  // в этом режиме у каждой задачи отдельный файл плана.
   let resolvedPlanPath = input.planPath;
   if (input.plannerMode === "full") {
     const project = findProjectById(input.projectId);
@@ -1262,6 +1331,10 @@ export function createTask(input: {
           .where(inArray(participants.id, assigneeIds))
           .orderBy(asc(participants.displayName), asc(participants.id))
           .all();
+  // Инвариант владения: задачу в AI-исполнении нельзя одновременно назначить
+  // участникам, а исполнители должны существовать и быть активными. Здесь это
+  // проверяется до открытия транзакции, потому что отказ не должен оставлять
+  // после себя ни задачи, ни записей в истории.
   const hasInvalidAssignees =
     assignees.length !== assigneeIds.length ||
     assignees.some((participant) => !participant.active);
@@ -1280,6 +1353,9 @@ export function createTask(input: {
     );
     return undefined;
   }
+  // Позиция в бэклоге задаётся с шагом 100 — это оставляет место для вставки
+  // карточки между соседями без пересчёта всего списка. Отсутствие максимума
+  // трактуется как пустой бэклог, поэтому отсчёт начинается с 1000.
   const position =
     input.position ??
     (() => {
@@ -1287,6 +1363,9 @@ export function createTask(input: {
       return (maxPosition ?? 1000) + 100;
     })();
 
+  // Четыре вставки ниже образуют одно неделимое действие: сама задача, её
+  // исполнители, запись в истории исполнителей и событие аудита. Без транзакции
+  // сбой на любом из шагов оставил бы задачу без истории или без аудита.
   db.transaction((tx) => {
     tx.insert(tasks)
       .values({
@@ -1341,6 +1420,9 @@ export function createTask(input: {
         )
         .run();
     }
+    // Историческая запись хранит снимки title, статуса и состава исполнителей,
+    // а не ссылки на текущие значения: история исполнительства должна читаться
+    // корректно даже после переименования задачи или деактивации участника.
     tx.insert(taskExecutorHistory)
       .values({
         id: crypto.randomUUID(),
@@ -1380,6 +1462,9 @@ export function createTask(input: {
 }
 
 export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | undefined {
+  // Поля владения вырезаются из патча намеренно: они меняются только через
+  // специализированные операции (handoff, transition), где контролируются
+  // ожидаемая ревизия и права актора.
   const {
     attachments,
     tags,
@@ -1395,6 +1480,8 @@ export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | unde
     assigneeIds?: unknown;
   };
   const patch: TaskFieldsPatch = { ...rest, updatedAt: new Date().toISOString() };
+  // JSON-колонки сериализуются здесь, на границе слоя данных: вызывающий код
+  // работает с доменными типами (массив вложений, список тегов), а не со строками.
   if (attachments !== undefined) {
     patch.attachments = JSON.stringify(attachments);
   }
@@ -1423,12 +1510,12 @@ export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | unde
 }
 
 /**
- * Atomically claim the QA "running" slot for a task. Performs a conditional
- * UPDATE — `SET qa_status='running' WHERE id=? AND qa_status!='running'` — and
- * returns true only when THIS call flipped the row (it won the transition and
- * owns the run). Returns false when QA was already running, so concurrent
- * manual + auto-trigger / double-POST starts are mutually exclusive at the DB
- * and never spawn two runtime runs. Bumps `updatedAt` to mirror updateTask.
+ * Захват запуска QA: compare-and-set на уровне SQL.
+ *
+ * Условие `qa_status != 'running'` не даёт двум параллельным вызовам запустить проверку
+ * дважды - ручной запуск и автотриггер не могут пересечься. Признак успеха - число
+ * изменённых строк, а не предварительное чтение, которое к моменту записи могло устареть.
+ * Здесь же обновляется updatedAt, чтобы поведение совпадало с updateTask.
  */
 export function tryStartQaRun(id: string): boolean {
   const result = getDb()
@@ -1446,11 +1533,12 @@ export function tryStartQaRun(id: string): boolean {
 }
 
 /**
- * Recover tasks orphaned in qaStatus:"running" — a crash/restart mid-run or a
- * dispatch failure that never finalized leaves the row in "running", and since
- * `tryStartQaRun` only wins when qa_status != 'running', such a task could
- * never start QA again. Called once at API startup; flips every "running" row
- * to the terminal "error" status and returns how many rows were recovered.
+ * Восстановление задач, застрявших в состоянии qaStatus: "running".
+ *
+ * Падение или перезапуск посреди прогона оставляет строку в "running", а tryStartQaRun
+ * выигрывает только когда qa_status != 'running' - такая задача больше никогда не смогла
+ * бы запустить проверку. Вызывается один раз при старте API: переводит все строки в
+ * "running" в терминальное "error" и возвращает число восстановленных задач.
  */
 export function resetStaleQaRuns(): number {
   const result = getDb()
@@ -1462,8 +1550,11 @@ export function resetStaleQaRuns(): number {
 }
 
 /**
- * Write only the `position` column. Does NOT bump `updatedAt` — manual reorder
- * is metadata, not content, and must not disturb "updated at" sort views.
+ * Запись только колонки position.
+ *
+ * updatedAt намеренно не обновляется: ручная перестановка - это метаданные, а не
+ * изменение содержимого, и не должна влиять на представления, отсортированные по времени
+ * обновления.
  */
 export function updateTaskPositionOnly(id: string, position: number): void {
   getDb().update(tasks).set({ position }).where(eq(tasks.id, id)).run();
@@ -1472,6 +1563,8 @@ export function updateTaskPositionOnly(id: string, position: number): void {
 export function setTaskFields(id: string, fields: TaskFieldsPatch): void {
   const {
     autoReviewState,
+    // Статус и владение отбрасываются: их смена должна идти через переходы
+    // состояния и handoff, иначе будут нарушены инварианты жизненного цикла.
     status: _status,
     executionOwner: _executionOwner,
     ownershipRevision: _ownershipRevision,
@@ -1486,6 +1579,8 @@ export function setTaskFields(id: string, fields: TaskFieldsPatch): void {
     patch.autoReviewStateJson =
       autoReviewState === null ? null : JSON.stringify(autoReviewState);
   }
+  // Пустой патч не отправляется в БД: это защищает updatedAt и ревизии от
+  // бессмысленного "обновления", которое могло бы сбить оптимистичные проверки.
   if (Object.keys(patch).length === 0) {
     log.warn({ taskId: id }, "Ignored task field update with no mutable fields");
     return;
@@ -1618,8 +1713,8 @@ export function toAppSettingsResponse(row: AppSettingsRow): AppSettings {
 
 function ensureAppSettingsRow(): AppSettingsRow {
   const db = getDb();
-  // Migration 13 seeds row id=1. Keep this fallback for legacy/test databases
-  // so read paths stay resilient even when they start from an empty schema.
+  // Строку с id=1 создаёт миграция 13. Запасной путь нужен для старых баз и тестов:
+  // даже если схема пуста, чтение настроек должно возвращать пригодный объект.
   const existing = db.select().from(appSettings).where(eq(appSettings.id, APP_SETTINGS_ID)).get();
   if (existing) {
     return existing;
@@ -1627,6 +1722,9 @@ function ensureAppSettingsRow(): AppSettingsRow {
 
   const now = new Date().toISOString();
   log.debug({ appSettingsId: APP_SETTINGS_ID }, "Seeding missing singleton app settings row");
+  // Вставка идемпотентна: onConflictDoNothing позволяет двум параллельным вызовам
+  // не упасть на гонке за единственную строку. Итоговый select поэтому обязателен —
+  // нужную строку мог создать соседний вызов, а не мы.
   db
     .insert(appSettings)
     .values({
@@ -1706,6 +1804,10 @@ export function getAppDefaultRuntimeProfileId(
 
   const seenProfileIds = new Set<string>();
 
+  // Профиль берётся из цепочки кандидатов: специфичный для режима, затем общий
+  // task-профиль. Отклонённый кандидат (удалён, отключён, принадлежит проекту) не
+  // считается ошибкой — просто передаёт ход следующему. Множество seenProfileIds
+  // защищает от повторной проверки одного и того же id в цепочке.
   for (const candidate of candidates) {
     if (!candidate.profileId || seenProfileIds.has(candidate.profileId)) continue;
     seenProfileIds.add(candidate.profileId);
@@ -1748,6 +1850,11 @@ export function listProjects(): ProjectRow[] {
   return getDb()
     .select()
     .from(projects)
+    // Закреплённые проекты идут первыми, внутри группы — по времени закрепления.
+    // Сортировка по имени задана с collate nocase: стандартное сравнение SQLite
+    // учитывает регистр и поставило бы заглавные буквы отдельно от строчных,
+    // что для человекочитаемого списка выглядит как беспорядок. Замыкающая
+    // сортировка по id делает порядок полным и устойчивым при совпадении имён.
     .orderBy(
       sql`case when ${projects.pinnedAt} is null then 1 else 0 end`,
       asc(projects.pinnedAt),
@@ -1873,6 +1980,10 @@ export function listProjectTaskOverviews(previewLimit = 3): ProjectTaskOverview[
     }
   }
 
+  // Превью карточек собираются одним оконным запросом на все проекты и статусы
+  // сразу. Альтернатива — запрос на каждую пару (проект, статус) — превратилась бы
+  // в N+1. Оконная функция нумерует задачи внутри каждой такой пары, поэтому
+  // rank <= предела отдаёт первые карточки колонки, а не случайные строки.
   if (normalizedPreviewLimit > 0) {
     const previewRows = db.all<ProjectTaskPreviewQueryRow>(sql`
       select
@@ -2116,6 +2227,9 @@ function unlockedCoordinatorTaskFilter(nowIso: string) {
   );
 }
 
+// Порядок выдачи кандидатов задаёт приоритет обработки: сначала меньшая позиция
+// (то есть выше на доске), при равенстве — кто раньше создан. Второй ключ нужен,
+// чтобы порядок был детерминированным и не "дрожал" между проходами координатора.
 export function findCoordinatorTaskCandidates(stage: CoordinatorStage, limit: number): TaskRow[] {
   const nowIso = new Date().toISOString();
 
@@ -2177,11 +2291,16 @@ export function listCoordinatorActionableProjectIds(limit: number): string[] {
     .map((row) => row.projectId);
 }
 
-/** Atomically claim a task for processing. Returns true if claim succeeded. */
+/** Атомарно захватывает задачу в обработку. Возвращает true, если захват удался. */
 export function claimTask(taskId: string, coordinatorId: string, lockDurationMs: number): boolean {
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
 
+  // Захват выполняется одним UPDATE с условием на текущее состояние блокировки.
+  // Сравнение дат идёт как сравнение строк: ISO-8601 в UTC сортируется
+  // лексикографически так же, как хронологически, поэтому отдельная функция
+  // преобразования не нужна. Просроченная блокировка (lockedUntil <= now)
+  // считается свободной — так восстанавливаются задачи после падения ноды.
   const result = getDb()
     .update(tasks)
     .set({ lockedBy: coordinatorId, lockedUntil })
@@ -2199,14 +2318,17 @@ export function claimTask(taskId: string, coordinatorId: string, lockDurationMs:
 }
 
 /**
- * Atomically claim a coordinator candidate only while its actionable snapshot
- * still matches. Returns the fresh row captured by the successful UPDATE.
+ * Захват кандидата координатором - только пока снимок задачи, по которому принималось
+ * решение, всё ещё совпадает. Возвращается строка, полученная успешным UPDATE.
  */
 export function claimCoordinatorTaskIfEligible(
   input: CoordinatorTaskClaimInput,
 ): TaskRow | undefined {
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + input.lockDurationMs).toISOString();
+  // Проверка ожидаемого статуса закрывает разрыв между выбором кандидата и
+  // захватом: пока координатор шёл до записи, задачу мог продвинуть другой
+  // процесс. Несовпадение ожиданий означает "кандидат устарел" — захват не состоялся.
   const conditions = [
     eq(tasks.id, input.taskId),
     eq(tasks.projectId, input.expectedProjectId),
@@ -2228,9 +2350,10 @@ export function claimCoordinatorTaskIfEligible(
 }
 
 /**
- * Conditional proactive runtime gate block (CAS).
- * Applies the block only if the candidate row is still in the expected state
- * and remains available (unpaused + unlocked) at write time.
+ * Условная блокировка задачи по лимитам рантайма (compare-and-set).
+ *
+ * Блокировка применяется только если строка всё ещё в ожидаемом состоянии и доступна
+ * (не на паузе, не под чужим захватом) в момент записи.
  */
 export function blockTaskForRuntimeGateIfEligible(input: {
   taskId: string;
@@ -2279,6 +2402,9 @@ export function blockTaskForRuntimeGateIfEligible(input: {
       .returning({ status: tasks.status })
       .get();
     if (!updated) return false;
+    // Аудит пишется в той же транзакции, что и смена статуса: либо есть и блокировка,
+    // и её след в журнале, либо нет ни того, ни другого. fromStatus берётся из
+    // строки, прочитанной до UPDATE, — это фактическое предыдущее состояние.
     tx.insert(auditEvents)
       .values(
         createAuditEventValues({
@@ -2308,18 +2434,18 @@ export function blockTaskForRuntimeGateIfEligible(input: {
   });
 }
 
-/** Check if any task in a project is currently locked (active, non-expired). */
+/** Проверка: есть ли в проекте хотя бы одна задача под активным (не истёкшим) захватом. */
 /**
- * Conditional advance from `backlog` to `planning`. Returns `true` only if
- * the row was actually updated — i.e. the task was still in `backlog` and
- * not paused at the moment of the write. This is the CAS that prevents two
- * coordinator passes (auto-queue + scheduler, or two replicas) from racing
- * the same task through the transition twice. Callers that observe `false`
- * must skip the task without further side effects (no broadcast, no log
- * entry).
+ * Условный перевод задачи из `backlog` в `planning`.
  *
- * Clears `scheduledAt` in the same write so the scheduler can't re-fire a
- * task that auto-queue already advanced (or vice versa).
+ * `true` возвращается только если строка действительно обновлена: задача была в `backlog`
+ * и не на паузе в момент записи. Это тот самый compare-and-set, который не даёт двум
+ * проходам координатора (автоочередь и планировщик либо две реплики) провести одну задачу
+ * через переход дважды. Вызывающий, получивший `false`, обязан пропустить задачу без
+ * побочных эффектов: без broadcast и без записи в лог.
+ *
+ * `scheduledAt` очищается в той же записи, чтобы планировщик не запустил повторно задачу,
+ * которую уже продвинула автоочередь (и наоборот).
  */
 export function claimBacklogTaskForAdvance(
   taskId: string,
@@ -2336,6 +2462,10 @@ export function claimBacklogTaskForAdvance(
       .update(tasks)
       .set({
         status: "planning",
+        // Перенос в планирование обнуляет всё, что относится к предыдущему кругу
+        // работы: причину блокировки, счётчики повторов и итераций ревью, а также
+        // флаг повторной доработки. Иначе задача унаследовала бы устаревшие
+        // состояния и, например, сразу считалась бы выбившейся из лимита ревью.
         scheduledAt: null,
         blockedReason: null,
         blockedFromStatus: null,
@@ -2420,10 +2550,11 @@ export function hasBlockingAutoQueueCommitForProject(projectId: string): boolean
 }
 
 /**
- * Count tasks the auto-queue must consider "still in flight" before advancing
- * the next backlog item. Includes blocked_external so retry-cycles don't
- * cause the pool to overshoot. Excludes terminal (done/verified) and the
- * source state (backlog).
+ * Сколько задач автоочередь должна считать "ещё в работе", прежде чем продвигать
+ * следующую задачу из backlog.
+ *
+ * blocked_external включён, иначе циклы повторных попыток выводили бы пул за предел.
+ * Терминальные статусы (done, accepted) и исходный backlog исключены.
  */
 export function countActivePipelineTasksForProject(projectId: string): number {
   const row = getDb()
@@ -2449,14 +2580,13 @@ export function countActivePipelineTasksForProject(projectId: string): number {
 }
 
 /**
- * True if the project has at least one in-flight task with a persisted
- * `branchName` but no isolated `worktreePath`. Used by the auto-queue
- * scheduler to keep parallel execution disabled for legacy branch-bound
- * tasks that still mutate the shared worktree on stage transitions.
+ * Есть ли в проекте хотя бы одна незавершённая задача с сохранённым `branchName`, но без
+ * отдельного `worktreePath`.
  *
- * Includes `backlog` so a queued task whose branch was prepared (e.g. via
- * `replan`) does not let the scheduler open the parallel pool
- * before its first stage starts.
+ * Планировщик автоочереди использует это, чтобы не включать параллельное исполнение для
+ * legacy-задач, привязанных к общей ветке: они меняют общий worktree при смене этапа.
+ * `backlog` тоже учитывается: задача, которой уже подготовили ветку, не должна позволить
+ * открыть параллельный пул до старта первого этапа.
  */
 export function hasActiveBranchBoundTasksForProject(projectId: string): boolean {
   const row = getDb()
@@ -2499,8 +2629,8 @@ export function hasActiveLockedTaskForProject(projectId: string): boolean {
 }
 
 /**
- * Statuses that can still own or resume a task worktree. Everything except the
- * terminal `done`/`verified` states, which release their worktree.
+ * Статусы, в которых задача ещё владеет worktree или может его переиспользовать: все,
+ * кроме терминальных done и accepted, которые worktree освобождают.
  */
 const NON_TERMINAL_WORKTREE_STATUSES: TaskStatus[] = [
   "backlog",
@@ -2521,9 +2651,10 @@ export interface WorktreeReferenceQuery {
 }
 
 /**
- * How many OTHER live (non-terminal) tasks still reference the same physical
- * worktree folder. Cleanup refuses to remove a worktree while this is non-zero,
- * so a shared/deferred folder is never yanked out from under a live task.
+ * Сколько ДРУГИХ незавершённых задач ссылаются на тот же каталог worktree.
+ *
+ * Пока значение не ноль, очистка не удаляет каталог: общий или отложенный worktree не
+ * должен исчезнуть из-под работающей задачи.
  */
 export function countOtherLiveTasksReferencingWorktree(input: WorktreeReferenceQuery): number {
   const row = getDb()
@@ -2549,7 +2680,7 @@ export interface ActiveTaskWorktreeRow {
   status: TaskStatus;
 }
 
-/** Live tasks that declare a worktree folder (reconciliation input). */
+/** Живые задачи с объявленным каталогом worktree (вход для сверки). */
 export function listActiveTasksWithWorktrees(projectId: string): ActiveTaskWorktreeRow[] {
   const rows = getDb()
     .select({
@@ -2590,9 +2721,11 @@ export interface ClearDanglingVcsLinksResult {
 }
 
 /**
- * Clear VCS-issue → task links whose task row no longer exists. The FK uses
- * `onDelete: set null`, which SQLite only enforces when `PRAGMA foreign_keys`
- * is ON; in practice deleted tasks can leave dangling `task_id` values behind.
+ * Очистка связей VCS-issue → задача, у которых строка задачи уже не существует.
+ *
+ * Внешний ключ объявлен с `onDelete: set null`, но SQLite применяет его только при
+ * `PRAGMA foreign_keys = ON`. На практике после удаления задачи остаются висячие
+ * значения `task_id`, поэтому их нужно убирать отдельным проходом.
  */
 export function clearDanglingVcsIssueLinks(): ClearDanglingVcsLinksResult {
   const db = getDb();
@@ -2640,7 +2773,7 @@ export function clearDanglingVcsIssueLinks(): ClearDanglingVcsLinksResult {
   return { githubLinksCleared, gitlabLinksCleared };
 }
 
-/** Extend lock expiry for a task owned by this coordinator. */
+/** Продлевает срок блокировки задачи, принадлежащей этому координатору. */
 export function renewTaskClaim(taskId: string, coordinatorId: string, lockDurationMs: number): void {
   const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
   getDb()
@@ -2650,7 +2783,7 @@ export function renewTaskClaim(taskId: string, coordinatorId: string, lockDurati
     .run();
 }
 
-/** Release a task claim after processing completes. */
+/** Отпускает захват задачи после завершения обработки. */
 export function releaseTaskClaim(taskId: string, coordinatorId?: string): void {
   const conditions = [eq(tasks.id, taskId)];
   if (coordinatorId != null) {
@@ -2663,10 +2796,10 @@ export function releaseTaskClaim(taskId: string, coordinatorId?: string): void {
     .run();
 }
 
-/** Release expired or abandoned task claims. Returns count of released claims. */
+/** Снятие истёкших или заброшенных захватов задач. Возвращает число снятых захватов. */
 export function releaseStaleTaskClaims(): number {
   const nowIso = new Date().toISOString();
-  // Heartbeat older than 5 minutes means the process is dead
+  // Пульс старше 5 минут означает, что процесс мёртв.
   const heartbeatDeadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const result = getDb()
@@ -2675,10 +2808,10 @@ export function releaseStaleTaskClaims(): number {
     .where(and(
       isNotNull(tasks.lockedBy),
       or(
-        // Lock TTL expired
+        // Захват с истёкшим TTL
         lte(tasks.lockedUntil, nowIso),
-        // Process died: heartbeat stale, task still in-progress, and the claim
-        // is not a QA lock (QA runs have no heartbeat and must live until TTL).
+        // Процесс умер: пульс устарел, задача всё ещё в работе, и это не QA-захват
+        // (у QA-прогонов нет пульса, они живут до истечения TTL).
         and(
           inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
           notLike(tasks.lockedBy, "qa:%"),
@@ -2710,7 +2843,7 @@ export function listDueBlockedExternalTasks(nowIso: string): TaskRow[] {
     .all();
 }
 
-/** Backlog tasks whose `scheduledAt` is due (<= nowIso). Skips paused tasks. */
+/** Задачи backlog с наступившим сроком `scheduledAt` (<= nowIso). Пропускает приостановленные задачи. */
 export function listDueScheduledTasks(nowIso: string): TaskRow[] {
   log.debug({ nowIso }, "Scanning for due scheduled tasks");
   const rows = getDb()
@@ -2730,7 +2863,7 @@ export function listDueScheduledTasks(nowIso: string): TaskRow[] {
   return rows;
 }
 
-/** Clear scheduledAt after firing; bumps updatedAt. */
+/** Очищает scheduledAt после срабатывания; обновляет updatedAt. */
 export function clearScheduledAt(taskId: string): void {
   log.debug({ taskId }, "Clearing scheduledAt");
   const nowIso = new Date().toISOString();
@@ -2741,7 +2874,7 @@ export function clearScheduledAt(taskId: string): void {
     .run();
 }
 
-/** Set or clear scheduledAt. Caller validates the ISO string upstream. */
+/** Устанавливает или очищает scheduledAt. ISO-строку валидирует вызывающий код выше. */
 export function updateScheduledAt(taskId: string, scheduledAt: string | null): void {
   log.debug({ taskId, scheduledAt }, "Updating scheduledAt");
   const nowIso = new Date().toISOString();
@@ -2752,7 +2885,7 @@ export function updateScheduledAt(taskId: string, scheduledAt: string | null): v
     .run();
 }
 
-/** Read the auto-queue flag for a project. Returns false for unknown projects. */
+/** Читает флаг автоочереди проекта. Для неизвестных проектов возвращает false. */
 export function getAutoQueueMode(projectId: string): boolean {
   const row = getDb()
     .select({ autoQueueMode: projects.autoQueueMode })
@@ -2762,12 +2895,12 @@ export function getAutoQueueMode(projectId: string): boolean {
   return Boolean(row?.autoQueueMode);
 }
 
-/** Projects with `autoQueueMode = true`. Used by the coordinator's auto-advance pass. */
+/** Проекты с `autoQueueMode = true`. Используется проходом автопродвижения координатора. */
 export function listAutoQueueProjects(): ProjectRow[] {
   return getDb().select().from(projects).where(eq(projects.autoQueueMode, true)).all();
 }
 
-/** Toggle the project-level auto-queue flag. */
+/** Переключает флаг автоочереди уровня проекта. */
 export function setAutoQueueMode(projectId: string, enabled: boolean): void {
   log.info({ projectId, enabled }, "Setting auto-queue mode");
   const nowIso = new Date().toISOString();
@@ -2779,9 +2912,10 @@ export function setAutoQueueMode(projectId: string, enabled: boolean): void {
 }
 
 /**
- * Next backlog task in a project ordered by `position` ascending.
- * Skips paused tasks and tasks that still have a future `scheduledAt`
- * (those belong to the scheduled-task trigger, not the auto-queue advancer).
+ * Следующая задача backlog в проекте по возрастанию `position`.
+ *
+ * Пропускаются задачи на паузе и задачи с `scheduledAt` в будущем: последние относятся к
+ * триггеру отложенных задач, а не к продвижению автоочереди.
  */
 export function nextBacklogTaskByPosition(projectId: string): TaskRow | undefined {
   const nowIso = new Date().toISOString();
@@ -2815,7 +2949,7 @@ export function listStaleInProgressTasks(): TaskRow[] {
         inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
-        // Skip tasks with active (non-expired) locks — they're being processed
+        // Пропускаем задачи с активным (не истёкшим) захватом: их уже обрабатывают.
         or(
           sql`${tasks.lockedBy} IS NULL`,
           lte(tasks.lockedUntil, nowIso),
@@ -3022,18 +3156,19 @@ export function incrementChatSessionTokenUsage(
 }
 
 // ---------------------------------------------------------------------------
-// Usage event sink — structural type matching `@aif/runtime`'s RuntimeUsageSink
+// Приёмник событий использования: структурный тип, совпадающий с RuntimeUsageSink
+// из @aif/runtime
 // ---------------------------------------------------------------------------
 
 /**
- * Structural shape of a usage event. Mirrors `RuntimeUsageEvent` from
- * `@aif/runtime/usageSink` without an import so `@aif/data` stays free of
- * a dependency on `@aif/runtime` (runtime → shared → data is the intended
- * direction; data must not know about the runtime layer).
+ * Структурная форма события использования. Повторяет `RuntimeUsageEvent` из
+ * `@aif/runtime/usageSink` без импорта: пакет @aif/data не должен зависеть от
+ * @aif/runtime. Направление зависимостей задано как runtime → shared → data,
+ * поэтому слой данных не знает о слое рантаймов.
  *
- * The host process (api or agent) passes `createDbUsageSink()` to
- * `createRuntimeRegistry({ usageSink })`, where TypeScript's structural
- * typing verifies that the returned object satisfies `RuntimeUsageSink`.
+ * Процесс-хозяин (api или agent) передаёт `createDbUsageSink()` в
+ * `createRuntimeRegistry({ usageSink })`, где структурная типизация TypeScript проверяет,
+ * что возвращённый объект удовлетворяет `RuntimeUsageSink`.
  */
 export interface DbUsageEvent {
   context: {
@@ -3066,22 +3201,20 @@ export interface CreateDbUsageSinkOptions {
 }
 
 /**
- * Insert a `usage_events` row and roll the usage delta into whichever
- * per-entity aggregate counters the event has scope for (task, project,
- * chat-session). Any subset of scopes may be present — a chat turn has
- * project + chat-session but no task; a subagent run has project + task
- * but no chat-session; a commit run has only project.
+ * Запись строки в `usage_events` и увеличение агрегатов тех сущностей, для которых у
+ * события есть область (задача, проект, чат-сессия). Любое подмножество областей
+ * допустимо: у хода в чате есть проект и чат-сессия, но нет задачи; у запуска субагента -
+ * проект и задача, но нет чат-сессии; у коммита есть только проект.
  *
- * Runs all four writes in a single transaction so the append-only log and
- * the rolled-up counters stay consistent.
+ * Все четыре записи идут в одной транзакции, чтобы append-only журнал и свёрнутые
+ * счётчики не разошлись.
  */
 export function recordUsageEvent(event: DbUsageEvent): void {
   const { usage, context } = event;
   const db = getDb();
 
-  // Wrap insert + aggregate updates in a single transaction so the
-  // append-only log and rolled-up counters stay consistent. If any
-  // update fails the entire batch rolls back — no partial divergence.
+  // Вставка и обновление агрегатов выполняются в одной транзакции: если хотя бы одно
+  // обновление не удастся, вся пачка откатится и расхождения не возникнет.
   db.transaction((tx) => {
     tx.insert(usageEvents)
       .values({
@@ -3102,10 +3235,10 @@ export function recordUsageEvent(event: DbUsageEvent): void {
       })
       .run();
 
-    // Use usage.totalTokens (the provider's authoritative total) for all
-    // aggregates — same source of truth as the usage_events row. Never
-    // recalculate as inputTokens + outputTokens: providers may include
-    // additional token categories (cache, reasoning, etc.) in their total.
+    // Для всех агрегатов берётся usage.totalTokens - авторитетный итог провайдера, тот же
+    // источник, что и у строки в usage_events. Пересчитывать его как inputTokens +
+    // outputTokens нельзя: провайдеры включают в итог дополнительные категории
+    // (кэш, рассуждения и другие), которые не видны в этих двух полях.
     const totalTokensDelta = usage.totalTokens;
     const costDelta = usage.costUsd ?? 0;
 
@@ -3146,10 +3279,11 @@ export function recordUsageEvent(event: DbUsageEvent): void {
 }
 
 /**
- * Build a `DbUsageSink` (structurally compatible with
- * `@aif/runtime.RuntimeUsageSink`) that persists every event via
- * `recordUsageEvent`. Sink methods are non-throwing: any DB error is logged
- * and swallowed so a broken sink never breaks the caller mid-run.
+ * Создание `DbUsageSink`, структурно совместимого с `@aif/runtime.RuntimeUsageSink`
+ * и сохраняющего каждое событие через `recordUsageEvent`.
+ *
+ * Метод не бросает исключений: любая ошибка базы логируется и поглощается, чтобы сбой
+ * учёта токенов не срывал выполнение задачи.
  */
 export function createDbUsageSink(options: CreateDbUsageSinkOptions = {}): DbUsageSink {
   return {
@@ -3183,13 +3317,10 @@ export function createDbUsageSink(options: CreateDbUsageSinkOptions = {}): DbUsa
 }
 
 /**
- * Find existing tasks that match the given project + roadmap alias combination.
- * Used for deduplication during roadmap import.
- */
-/**
- * Full-text search across task title and description.
- * Case-insensitive SQL LIKE-based search. Returns matching tasks ordered by updatedAt desc.
- * Limited to 50 results.
+ * Поиск задач по заголовку и описанию.
+ *
+ * Регистронезависимый поиск через SQL LIKE. Результаты отсортированы по времени
+ * обновления (сначала свежие), выдача ограничена 50 строками.
  */
 export function searchTasks(
   query: string,
@@ -3219,13 +3350,19 @@ export function searchTasks(
 }
 
 /**
- * Update the lastSyncedAt timestamp for a task (called by MCP sync operations).
+ * Обновление отметки lastSyncedAt у задачи (вызывается операциями синхронизации MCP).
  */
 export function touchLastSyncedAt(taskId: string): void {
   const nowIso = new Date().toISOString();
   setTaskFields(taskId, { lastSyncedAt: nowIso });
 }
 
+/**
+ * Задачи проекта с указанным псевдонимом в roadmap.
+ *
+ * Используется для дедупликации при импорте roadmap: повторный импорт не должен
+ * создавать вторую задачу на тот же пункт.
+ */
 export function findTasksByRoadmapAlias(projectId: string, alias: string): TaskRow[] {
   return getDb()
     .select()
@@ -3234,7 +3371,7 @@ export function findTasksByRoadmapAlias(projectId: string, alias: string): TaskR
     .all();
 }
 
-// ── Runtime Warmup Sessions ──────────────────────────────────────────
+// ── Разогрев runtime-сессий ────────────────────────────────────────
 
 const ACTIVE_RUNTIME_WARMUP_STATUSES: RuntimeWarmupSessionStatus[] = ["creating", "ready"];
 
@@ -3295,6 +3432,11 @@ export function createRuntimeWarmupSession(
   return findRuntimeWarmupSessionById(id);
 }
 
+// Перевод прогрева в готовность — двухфазный переход с явным условием на
+// исходный статус (creating). Сравнение по статусу в WHERE делает переход
+// идемпотентным и защищает от гонки: если сессию успел отметить другой процесс
+// или её уже отменили, changes будет равно нулю и функция молча выйдет,
+// не выставив готовность поверх чужого решения.
 export function markRuntimeWarmupSessionReady(
   id: string,
   input: {
@@ -3329,20 +3471,34 @@ export function markRuntimeWarmupSessionReady(
       .run();
     if (readyUpdate.changes === 0) return;
 
+    // Готовая сессия может быть только одна на область (профиль, проект, ветка):
+    // смысл прогрева — держать разогретым один рабочий контекст. Поэтому при
+    // успехе все остальные активные сессии той же области закрываются одним
+    // UPDATE. Чужие области не трогаются: они прогреваются параллельно.
     tx.update(runtimeWarmupSessions)
       .set({ status: "cleared", updatedAt: now })
       .where(
         and(
+          // Область берётся из уже прочитанной строки, а не из аргументов:
+          // источник истины — то, что фактически лежит в БД.
           ...runtimeWarmupScopeConditions(existing),
           inArray(runtimeWarmupSessions.status, ACTIVE_RUNTIME_WARMUP_STATUSES),
+          // Себя исключаем: только что установленный статус ready не должен
+          // быть затёрт этим же вызовом.
           ne(runtimeWarmupSessions.id, id),
         ),
       )
       .run();
   });
+  // Строка перечитывается после транзакции, а не собирается в памяти: так
+  // вызывающий код получает ровно то состояние, которое зафиксировано в БД,
+  // включая поля, пересчитанные триггерами или значениями по умолчанию.
   return findRuntimeWarmupSessionById(id);
 }
 
+// Ошибка прогрева не является исключительной ситуацией: недоступный провайдер
+// — обычное дело, и задача должна продолжить работу без разогретой сессии.
+// Поэтому статус меняется без условий на текущее значение и без транзакции.
 export function markRuntimeWarmupSessionFailed(
   id: string,
   errorMessage: string,
@@ -3360,6 +3516,11 @@ export function markRuntimeWarmupSessionFailed(
   return findRuntimeWarmupSessionById(id);
 }
 
+// Принудительная очистка всей активной области. Нужна перед сменой конфигурации
+// профиля: старые разогретые сессии становятся несовместимыми с новой
+// конфигурацией, и их лучше закрыть явно, чем ждать истечения TTL.
+// Не завершённые сессии (creating) тоже закрываются — иначе они остались бы
+// висеть навсегда, если процесс прогрева упал.
 export function clearActiveRuntimeWarmupSessions(
   input: RuntimeWarmupScopeInput,
   updatedAt = new Date().toISOString(),
@@ -3377,6 +3538,10 @@ export function clearActiveRuntimeWarmupSessions(
   return result.changes;
 }
 
+// Пассивная уборка просроченных сессий по времени: expiresAt сравнивается со
+// строкой текущего момента, потому что ISO-8601 в UTC сортируется как текст.
+// Отдельный статус expired (в отличие от cleared) нужен для диагностики:
+// по нему видно, что сессия не была закрыта явно, а просто истекла.
 export function expireStaleRuntimeWarmupSessions(
   nowIso = new Date().toISOString(),
 ): number {
@@ -3393,6 +3558,10 @@ export function expireStaleRuntimeWarmupSessions(
   return result.changes;
 }
 
+// Поиск последней пригодной сессии для повторного использования. Условие
+// строгое: статус ready, заполненный sourceSessionId и expiresAt в будущем.
+// Сортировка по updatedAt с limit 1 выбирает самую свежую, если строк успело
+// накопиться несколько (например, из-за гонки двух прогревов).
 export function findActiveReadyRuntimeWarmupSession(
   input: RuntimeWarmupScopeInput,
   nowIso = new Date().toISOString(),
@@ -3413,17 +3582,30 @@ export function findActiveReadyRuntimeWarmupSession(
     .get();
 }
 
-// ── Runtime Profiles ──────────────────────────────────────────
+// ── Runtime-профили ──────────────────────────────────────────
 
+// Последнее событие расходов по каждому профилю. Задача — по списку профилей
+// получить ровно последнюю запись на каждый, а не всю историю: журнал растёт
+// неограниченно, и загружать его целиком ради карточки профиля нельзя.
+// Приём состоит из двух шагов: сначала CTE считает максимальное время события
+// на профиль, затем оно снова соединяется с журналом, чтобы вытащить остальные
+// колонки той же строки. Альтернатива (оконная функция row_number) дала бы тот же
+// результат, но CTE + max работает на всех версиях SQLite одинаково.
 function findLatestRuntimeProfileUsageByIds(
   profileIds: string[],
 ): Map<string, RuntimeProfileUsageState> {
+  // Дедупликация и отсев пустых id: список приходит от вызывающего кода и может
+  // содержать повторы после сборки из нескольких источников. Без этого шага
+  // в inArray попали бы лишние параметры, а на больших списках это упирается
+  // в лимит параметров SQLite.
   const uniqueProfileIds = Array.from(new Set(profileIds.filter((value) => value.length > 0)));
   if (uniqueProfileIds.length === 0) {
     return new Map();
   }
 
   const db = getDb();
+  // CTE с group by по профилю: isNotNull отсекает события без профиля (они не
+  // привязаны к конкретной конфигурации рантайма и для отчёта бесполезны).
   const latestUsageByProfile = db
     .select({
       profileId: usageEvents.profileId,
@@ -3434,6 +3616,10 @@ function findLatestRuntimeProfileUsageByIds(
     .groupBy(usageEvents.profileId)
     .as("latest_usage_by_profile");
 
+  // Соединение по паре (profileId, createdAt) восстанавливает полную строку
+  // события. Совпадение по времени уникально не гарантировано, поэтому
+  // результат может содержать несколько кандидатов на профиль — это нормально,
+  // конкретную строку выбирает код ниже.
   const rows = db
     .select({
       profileId: usageEvents.profileId,
@@ -3453,8 +3639,15 @@ function findLatestRuntimeProfileUsageByIds(
     )
     .all();
 
+  // Первая встреченная строка на профиль побеждает, остальные отбрасываются.
+  // При совпадении времени события выбор между кандидатами неразличим снаружи,
+  // поэтому дополнительная сортировка не имеет смысла — важно лишь получить
+  // по одному значению на профиль, чтобы карта не "мигала" между запросами.
   const usageByProfileId = new Map<string, RuntimeProfileUsageState>();
   for (const row of rows) {
+    // profileId в выборке типизирован как nullable, потому что колонка допускает
+    // null; для строк, попавших в CTE, он уже не пуст, но приведение типа
+    // сознательно не делается — проверка дешевле и защищает от изменения SQL.
     if (!row.profileId) continue;
     if (usageByProfileId.has(row.profileId)) continue;
     usageByProfileId.set(row.profileId, {
@@ -3930,6 +4123,11 @@ export function evaluateRuntimeLimitGate(
   };
 }
 
+// Разрешение профиля идёт по приоритетной цепочке: переопределение на задаче,
+// затем проектный профиль для конкретного режима, затем системное значение.
+// Функция не бросает исключений при отсутствии подходящего профиля: "ничего не
+// выбрано" — допустимый итог (source = "none"), а решение о том, считать ли это
+// ошибкой, принимает вызывающий код.
 export function resolveEffectiveRuntimeProfile(input: {
   taskId?: string;
   projectId?: string;
@@ -3941,8 +4139,8 @@ export function resolveEffectiveRuntimeProfile(input: {
   const projectId = input.projectId ?? task?.projectId;
   const project = projectId ? findProjectById(projectId) : undefined;
 
-  // Task-level override applies to all stages: if set, the entire task
-  // pipeline (plan, implement, review, chat) runs on the specified runtime.
+  // Переопределение рантайма на уровне задачи действует на все этапы: если оно задано,
+  // весь конвейер (планирование, реализация, ревью, чат) идёт на указанном рантайме.
   const taskRuntimeProfileId = task?.runtimeProfileId ?? null;
 
   const projectRuntimeProfileId = getProjectRuntimeProfileId(project, mode);
@@ -3957,8 +4155,16 @@ export function resolveEffectiveRuntimeProfile(input: {
     { source: "system_default", profileId: systemRuntimeProfileId },
   ];
 
+  // Накопленный список отказников нужен только для диагностики: он позволяет
+  // объяснить в логе, почему задача уехала на профиль более низкого приоритета.
+  // На выбор профиля он не влияет.
   const unavailableIds: string[] = [];
 
+  // Первый же валидный кандидат побеждает и сразу возвращается: цепочка не
+  // смотрит дальше, даже если следующий профиль "лучше". Отсев делается по
+  // enabled, потому что отключённый профиль остаётся в БД для истории, но
+  // запускать на нём задачи нельзя. Переопределение на задаче считается
+  // принудительным и поэтому не логируется как вынужденный откат.
   for (const candidate of candidates) {
     if (!candidate.profileId) continue;
     const profile = findRuntimeProfileById(candidate.profileId);
@@ -3980,6 +4186,9 @@ export function resolveEffectiveRuntimeProfile(input: {
       );
     }
 
+    // Событие расходов подтягивается только для выбранного профиля — одним
+    // запросом на один id. Массовая версия (resolveEffectiveRuntimeProfilesForTasks)
+    // нужна там, где профилей сразу много.
     return {
       source: candidate.source,
       profile: toRuntimeProfileResponse(
@@ -4001,7 +4210,7 @@ export function resolveEffectiveRuntimeProfile(input: {
   };
 }
 
-// ── Runtime Profile Resolution ─────────────────────────────────
+// ── Разрешение runtime-профилей ────────────────────────────────
 
 type RuntimeResolvableTask = Pick<TaskRow, "id" | "projectId" | "runtimeProfileId">;
 
@@ -4019,6 +4228,9 @@ export function resolveEffectiveRuntimeProfilesForTasks(
     return results;
   }
 
+  // Проекты и профили читаются пакетно до цикла, чтобы разрешение для сотни
+  // задач не превратилось в сотни запросов. Списки id дедуплицируются: одна и та же
+  // пара (профиль, проект) обычно повторяется у многих задач доски.
   const db = getDb();
   const projectIds = Array.from(new Set(taskRows.map((task) => task.projectId)));
   const projectRows =
@@ -4027,6 +4239,10 @@ export function resolveEffectiveRuntimeProfilesForTasks(
       : [];
   const projectById = new Map(projectRows.map((project) => [project.id, project]));
 
+  // Кандидаты считаются один раз и запоминаются по задаче: второй цикл ниже
+  // повторяет ту же цепочку приоритетов, но уже по загруженным в память
+  // строкам профилей, поэтому заново дергать getProjectRuntimeProfileId
+  // и пересобирать массив не нужно.
   const candidatesByTaskId = new Map<
     string,
     Array<{
@@ -4063,8 +4279,13 @@ export function resolveEffectiveRuntimeProfilesForTasks(
       ? db.select().from(runtimeProfiles).where(inArray(runtimeProfiles.id, uniqueProfileIds)).all()
       : [];
   const profileById = new Map(profileRows.map((profile) => [profile.id, profile]));
+  // Последние события расходов собираются одним CTE-запросом на весь список
+  // профилей — именно для этого написана пакетная версия выше.
   const usageByProfileId = findLatestRuntimeProfileUsageByIds(uniqueProfileIds);
 
+  // Счётчик откатов нужен для итогового debug-лога: по нему видно, сколько
+  // задач уехало на профиль более низкого приоритета из-за недоступных
+  // кандидатов. Сами сообщения об откате пишутся по одному на задачу.
   let fallbackLogCount = 0;
   for (const task of taskRows) {
     const project = projectById.get(task.projectId);
@@ -4108,6 +4329,9 @@ export function resolveEffectiveRuntimeProfilesForTasks(
       break;
     }
 
+    // Заполнитель для задач, у которых не нашлось ни одного валидного
+    // кандидата: карта обязана содержать запись на каждую входную задачу,
+    // чтобы вызывающий код не различал "нет в карте" и "нет профиля".
     if (!results.has(task.id)) {
       results.set(task.id, {
         source: "none",
@@ -4132,7 +4356,7 @@ export function resolveEffectiveRuntimeProfilesForTasks(
   return results;
 }
 
-// ── Chat Sessions ──────────────────────────────────────────────
+// ── Сессии чата ──────────────────────────────────────────────
 
 export function toChatSessionResponse(row: ChatSessionRow): ChatSession {
   return {
@@ -4154,7 +4378,7 @@ export function toChatMessageResponse(row: ChatMessageRow): ChatSessionMessage {
     try {
       attachments = JSON.parse(row.attachments) as ChatMessageAttachment[];
     } catch {
-      // ignore malformed JSON
+      // Повреждённый JSON: вложения молча считаются отсутствующими.
     }
   }
   return {
@@ -4287,7 +4511,7 @@ export function updateChatSessionTimestamp(id: string): void {
     .run();
 }
 
-// - Codex index repository (session read-model + limit overlays) -
+// - Репозиторий индекса Codex (read-model сессий + наложения лимитов) -
 
 export interface UpsertCodexSessionInput {
   sessionId: string;
@@ -4463,22 +4687,31 @@ export function buildCodexLimitHeadKey(input: {
   ]);
 }
 
-// SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999. Each row binds N columns,
-// so bulk writes must chunk to stay under the limit. Without chunking the
-// indexer warm-up crashes with "too many SQL variables" on any real
-// ~/.codex/sessions (thousands of rollouts).
-const CODEX_SESSION_UPSERT_BATCH = 50; // 14 cols × 50 = 700
-const CODEX_SESSION_FILE_UPSERT_BATCH = 70; // 11 cols × 70 = 770
-const CODEX_LIMIT_HEAD_UPSERT_BATCH = 70; // 12 cols × 70 = 840
-const CODEX_LIMIT_HISTORY_INSERT_BATCH = 90; // 10 cols × 90 = 900
-const CODEX_FILEPATH_IN_ARRAY_BATCH = 500; // single-column inArray
+// SQLite ограничивает число параметров в одном запросе (по умолчанию 999, константа
+// SQLITE_MAX_VARIABLE_NUMBER). Каждая строка занимает столько параметров, сколько у неё
+// колонок, поэтому массовые вставки разбиваются на пачки. Без этого прогрев индексатора
+// падал бы с ошибкой "too many SQL variables" на любом реальном ~/.codex/sessions.
+const CODEX_SESSION_UPSERT_BATCH = 50; // 14 колонок × 50 = 700
+const CODEX_SESSION_FILE_UPSERT_BATCH = 70; // 11 колонок × 70 = 770
+const CODEX_LIMIT_HEAD_UPSERT_BATCH = 70; // 12 колонок × 70 = 840
+const CODEX_LIMIT_HISTORY_INSERT_BATCH = 90; // 10 колонок × 90 = 900
+const CODEX_FILEPATH_IN_ARRAY_BATCH = 500; // одноколоночный inArray
 
+// Индексатор Codex присылает сессии пакетами, поэтому запись идёт не по одной
+// строке, а через upsert с опорой на естественный ключ sessionId. Так повторный
+// проход по тем же файлам не создаёт дубликатов и не требует предварительного
+// чтения существующих строк: решение insert-or-update принимает сам SQLite.
 export function upsertCodexSessions(rows: UpsertCodexSessionInput[]): number {
+  // Пустой пакет не является ошибкой: инкрементальный обход каталога регулярно
+  // не находит ничего нового, и такой вызов не должен доходить до БД.
   if (rows.length === 0) {
     log.debug({ requestedCount: 0 }, "Skipping codex session upsert (empty batch)");
     return 0;
   }
 
+  // Одно время на весь пакет: строки одного вызова не должны различаться
+  // метками создания и обновления, иначе сортировка по updatedAt перемешала бы
+  // записи, записанные одной операцией.
   const nowIso = new Date().toISOString();
   const values = rows.map((row) => ({
     sessionId: row.sessionId,
@@ -4497,6 +4730,10 @@ export function upsertCodexSessions(rows: UpsertCodexSessionInput[]): number {
     updatedAt: nowIso,
   }));
 
+  // Пакет режется на куски фиксированного размера: у SQLite есть жёсткий лимит
+  // на число параметров в одном выражении, а один пакет разворачивается в
+  // произведение строк на колонки. Размер подобран так, чтобы оставаться под
+  // лимитом с запасом (см. константу CODEX_SESSION_UPSERT_BATCH выше).
   let totalChanges = 0;
   for (let i = 0; i < values.length; i += CODEX_SESSION_UPSERT_BATCH) {
     const chunk = values.slice(i, i + CODEX_SESSION_UPSERT_BATCH);
@@ -4505,6 +4742,11 @@ export function upsertCodexSessions(rows: UpsertCodexSessionInput[]): number {
       .values(chunk)
       .onConflictDoUpdate({
         target: codexSessions.sessionId,
+        // excluded.* — это строка, которую мы только что пытались вставить.
+        // Ссылка на неё, а не на литеральные значения, позволяет описывать
+        // обновление один раз для всего пакета, без сборки отдельного SET
+        // на каждую строку. Значения в snake_case, потому что выражение
+        // исполняется уже внутри SQL, а не в TypeScript.
         set: {
           filePath: sql`excluded.file_path`,
           title: sql`excluded.title`,
@@ -4521,6 +4763,9 @@ export function upsertCodexSessions(rows: UpsertCodexSessionInput[]): number {
         },
       })
       .run();
+    // changes суммируются по всем кускам: вызывающий код использует это число
+    // как метрику прогресса индексации, поэтому оно должно отражать весь вызов,
+    // а не последний чанк.
     totalChanges += result.changes;
   }
 
@@ -4531,6 +4776,10 @@ export function upsertCodexSessions(rows: UpsertCodexSessionInput[]): number {
   return totalChanges;
 }
 
+// Индекс файлов сессий ведётся отдельно от индекса сессий, потому что файл и
+// логическая сессия — не одно и то же: один файл может быть перезаписан другой
+// сессией, а смещение разбора (parsedOffset) относится именно к файлу, а не к
+// сессии. Ключ здесь — путь к файлу.
 export function upsertCodexSessionFiles(rows: UpsertCodexSessionFileInput[]): number {
   if (rows.length === 0) {
     log.debug({ requestedCount: 0 }, "Skipping codex session-file upsert (empty batch)");
@@ -4560,6 +4809,9 @@ export function upsertCodexSessionFiles(rows: UpsertCodexSessionFileInput[]): nu
       .values(chunk)
       .onConflictDoUpdate({
         target: codexSessionFiles.filePath,
+        // importVersion входит в обновляемые поля намеренно: повышение версии
+        // разбора должно перезаписывать старую строку, чтобы записи, собранные
+        // прежним форматом, со временем переиндексировались.
         set: {
           sessionId: sql`excluded.session_id`,
           sizeBytes: sql`excluded.size_bytes`,
@@ -4583,21 +4835,35 @@ export function upsertCodexSessionFiles(rows: UpsertCodexSessionFileInput[]): nu
   return totalChanges;
 }
 
+// Отдаёт состояние всего индекса файлов без фильтров. Возвращаются только
+// метаданные строк (размер, mtime, смещение), но не содержимое сессий, поэтому
+// объём ответа определяется числом проиндексированных файлов, а не их тяжестью.
 export function listCodexSessionFileStates(): CodexSessionFileIndexRow[] {
   const rows = getDb()
     .select()
     .from(codexSessionFiles)
+    // Сначала недавно обновлённые: при ручном разборе состояния индекса интересны
+    // в первую очередь те файлы, которые менялись последними.
     .orderBy(desc(codexSessionFiles.updatedAt))
     .all();
   log.debug({ returnedCount: rows.length }, "Listed codex session-file index state rows");
   return rows;
 }
 
+// Пакетное чтение состояния по списку путей. Функция парная к
+// upsertCodexSessionFiles: индексатор сначала спрашивает, что уже известно о
+// найденных файлах, и только затем решает, какие из них разбирать.
+// Результат намеренно не упорядочен — вызывающий код сопоставляет строки с
+// входным списком путей сам, поэтому ORDER BY здесь был бы лишней работой.
 export function listCodexSessionFileStatesByPaths(filePaths: string[]): CodexSessionFileIndexRow[] {
   if (filePaths.length === 0) {
     return [];
   }
 
+  // IN-запрос тоже нарезается: у SQLite лимит считается по числу параметров
+  // (placeholder-ов), а inArray разворачивается ровно в такое число. Здесь
+  // режется только одно измерение, поэтому лимит куска выше, чем в upsert-ах,
+  // где параметров rows x cols.
   const all: CodexSessionFileIndexRow[] = [];
   for (let i = 0; i < filePaths.length; i += CODEX_FILEPATH_IN_ARRAY_BATCH) {
     const chunk = filePaths.slice(i, i + CODEX_FILEPATH_IN_ARRAY_BATCH);
@@ -4615,6 +4881,9 @@ export function listCodexSessionFileStatesByPaths(filePaths: string[]): CodexSes
   return all;
 }
 
+// Удаление идёт по filePath, а не по sessionId: индексатор обнаруживает
+// исчезновение именно файлов, и по ним же должна пропасть связанная сессия.
+// Нарезка на чанки нужна по той же причине, что и в чтении выше.
 export function deleteCodexSessionsByFilePaths(filePaths: string[]): number {
   if (filePaths.length === 0) {
     return 0;
@@ -4635,6 +4904,10 @@ export function deleteCodexSessionsByFilePaths(filePaths: string[]): number {
   return totalChanges;
 }
 
+// Удаление метаданных файла. Вызывается после удаления сессий: строки индекса
+// файлов ссылаются на сессии логически, и порядок операций оставлен за
+// вызывающим кодом, а не спрятан в транзакцию, чтобы большие пачки удалялись
+// чанками и не держали блокировку записи на всю операцию.
 export function deleteCodexSessionFilesByFilePaths(filePaths: string[]): number {
   if (filePaths.length === 0) {
     return 0;

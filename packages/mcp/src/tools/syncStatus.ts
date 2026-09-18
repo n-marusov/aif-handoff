@@ -59,8 +59,8 @@ export function register(server: McpServer, context: ToolContext): void {
         });
       }
 
-      // Guard: terminal statuses (done, verified) cannot be overwritten by sync.
-      // Only human events (request_changes, approve_done) can transition out of these.
+      // Защита: терминальные статусы (done, verified) не могут быть перезаписаны синхронизацией.
+      // Только человеческие события (request_changes, approve_done) могут вывести из них.
       if (row.status === "done" || row.status === "accepted") {
         log.warn(
           {
@@ -87,7 +87,7 @@ export function register(server: McpServer, context: ToolContext): void {
         };
       }
 
-      // If status is already the same, no-op
+      // Если статус уже тот же — ничего не делаем
       if (row.status === args.newStatus) {
         log.info(
           { taskId: args.taskId, status: args.newStatus, direction: args.direction },
@@ -108,7 +108,7 @@ export function register(server: McpServer, context: ToolContext): void {
         };
       }
 
-      // Resolve conflict using last-write-wins
+      // Разрешает конфликт по принципу last-write-wins
       const resolution = resolveConflict({
         sourceTimestamp: args.sourceTimestamp,
         targetTimestamp: row.updatedAt,
@@ -116,7 +116,7 @@ export function register(server: McpServer, context: ToolContext): void {
       });
 
       if (resolution.conflict) {
-        // Target is newer — return conflict info without modifying
+        // Цель новее — вернуть информацию о конфликте без изменений
         log.warn(
           {
             taskId: args.taskId,
@@ -145,7 +145,7 @@ export function register(server: McpServer, context: ToolContext): void {
       }
 
       try {
-        // Source is newer — apply the status change
+        // Источник новее — применить смену статуса
         const nowIso = new Date().toISOString();
         const transition = transitionTaskStatus({
           taskId: args.taskId,

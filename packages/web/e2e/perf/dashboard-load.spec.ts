@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { PERF_BUDGETS, readNavigationTiming, readWebVitals, recordNetwork } from "./utils";
 
-// This spec exercises the cold dashboard render: open `/`, wait for the
-// dashboard shell to finish its initial project load, then snapshot timing +
-// network. "Cold" here means the browser has no HTTP cache for bundles — the
-// API still uses its server-side cache, so early runs right after starting dev
-// will hit worst-case latencies.
+// Этот тест проверяет холодный рендер дашборда: открывает `/`, ждёт завершения
+// начальной загрузки проектов и фиксирует метрики времени/сети. "Холодный"
+// означает отсутствие HTTP-кеша бандлов в браузере; серверный кеш API при этом
+// остаётся активным, поэтому первые прогоны после старта dev дают худшие задержки.
 test.describe("dashboard cold load", () => {
   test("renders kanban shell within LCP/DOM-ready budgets", async ({ page, context }) => {
     await context.clearCookies();
@@ -15,10 +14,9 @@ test.describe("dashboard cold load", () => {
     const response = await nav;
     expect(response?.status() ?? 500).toBeLessThan(400);
 
-    // Wait until the app resolves the initial projects request and renders the
-    // stable dashboard shell. The perf dev DB is allowed to be empty, in which
-    // case the root view renders the empty-projects state instead of kanban
-    // columns.
+    // Ждём, пока приложение завершит первый запрос проектов и отрисует
+    // стабильное состояние дашборда. База perf-окружения может быть пустой —
+    // тогда показывается состояние без проектов вместо колонок канбана.
     await page.waitForSelector(
       "text=/Backlog|Planning|Implementing|Projects overview|No projects yet/i",
       {

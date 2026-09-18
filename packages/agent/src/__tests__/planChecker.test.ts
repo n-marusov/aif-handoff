@@ -70,7 +70,7 @@ describe("hasChecklistItems", () => {
 describe("countConvertibleBullets", () => {
   it("counts plain bullets that could become checkboxes", () => {
     const plan = "- [ ] Already checkbox\n- Plain bullet item\n- Another plain item\n- ab";
-    expect(countConvertibleBullets(plan)).toBe(2); // "ab" is too short (<=3)
+    expect(countConvertibleBullets(plan)).toBe(2); // "ab" слишком короткая (<=3)
   });
 
   it("returns 0 when all bullets are checkboxes", () => {
@@ -216,7 +216,7 @@ describe("runPlanChecker", () => {
     └── PLAN.md`),
     );
 
-    // Plan has no bullets at all — pure prose — so local fallback can't help
+    // В плане совсем нет буллетов — чистая проза — локальный резервный вариант не поможет
     testDb.current
       .insert(tasks)
       .values({
@@ -244,7 +244,7 @@ describe("runPlanChecker", () => {
       ),
     );
 
-    // Plan with prose-only content so it can't be short-circuited
+    // План только из прозы — раннее завершение не сработает
     testDb.current
       .insert(tasks)
       .values({

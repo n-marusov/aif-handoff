@@ -1,3 +1,31 @@
+/**
+ * Codex-транспорт рантайма поверх официального @openai/codex-sdk.
+ *
+ * SDK работает как «тонкая обёртка» над локальным Codex CLI: конструктор Codex
+ * поднимает дочерний процесс, а весь ввод-вывод идёт через типизированный поток
+ * ThreadEvent. Поэтому транспорт не трогает сеть и авторизацию напрямую - он
+ * только собирает опции, скармливает их SDK и переводит события SDK в
+ * канонические RuntimeEvent, которые понимает весь остальной конвейер.
+ *
+ * Три осознанные опоры модуля:
+ * 1) Консервативное окружение. Дочернему процессу передаётся не process.env
+ *    целиком, а курируемый allowlist (см. buildCuratedEnv): ключевые переменные
+ *    вроде OPENAI_API_KEY нарушают OAuth-сессию `codex login`, поэтому по
+ *    умолчанию они вырезаются и возвращаются только при явном opt-in профиля.
+ * 2) Детерминированные дефолты разрешений. approvalPolicy/sandboxMode
+ *    нормализуются здесь (см. ./permissions.ts), а не в ~/.codex/config.toml
+ *    пользователя - иначе поведение задачи зависело бы от хоста.
+ * 3) Наблюдаемость лимитов. Во время прогона периодический опрос rollout-файла
+ *    сессии (sessions.ts) рождает события runtime:limit с дедупликацией по
+ *    подписи снимка, чтобы UI видел расход токенов, не читая файлы на каждом
+ *    ивенте.
+ *
+ * Ошибки SDK-потока не «разбираются по тексту»: каждый сбой заворачивается в
+ * CodexRuntimeAdapterError со структурными category/adapterCode (errors.ts), и
+ * потребители ветвятся только по этим полям - см. правило проекта о Structured
+ * Error Classification.
+ */
+
 import {
   Codex,
   type CodexOptions,
@@ -36,6 +64,10 @@ import {
   resolveModelEffortOption,
 } from "../../modelEffort.js";
 
+// Минимальный контракт логгера, навязываемый адаптеру: все методы опциональны,
+// потому что вызывающий код (api/agent) может передать любой partial-логгер или
+// pino-совместимый объект. Все обращения идут через `?.`, поэтому отсутствие
+// метода молча допустимо - адаптер не обязан тащить полную реализацию.
 export interface CodexSdkLogger {
   debug?(context: Record<string, unknown>, message: string): void;
   info?(context: Record<string, unknown>, message: string): void;
@@ -43,22 +75,36 @@ export interface CodexSdkLogger {
   error?(context: Record<string, unknown>, message: string): void;
 }
 
+// Опрос rollout-файла сессии во время прогона: частота ограничена, иначе на
+// длинном стриме снимок лимитов перечитывался бы на каждом событии SDK.
 const CODEX_SESSION_LIMIT_POLL_INTERVAL_MS = 1_000;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Хелперы
 // ---------------------------------------------------------------------------
 
+// Narrowing-хелпер для неструктурированных payload'ов: options/hooks/execution у
+// задачи приходят из JSON и могут быть чем угодно. Массив - не объект, поэтому
+// Array.isArray исключён явно; на входе не-объекта возвращается пустой объект,
+// что снимает с вызывающего кода обязательные проверки на null.
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
+// Строгое чтение опциональной строки: пустая строка и строка из пробелов
+// считаются отсутствием значения (null), а не валидной опцией. Это ключ к цепочкам
+// `readString(a) ?? readString(b) ?? default` - пустая переменная окружения или
+// незаполненное поле профиля не должны вытеснять значение из следующего источника.
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+// Однострочное представление произвольного аргумента инструмента для логов и
+// onToolUse: сериализация не должна уронить прогон, поэтому JSON.stringify
+// обёрнут в try/catch (циклические ссылки выбрасывают TypeError), а итог
+// усекается с многоточием - длинные diff/выводы забивают ленту событий.
 function formatToolDetail(value: unknown, maxLength = 200): string {
   if (value == null) return "";
 
@@ -78,6 +124,12 @@ function formatToolDetail(value: unknown, maxLength = 200): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+// allowlist переменных окружения для дочернего процесса Codex. Инверсия
+// «чёрного списка» сознательна: process.env в CI/dev-шелле содержит секреты
+// подрядчика, мусорные npm_*-переменные и locale-наследство, а Codex CLI нужен
+// лишь узкий набор: его собственные OPENAI_*/CODEX_* ключи, HOME/PATH для
+// поиска config.toml и прокси-переменные для сети в корпоративных средах.
+// Новой переменной по умолчанию нет доступа - это цена предсказуемости.
 const ALLOWED_ENV_PREFIXES = [
   "OPENAI_",
   "CODEX_",
@@ -100,14 +152,20 @@ const ALLOWED_ENV_PREFIXES = [
 ];
 
 /**
- * Env keys that must NOT leak into the Codex SDK child by default. Local Codex
- * SDK runs delegate auth to `codex login` (OAuth); a placeholder/unrelated
- * `OPENAI_API_KEY=sk-000` or `OPENAI_BASE_URL` in `.env` would otherwise force
- * the SDK into API-key auth and break OAuth-backed chat. They are forwarded
- * only when API-key auth is explicitly opted into via profile `apiKeyEnvVar`.
+ * Env-ключи, которые по умолчанию НЕ должны утекать в дочерний процесс Codex SDK.
+ * Локальные запуски делегируют авторизацию `codex login` (OAuth); placeholder/посторонние
+ * `OPENAI_API_KEY=sk-000` или `OPENAI_BASE_URL` в `.env` иначе вынудили бы SDK
+ * идти по API-key авторизации и сломали OAuth-чат. Пробрасываются, только когда
+ * API-key авторизация явно включена профилем через `apiKeyEnvVar`.
  */
 const BLOCKED_ENV_KEYS = new Set(["OPENAI_API_KEY", "OPENAI_BASE_URL"]);
 
+// Курирование env — единственный слой, который решает, что увидит дочерний
+// процесс. Порядок проверок важен: явный apiKeyEnvVar с opt-in обрабатывается до
+// BLOCKED_ENV_KEYS, иначе «разрешённый» ключ был бы вырезан собственным блоком.
+// Строгая точка: значение ключа из процесса читается один раз здесь, и больше
+// нигде в адаптере — решение «пробрасывать ли API-ключ» не может разойтись
+// между вызовами.
 function buildCuratedEnv(
   apiKeyEnvVar: string,
   executionEnv?: Record<string, string>,
@@ -122,8 +180,11 @@ function buildCuratedEnv(
   let forwardedCount = 0;
   let filteredCount = 0;
   const droppedDisallowedPrefixKeys = new Set<string>();
+  // Учёт пропускается молча: пустое значение — не секрет и не конфигурация.
   for (const [key, value] of Object.entries(process.env)) {
     if (value == null) continue;
+    // Явный opt-in профиля (apiKeyEnvVar) имеет приоритет над блоком: профиль сам
+    // решил, что это API-key-режим, и тогда ключ обязан дойти до SDK.
     if (key === apiKeyEnvVar && allowApiKeyEnvVar) {
       env[key] = value;
       forwardedCount += 1;
@@ -139,6 +200,9 @@ function buildCuratedEnv(
     ) {
       env[key] = value;
       forwardedCount += 1;
+      // npm_* отдельно собираются в «сброшенные» списки: их генерирует сам npm при
+      // запуске скриптов, они не несут смысла для Codex, но их объём маскирует
+      // настоящие конфигурационные ключи в диагностиках.
     } else {
       filteredCount += 1;
       if (key.startsWith("npm_")) {
@@ -146,6 +210,9 @@ function buildCuratedEnv(
       }
     }
   }
+  // executionEnv (пер-задачные переменные из профиля) накладывается последним и
+  // выигрывает у унаследованных: явное намерение вызывающего важнее окружения
+  // процесса, но это же значит, что им можно переопределить любой allowlist-ключ.
   Object.assign(env, executionEnv ?? {});
   return {
     env,
@@ -156,12 +223,19 @@ function buildCuratedEnv(
 }
 
 // ---------------------------------------------------------------------------
-// SDK option builders
+// Сборщики опций SDK
 // ---------------------------------------------------------------------------
 
+// Сборка CodexOptions — «корня» всего SDK-подключения: env + способ авторизации
+// + путь к CLI + config-overrides. Всё читается из input.options (профиль рантайма)
+// с фолбэком в переменные окружения, причём профиль всегда выигрывает: он —
+// явное решение оператора, а окружение — лишь удобное наследование.
 function buildCodexOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): CodexOptions {
   const options = asRecord(input.options);
   const execution = input.execution;
+  // allowApiKeyEnvVar выводится из явности apiKeyEnvVar, а не из его значения:
+  // «профиль назвал переменную» и «система случайно содержит OPENAI_API_KEY» —
+  // принципиально разные сигналы, и второй не должен включать API-key-авторизацию.
   const explicitApiKeyEnvVar = readString(options.apiKeyEnvVar);
   const apiKeyEnvVar = explicitApiKeyEnvVar ?? "OPENAI_API_KEY";
   const curatedEnv = buildCuratedEnv(
@@ -179,6 +253,9 @@ function buildCodexOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Cod
     },
     "[runtime:codex] Built Codex SDK environment from curated allowlist",
   );
+  // Отдельный warn только для «странного» случая (сброшены npm_*-префиксы):
+  // штатная фильтрация сотен переменных — норма, и тонуть в ней каждое
+  // соединение не должна. Срез до 10 ключей защищает лог от разрастания.
   if (curatedEnv.droppedDisallowedPrefixKeys.length > 0) {
     logger?.warn?.(
       {
@@ -194,11 +271,14 @@ function buildCodexOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Cod
     env: curatedEnv.env,
   };
 
-  // API key — only passed if explicitly provided via profile options or an
-  // explicitly configured apiKeyEnvVar. Otherwise the SDK delegates auth to the
-  // CLI which manages its own credentials via `codex login`, same as Claude SDK
-  // uses `claude /login`. An ambient OPENAI_API_KEY is intentionally ignored so
-  // a placeholder key cannot hijack an OAuth-backed session.
+  // API-ключ — передаётся только если явно задан опциями профиля или настроенным
+  // apiKeyEnvVar. Иначе SDK делегирует авторизацию CLI, который сам ведёт
+  // учётные данные через `codex login`, как Claude SDK использует `claude /login`.
+  // Внешний OPENAI_API_KEY намеренно игнорируется, чтобы placeholder-ключ не
+  // перехватил OAuth-сессию.
+  // Ключ передаётся SDK только когда он реально найден; отсутствие ключа —
+  // полноценный сценарий (OAuth через codex login), поэтому ветка else тут не
+  // ошибка, а норма. readString уже отфильтровал пустые строки-заглушки.
   const apiKey =
     readString(options.apiKey) ??
     (explicitApiKeyEnvVar ? readString(process.env[apiKeyEnvVar]) : null);
@@ -206,19 +286,31 @@ function buildCodexOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Cod
     codexOpts.apiKey = apiKey;
   }
 
-  // Base URL override. OPENAI_BASE_URL is intentionally not inferred here:
-  // Codex OAuth-backed SDK runs should use Codex's own backend unless a profile
-  // baseUrl or CODEX_BASE_URL explicitly opts into another endpoint.
+  // Override base URL. OPENAI_BASE_URL намеренно не выводится здесь:
+  // Codex-запуски SDK на OAuth должны использовать собственный бэкенд Codex, если
+  // profile baseUrl или CODEX_BASE_URL явно не выбирают другой эндпоинт.
+  // Фоллбэк именно в CODEX_BASE_URL, а не в OPENAI_BASE_URL: последний живёт в
+  // .env ради других инструментов OpenAI-экосистемы, и его молчаливое отражение
+  // здесь перенаправило бы OAuth-сессию (вместе с токенами) на чужой endpoint.
+  // Смена backend'а — осознанное решение профиля (options.baseUrl), не побочный
+  // эффект окружения.
   const baseUrl = readString(options.baseUrl) ?? readString(process.env.CODEX_BASE_URL);
   if (baseUrl) {
     codexOpts.baseUrl = baseUrl;
   }
 
-  // CLI path override
+  // Переопределение пути CLI
+  // Цепочка фолбэков с литералом "codex" в конце: без пути SDK не сможет поднять
+  // дочерний процесс, и «codex в PATH» — единственная честная глобальная
+  // догадка. Пустая строка в CODEX_CLI_PATH не сломает её: readString вернёт
+  // null, и цепочка провалится к дефолту, а не к битому пути.
   codexOpts.codexPathOverride =
     readString(options.codexCliPath) ?? readString(process.env.CODEX_CLI_PATH) ?? "codex";
 
-  // Codex CLI config overrides — cast to satisfy CodexConfigObject (non-exported recursive type)
+  // Config-overrides Codex CLI — каст ради CodexConfigObject (нелокальный рекурсивный тип)
+  // asRecord здесь гарантирует non-null object (пустой объект вместо null при
+  // мусорном входе), поэтому каст не «срезает» nullable — он лишь примиряет
+  // структурный тип с рекурсивным CodexConfigObject, который SDK не экспортирует.
   const configOverride = asRecord(options.codexConfig);
   if (Object.keys(configOverride).length > 0) {
     codexOpts.config = configOverride as CodexOptions["config"];
@@ -227,6 +319,10 @@ function buildCodexOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Cod
   return codexOpts;
 }
 
+// ThreadOptions — настройки одной сессии (ветки разговора) внутри Codex: рабочая
+// директория, модель, разрешения. hooks — второй, более старый источник значений:
+// API-слой исторически прокидывал сюда разрешения вместо profile options, и
+// адаптер продолжает это принимать (options выигрывает при конфликте).
 function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): ThreadOptions {
   const cwd = input.cwd ?? input.projectRoot;
   const options = asRecord(input.options);
@@ -239,20 +335,24 @@ function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Th
     threadOpts.workingDirectory = cwd;
   }
 
-  // Model from input or profile
+  // Модель из input или профиля
   if (input.model) {
     threadOpts.model = input.model;
   }
 
-  // Resolve effective approval policy and sandbox mode with a three-layer
-  // precedence: explicit profile options > bypass defaults (when
-  // execution.bypassPermissions=true) > stable non-bypass defaults.
+  // Эффективные approval policy и sandbox mode с трёхслойным приоритетом:
+  // явные опции профиля > дефолты bypass (при execution.bypassPermissions=true) >
+  // стабильные не-bypass дефолты.
   //
-  // The non-bypass defaults (`on-request` + `workspace-write`) keep behaviour
-  // stable across hosts regardless of the user's ~/.codex/config.toml. Prior
-  // to the bypass-permissions refactor these defaults were set by a
-  // Codex-specific hook factory in the API layer; the logic now lives inside
-  // the adapter so api/agent/runtime all see the same contract.
+  // Не-bypass дефолты (`on-request` + `workspace-write`) держат поведение
+  // стабильным на всех хостах независимо от ~/.codex/config.toml пользователя. До
+  // рефакторинга bypass-permissions эти дефолты задавала Codex-специфичная
+  // фабрика хуков в слое api; теперь логика внутри адаптера, и api/agent/runtime
+  // видят один контракт.
+  // Разрешения нормализуются, а не валидируются броском: опечатка в профиле не
+  // должна ронять прогон — значение уходит в null, логгируется warn, и дальше
+  // срабатывает безопасный дефолт. Потеря на строгости компенсируется тем, что
+  // источник значения виден в warn-логе (warnOnInvalidCodexPermissionOverride).
   const rawApprovalOption = readString(options.approvalPolicy);
   const rawApprovalHook = readString(hooks.approvalPolicy);
   const explicitApproval = rawApprovalOption ?? rawApprovalHook;
@@ -274,11 +374,17 @@ function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Th
     threadOpts.approvalPolicy = "on-request";
   }
 
-  // Skip git repo check if explicitly requested
+  // Пропуск проверки git-репозитория, если явно запрошен
+  // Строгое === true (а не truthy): значение может прийти из JSON как строка
+  // "true"/"false", и случайная строка не должна молча отключать проверку репозитория.
   if (options.skipGitRepoCheck === true || hooks.skipGitRepoCheck === true) {
     threadOpts.skipGitRepoCheck = true;
   }
 
+  // Зеркало approval-ветки с тем же контрактом: без нормализованного значения
+  // дефолт зависит от bypassPermissions. sandbox — не «вежливый совет», а реальный
+  // ОС-уровень изоляции дочернего процесса, поэтому danger-full-access включается
+  // только по явному флагу байпаса, никогда — по умолчанию.
   const rawSandboxOption = readString(options.sandboxMode);
   const rawSandboxHook = readString(hooks.sandboxMode);
   const explicitSandbox = rawSandboxOption ?? rawSandboxHook;
@@ -300,6 +406,10 @@ function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Th
     threadOpts.sandboxMode = "workspace-write";
   }
 
+  // Проверяется именно typeof === "boolean", а не truthiness: явный false —
+  // осознанный запрет сети, и его нельзя смешивать с «не задано» (тогда решение
+  // остаётся за самим CLI). Если схлопнуть в `options.networkAccessEnabled ?? ...`,
+  // ложь из options провалилась бы к hooks и была бы случайно переопределена.
   const networkAccessEnabled =
     typeof options.networkAccessEnabled === "boolean"
       ? options.networkAccessEnabled
@@ -310,7 +420,10 @@ function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Th
     threadOpts.networkAccessEnabled = networkAccessEnabled;
   }
 
-  // Reasoning effort
+  // Уровень reasoning-effort
+  // Если options не задал effort, собирается гибрид: поля из options + значение
+  // из hooks. Это нужно потому, что resolveModelEffortOption принимает один
+  // объект-источник, а приоритет «options выше hooks» нужно сохранить.
   const effortOptions =
     options.modelReasoningEffort == null
       ? { ...options, modelReasoningEffort: hooks.modelReasoningEffort }
@@ -320,12 +433,20 @@ function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Th
     "modelReasoningEffort",
     CODEX_MODEL_EFFORT_LEVELS,
   );
+  // Ветка Reflect.set — осознанный escape hatch: свежие уровни effort (например
+  // новые значения из обновлённого CLI) могут отсутствовать в union-типе
+  // ModelReasoningEffort, зашитом в .d.ts SDK. На уровне протокола это просто
+  // строка, поэтому неизвестный, но валидный уровень проходит в рантайме без
+  // падения компиляции — вместо того чтобы каждый раз патчить зависимости.
   if (isModelEffortLevel<ModelReasoningEffort>(effort, CODEX_MODEL_EFFORT_LEVELS)) {
     threadOpts.modelReasoningEffort = effort;
   } else if (effort) {
     Reflect.set(threadOpts, "modelReasoningEffort", effort);
   }
 
+  // Кто победил в четырёхслойной цепочке приоритетов (options > hooks > bypass >
+  // default) — иначе невоспроизводимо: при жалобе «агент пишет вне workspace»
+  // диагностика начинается с того, откуда прилетело значение sandbox.
   logger?.debug?.(
     {
       runtimeId: input.runtimeId,
@@ -356,6 +477,10 @@ function buildThreadOptions(input: RuntimeRunInput, logger?: CodexSdkLogger): Th
   return threadOpts;
 }
 
+// TurnOptions — настройки одного хода (запроса), в отличие от thread-настроек
+// всей сессии. outputSchema включает структурированный ответ (JSON-Schema), а
+// signal пробрасывает отмену: без него abort() вызывающего не прервал бы активный
+// ход, и задача «висела» бы до естественного завершения.
 function buildTurnOptions(execution?: RuntimeExecutionIntent): TurnOptions {
   const turnOpts: TurnOptions = {};
 
@@ -371,14 +496,21 @@ function buildTurnOptions(execution?: RuntimeExecutionIntent): TurnOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Usage normalization
+// Нормализация usage
 // ---------------------------------------------------------------------------
 
+// Единая форма учёта для всех транспортов Codex: SDK отдаёт snake_case с null'
+// полями, потребители ждут camelCase с числами. Нулевой результат — не «ноль
+// израсходовано», а «метрик нет»: их не за чем нести в UI, где нули выглядят как
+// реальные показания счётчика.
 function normalizeUsage(usage: Usage | null): RuntimeUsage | null {
   if (!usage) return null;
 
   const inputTokens = usage.input_tokens ?? 0;
   const outputTokens = usage.output_tokens ?? 0;
+  // total считается как сумма, а не берётся из total_tokens провайдера: у Codex
+  // reasoning-токены учтены внутри output, и чужая «итоговая» цифра могла бы
+  // расходиться с суммой видимых полей — лучше честная арифметика, чем магия.
   const totalTokens = inputTokens + outputTokens;
 
   if (inputTokens === 0 && outputTokens === 0) return null;
@@ -391,9 +523,13 @@ function normalizeUsage(usage: Usage | null): RuntimeUsage | null {
 }
 
 // ---------------------------------------------------------------------------
-// Item → RuntimeEvent / callback mapping
+// Маппинг item → RuntimeEvent / колбэк
 // ---------------------------------------------------------------------------
 
+// Инструменты Codex — типизированные item'ы (команда, правка файла, MCP-вызов),
+// а не «tool_use»-блоки как у Claude. Здесь они приводятся к привычному формату
+// (имя + краткая деталь), чтобы UI рисовал один список инструментов для всех
+// рантаймов. Возвращаемый null — сигнал «это не инструмент», а не ошибка.
 function itemToToolUseSummary(item: ThreadItem): { toolName: string; detail: string } | null {
   switch (item.type) {
     case "command_execution":
@@ -403,6 +539,8 @@ function itemToToolUseSummary(item: ThreadItem): { toolName: string; detail: str
         toolName: "FileChange",
         detail: formatToolDetail(item.changes.map((c) => `${c.kind} ${c.path}`).join(", ")),
       };
+    // Префикс MCP: в имени остаётся сервер — у разных серверов бывают
+    // одноимённые инструменты, и без него события слились бы в один вызов.
     case "mcp_tool_call":
       return {
         toolName: `MCP:${item.server}/${item.tool}`,
@@ -415,6 +553,11 @@ function itemToToolUseSummary(item: ThreadItem): { toolName: string; detail: str
   }
 }
 
+// Переводчик потока ThreadEvent в канонический RuntimeEvent — точка, где
+// специфика Codex перестаёт быть заметна остальной системе. Возвращаемый null
+// означает «это событие нас не интересует» (item.started и т.п.), а не ошибку:
+// стрим намеренно фильтруется, иначе потребители утонули бы в промежуточных
+// состояниях каждого item.
 function threadEventToRuntimeEvent(event: ThreadEvent): RuntimeEvent | null {
   const now = new Date().toISOString();
 
@@ -436,6 +579,8 @@ function threadEventToRuntimeEvent(event: ThreadEvent): RuntimeEvent | null {
         message: "Turn started",
       };
 
+    // turn.completed трактуется как result:success: в Codex-модели завершённый
+    // ход = успешный ответ; фатальные сбои приходят отдельным turn.failed ниже.
     case "turn.completed":
       return {
         type: "result:success",
@@ -456,6 +601,10 @@ function threadEventToRuntimeEvent(event: ThreadEvent): RuntimeEvent | null {
         message: event.error?.message ?? "Turn failed",
       };
 
+    // usage здесь плоский (inputTokens/outputTokens), тогда как итоговый
+    // RuntimeRunResult.usage проходит normalizeUsage: событие — для живого
+    // наблюдения, result.usage — для отчётности, и дублировать трансформации
+    // в двух местах дороже, чем держать их разными.
     case "item.completed": {
       const item = event.item;
       if (item.type === "agent_message") {
@@ -496,11 +645,18 @@ function threadEventToRuntimeEvent(event: ThreadEvent): RuntimeEvent | null {
         message: event.message,
       };
 
+    // default-ветка — не ленивость, а контракт: SDK добавит новые типы событий,
+    // и неизвестные должны тихо игнорироваться, а не ронять прогон: частичная
+    // потеря стрима лучше полной остановки работы из-за незнакомой строки.
     default:
       return null;
   }
 }
 
+// Дедуп по «подписи» снимка: JSON-канонизация всего snapshot'а, а не сравнение
+// отдельных полей — лимиты меняются пакетно, и подписывать надо состояние целиком.
+// Сравнение именно по содержимому, а не по времени: второй вызов с тем же
+// снимком не должен плодить повторные события в ленте.
 function hasRuntimeLimitSnapshotSignature(
   events: RuntimeEvent[] | null | undefined,
   signature: string,
@@ -515,7 +671,15 @@ function hasRuntimeLimitSnapshotSignature(
   );
 }
 
+// Финальная страховка: гарантирует, что в events итогового результата лёг
+// актуальный снимок лимитов, даже если потоковый наблюдатель его не поймал
+// (например, sessionId стал известен только после выхода из цикла). Функция
+// чистая: вместо мутации возвращает новый result, чтобы вызывающий мог
+// безопасно работать с предыдущей ссылкой на объект.
 async function appendCodexSessionLimitEvent(input: RuntimeRunInput, result: RuntimeRunResult) {
+  // Снимок читается из rollout-файла сессии на диске — без sessionId искать негде,
+  // поэтому отсутствие идентификатора означает «лимитов не видно», а не «лимитов
+  // нет».
   const sessionId = result.sessionId ?? null;
   if (!sessionId) {
     return result;
@@ -546,11 +710,19 @@ async function appendCodexSessionLimitEvent(input: RuntimeRunInput, result: Runt
   };
 }
 
+// Состояние потокового наблюдателя живёт в рамках одного прогона (создаётся в
+// runCodexSdkAttempt): «уже отправляли этот снимок» — факт одной сессии, а не
+// процесса; разделение по прогонам исключает перенос устаревших подписей.
 interface CodexSessionLimitObserverState {
   lastCheckedAtMs: number;
   lastSignature: string | null;
 }
 
+// Потоковый наблюдатель лимитов: в отличие от append-страховки, он мутит
+// runtimeEvents на месте и уведомляет onEvent — цель «показать расход токенов
+// живьём», а не обогатить финальный результат. Параметр-объект, а не
+// позиционные аргументы: полей много, половина опциональна, и на месте вызова
+// важна читаемость.
 async function maybeEmitCodexSessionLimitEvent(input: {
   runtimeInput: RuntimeRunInput;
   sessionId: string | null;
@@ -564,6 +736,10 @@ async function maybeEmitCodexSessionLimitEvent(input: {
     return;
   }
 
+  // Троттлинг по «последняя проверка была» (а не «первая»): условие > 0 оставляет
+  // первый вызов непроверенным — событие уходит сразу, как только появились данные,
+  // а уже затем включается интервал. force используется в финальной точке прогона,
+  // где ожидание интервала бессмысленно — стрим уже закрыт.
   const nowMs = Date.now();
   if (
     input.force !== true &&
@@ -606,9 +782,12 @@ async function maybeEmitCodexSessionLimitEvent(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Main SDK execution
+// Основное исполнение через SDK
 // ---------------------------------------------------------------------------
 
+// Одна попытка исполнения без retry-логики — она намеренно отделена от
+// runCodexSdk: ретраить можно только «не стартнувший» прогон, а это решение
+// знает только обёртка сверху, где виден тип ошибки.
 async function runCodexSdkAttempt(
   input: RuntimeRunInput,
   logger?: CodexSdkLogger,
@@ -620,22 +799,32 @@ async function runCodexSdkAttempt(
 
   const codex = new Codex(codexOpts);
 
+  // Резюме против новой ветки: resumeThread перестраивает историю из rollout-
+  // файла на диске, поэтому sessionId должен существовать — без него молча
+  // стартует новая ветка (проверка через && обеим условиям), и вызывающий не
+  // получит неожиданного «продолжения пустоты».
   const thread =
     input.resume && input.sessionId
       ? codex.resumeThread(input.sessionId, threadOpts)
       : codex.startThread(threadOpts);
 
-  // The Codex SDK does not expose a dedicated system-prompt slot on
-  // ThreadOptions/TurnOptions, so `execution.systemPromptAppend` (used by the
-  // API transport via a real system message) is prepended to the user prompt
-  // instead. This keeps the registry's language-directive injection effective
-  // across every Codex transport — see packages/runtime/src/registry.ts.
+  // У Codex SDK нет отдельного слота system prompt в ThreadOptions/TurnOptions,
+  // поэтому `execution.systemPromptAppend` (в API-транспорте — настоящее системное
+  // сообщение) пристыковывается к пользовательскому промпту. Так инъекция
+  // языковой директивы реестра работает на всех Codex-транспортах — см.
+  // packages/runtime/src/registry.ts.
   const systemAppend = execution?.systemPromptAppend?.trim();
   const composedPrompt = systemAppend ? `${systemAppend}\n\n${input.prompt}` : input.prompt;
 
   const { events } = await thread.runStreamed(composedPrompt, turnOpts);
 
-  // Wrap event stream with shared timeout utilities
+  // Оборачивает поток событий общими утилитами таймаутов
+  // Явный вызов Symbol.asyncIterator: withStreamTimeouts забирает итератор в
+  // единоличное потребление. Асинхронный итератор Codex — однопроходный, и
+  // «случайно» обойти его дважды (for await по events и по обёртке) нельзя —
+  // второй потребитель получил бы пустой стрим.
+  // Фолбэк AbortController обязателен: утилиты таймаутов сами прерывают стрим,
+  // и без собственного контроллера они не смогли бы закрыть зависший поток.
   const abort = execution?.abortController ?? new AbortController();
   const wrappedEvents = withStreamTimeouts(
     events[Symbol.asyncIterator](),
@@ -646,6 +835,9 @@ async function runCodexSdkAttempt(
     abort,
   );
 
+  // outputText копится из завершённых agent_message: Codex не отдаёт дельты
+  // (в отличие от API-транспорта), поэтому склейка идёт блоками через пустую
+  // строку — так многошаговый ответ остаётся читаемым Markdown'ом.
   let outputText = "";
   let sessionId: string | null = null;
   let usage: RuntimeUsage | null = null;
@@ -656,28 +848,31 @@ async function runCodexSdkAttempt(
   };
 
   for await (const event of wrappedEvents) {
-    // Extract thread ID from the first event
+    // Извлекает thread ID из первого события
     if (event.type === "thread.started") {
       sessionId = event.thread_id;
     }
 
-    // Extract usage from turn completion
+    // Извлекает usage из завершения тёрна
     if (event.type === "turn.completed") {
       usage = normalizeUsage(event.usage);
     }
 
-    // Handle fatal errors
+    // хода разворачивается в брошенное исключение, а не в event: так
+    // ошибка попадает в единый catch обёртки runCodexSdk, где решают «ретраить или
+    // нет». classifyCodexRuntimeError обогащает её структурными category/adapterCode.
+    // Обработка фатальных ошибок
     if (event.type === "turn.failed") {
       throw classifyCodexRuntimeError(event.error?.message ?? "Codex turn failed");
     }
 
-    // Collect output text from completed agent messages
+    // Сбор выходного текста из завершённых сообщений агента
     if (event.type === "item.completed" && event.item.type === "agent_message") {
       if (outputText) outputText += "\n\n";
       outputText += event.item.text;
     }
 
-    // Fire onToolUse callback for tool-like items
+    // Вызов onToolUse для item'ов-инструментов
     if (event.type === "item.completed") {
       const toolSummary = itemToToolUseSummary(event.item);
       if (toolSummary) {
@@ -685,13 +880,15 @@ async function runCodexSdkAttempt(
       }
     }
 
-    // Map to runtime events and notify
+    // Маппинг в события runtime и уведомление
     const runtimeEvent = threadEventToRuntimeEvent(event);
     if (runtimeEvent) {
       runtimeEvents.push(runtimeEvent);
       execution?.onEvent?.(runtimeEvent);
     }
 
+    // Вызов на каждом событии бесплатен: троттлинг и дедуп живут внутри
+    // наблюдателя, а здесь важен лишь факт «стрим ещё идёт».
     await maybeEmitCodexSessionLimitEvent({
       runtimeInput: input,
       sessionId,
@@ -701,11 +898,18 @@ async function runCodexSdkAttempt(
     });
   }
 
-  // Fallback: thread.id is populated after the first turn starts
+  // При resume событие thread.started может не прийти, и тогда sessionId есть
+  // только у самого объекта thread — фоллбэк закрывает этот пробел, иначе
+  // лимит-снимок и последующее resume были бы невозможны.
+  // Резерв: thread.id заполняется после старта первого тёрна
   if (!sessionId) {
     sessionId = thread.id ?? null;
   }
 
+  // Финальная точка: force-проверка наблюдателя (свежий снимок в runtimeEvents)
+  // плюс append-страховка на уровне результата. Двойной контроль не дублирует
+  // работу: вторая ступень сверяет подпись и ничего не добавляет, если первая
+  // уже всё выдала.
   await maybeEmitCodexSessionLimitEvent({
     runtimeInput: input,
     sessionId,
@@ -725,6 +929,11 @@ async function runCodexSdkAttempt(
   return appendCodexSessionLimitEvent(input, result);
 }
 
+// Публичная точка входа sdk-транспорта: одна попытка прогона плюс ровно один
+// retry. Повтор разрешён только для ретриабельного start-timeout (стрим не начал
+// отдавать события) — это почти всегда холодный старт дочернего процесса или
+// гонка за сетевое соединение, где повтор дёшев. Ошибки же после начала работы
+// не ретраятся: вторая попытка удвоила бы побочные эффекты (правки файлов, комманды).
 export async function runCodexSdk(
   input: RuntimeRunInput,
   logger?: CodexSdkLogger,
@@ -756,6 +965,10 @@ export async function runCodexSdk(
     );
     return result;
   } catch (error) {
+    // Классификация идёт по структурированным полям (category + служебный флаг), а
+    // не по тексту сообщения — см. правило проекта о запрете строкового матчинга.
+    // Задержка resolveRetryDelay разводит повторные попытки по времени, чтобы не
+    // долбить уставший backend сразу после отбоя.
     if (isRetriableTimeoutError(error)) {
       const retryDelayMs = resolveRetryDelay(input.execution ?? {});
       logger?.warn?.(

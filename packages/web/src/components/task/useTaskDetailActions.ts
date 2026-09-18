@@ -22,7 +22,7 @@ const IMAGE_FILE_MAX_SIZE = 1_000_000;
 const BASE64_CONTENT_MAX_SIZE = 2_000_000;
 export const MAX_TASK_ATTACHMENTS = 100;
 export const TASK_ATTACHMENT_WARN_AT = 50;
-// Mirrors taskAttachmentSchema.size.max() in packages/api/src/schemas.ts.
+// Повторяет taskAttachmentSchema.size.max() из packages/api/src/schemas.ts.
 export const ATTACHMENT_SIZE_HARD_LIMIT = 100_000_000;
 const COMMENT_TIMEOUT_MS = 30_000;
 
@@ -70,7 +70,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
   const createTaskComment = useCreateTaskComment();
   const syncTaskPlan = useSyncTaskPlan();
 
-  // --- Delete ---
+  // --- Удаление ---
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleDelete = () => {
@@ -83,7 +83,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     });
   };
 
-  // --- Plan change (replanning / fast_fix / request_changes) ---
+  // --- Изменение плана (replanning / fast_fix / request_changes) ---
   const [showReplanModal, setShowReplanModal] = useState(false);
   const [planChangeMode, setPlanChangeMode] = useState<PlanChangeMode>("replanning");
   const [isSubmittingPlanChange, setIsSubmittingPlanChange] = useState(false);
@@ -156,7 +156,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     }
   };
 
-  // --- Maintenance (clear activity, sync plan) ---
+  // --- Обслуживание (очистка активности, синхронизация плана) ---
   const [maintenanceSuccess, setMaintenanceSuccess] = useState<string | null>(null);
   const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
   const [showClearActivityConfirm, setShowClearActivityConfirm] = useState(false);
@@ -211,7 +211,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     });
   };
 
-  // --- Start AI with plan-file check ---
+  // --- Запуск AI с проверкой файла плана ---
   const [showStartAiConfirm, setShowStartAiConfirm] = useState(false);
   const [startAiPlanPath, setStartAiPlanPath] = useState<string | null>(null);
   const [isCheckingStartAiPlanFile, setIsCheckingStartAiPlanFile] = useState(false);
@@ -242,7 +242,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     }
   };
 
-  // --- Attachments ---
+  // --- Вложения ---
   const handleTaskAttachmentsSelected = async (files: File[] | FileList | null) => {
     if (!task || !files) return;
     const arr = Array.isArray(files) ? files : Array.from(files);
@@ -274,14 +274,14 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     });
   };
 
-  // --- Approve done confirm ---
+  // --- Подтверждение approve done ---
   const [showApproveDoneConfirm, setShowApproveDoneConfirm] = useState(false);
   const [deletePlanOnApprove, setDeletePlanOnApprove] = useState(false);
   const [commitOnApprove, setCommitOnApprove] = useState(true);
-  // When the user asks for a commit on approve, the server runs `/aif-commit`
-  // as a fire-and-forget background task and broadcasts the result over WS.
-  // We keep the modal open with a spinner until the WS ack arrives, so the
-  // user sees whether the commit actually happened (issue #75).
+  // Если пользователь просит коммит при подтверждении, сервер запускает `/aif-commit`
+  // как фоновую задачу fire-and-forget и рассылает результат по WS.
+  // Держим модалку открытой со спиннером до прихода WS-подтверждения, чтобы
+  // пользователь видел, состоялся ли коммит (issue #75).
   const [commitPending, setCommitPending] = useState(false);
 
   useEffect(() => {
@@ -302,7 +302,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     const onFailed = (e: Event) => {
       if (!matchesTask(e)) return;
       console.debug("[approve-done] commit failed for", task.id);
-      // Keep modal open so the user sees the error toast and can retry.
+      // Держим модалку открытой, чтобы пользователь увидел тост ошибки и мог повторить.
       setCommitPending(false);
     };
     window.addEventListener("task:commit_done", onDone);
@@ -322,7 +322,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
       commitOnApprove,
     });
     if (commitOnApprove) {
-      // Wait for WS ack — do NOT close the modal yet.
+      // Ждём WS-подтверждение — модалку пока НЕ закрываем.
       console.debug("[approve-done] awaiting commit WS ack for", task.id);
       setCommitPending(true);
       return;
@@ -333,7 +333,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     onClose();
   };
 
-  // --- Action button dispatch ---
+  // --- Обработка нажатий кнопок действий ---
   const handleActionClick = (action: { event?: TaskEvent; actionType?: string }) => {
     if (action.actionType === "open_replanning") {
       openPlanChange("replanning");
@@ -362,11 +362,11 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
   };
 
   return {
-    // delete
+    // удаление
     showDeleteConfirm,
     setShowDeleteConfirm,
     handleDelete,
-    // plan change
+    // изменение плана
     showReplanModal,
     planChangeMode,
     isSubmittingPlanChange,
@@ -378,7 +378,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     setReplanFiles,
     resetReplanModal,
     handlePlanChangeRequest,
-    // maintenance
+    // обслуживание
     maintenanceSuccess,
     maintenanceError,
     showClearActivityConfirm,
@@ -389,16 +389,16 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     handleSyncPlanFromFile,
     syncTaskPlanIsPending: syncTaskPlan.isPending,
     updateTaskIsPending: updateTask.isPending,
-    // start AI
+    // запуск AI
     showStartAiConfirm,
     setShowStartAiConfirm,
     startAiPlanPath,
     isCheckingStartAiPlanFile,
     triggerStartAi,
-    // attachments
+    // вложения
     handleTaskAttachmentsSelected,
     handleRemoveTaskAttachment,
-    // approve done
+    // подтверждение завершения
     showApproveDoneConfirm,
     setShowApproveDoneConfirm,
     deletePlanOnApprove,
@@ -407,9 +407,9 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     setCommitOnApprove,
     commitPending,
     handleApproveDone,
-    // action buttons
+    // кнопки действий
     handleActionClick,
-    // update task (for description save)
+    // обновление задачи (для сохранения описания)
     updateTask,
   };
 }

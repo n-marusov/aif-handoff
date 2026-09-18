@@ -21,9 +21,9 @@ export function useCodexLoginStatus(
     queryKey: STATUS_KEY,
     queryFn: () => api.getCodexLoginStatus(),
     enabled,
-    // Single fetch on first enable + explicit invalidation by start/cancel
-    // mutations + interval polling while a session is in-flight. StrictMode
-    // remounts and window-focus events must not drag the broker.
+    // Один запрос при первом включении + явная инвалидация мутациями
+    // start/cancel + опрос по интервалу, пока сессия активна. Реремонты
+    // StrictMode и события фокуса окна не должны дергать брокер.
     refetchInterval: enabled && pollIntervalMs !== false ? pollIntervalMs : false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,

@@ -43,14 +43,14 @@ export function register(server: McpServer, context: ToolContext): void {
           });
         }
 
-        // Parse annotations from the incoming plan
+        // Разбирает аннотации из входящего плана
         const annotations = parsePlanAnnotations(args.planContent);
         log.debug(
           { taskId: args.taskId, annotationCount: annotations.length },
           "Parsed annotations",
         );
 
-        // Validate referenced task IDs exist
+        // Проверяет, что упомянутые идентификаторы задач существуют
         const annotationResults = annotations.map((ann) => {
           const referencedTask = findTaskById(ann.taskId);
           if (!referencedTask) {
@@ -66,7 +66,7 @@ export function register(server: McpServer, context: ToolContext): void {
           };
         });
 
-        // Update the task's plan field
+        // Обновляет поле плана задачи
         setTaskFields(args.taskId, { plan: args.planContent, updatedAt: new Date().toISOString() });
         const updatedRow = findTaskById(args.taskId);
         const task = updatedRow ? toTaskResponse(updatedRow) : toTaskResponse(row);

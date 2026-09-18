@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RuntimeExecutionError, type RuntimeLimitSnapshot } from "@aif/runtime";
 import { resetEnvCache } from "@aif/shared";
 
-// Flag defaults to false (opt-in). These tests assert on limitSnapshot
-// persistence, which requires the gate to be open.
+// Флаг по умолчанию false (включается явно). Эти тесты проверяют сохранение
+// limitSnapshot, для чего гейт должен быть открыт.
 process.env.AIF_USAGE_LIMITS_ENABLED = "true";
 resetEnvCache();
 
@@ -18,7 +18,7 @@ vi.mock("@aif/data", () => ({
   parseTaskCurrentTool: vi.fn(() => null),
 }));
 
-// Stable backoff for deterministic assertions
+// Стабильный backoff для детерминированных проверок
 vi.mock("../taskWatchdog.js", () => ({
   getRandomBackoffMinutes: () => 10,
 }));
@@ -146,7 +146,7 @@ describe("classifyStageError", () => {
       expect(result.retryAfter).not.toBeNull();
       const retryAfter = result.retryAfter as string;
       const retryMs = new Date(retryAfter).getTime();
-      // 10 min backoff (mocked)
+      // backoff 10 минут (замокано)
       expect(retryMs).toBeGreaterThanOrEqual(before + 10 * 60_000 - 1000);
       expect(retryMs).toBeLessThanOrEqual(before + 10 * 60_000 + 1000);
       expect(result.retryAfterSource).toBe("random_backoff");
@@ -338,17 +338,17 @@ describe("classifyStageError", () => {
     expect(appendTaskActivityLog).not.toHaveBeenCalled();
   });
 
-  // --- priority: fast_retry beats external ---
+  // --- приоритет: fast_retry сильнее external ---
 
   it("fast_retry takes priority over external match", () => {
-    // "Error in hook callback: stream closed" matches both fast-retry and external patterns
+    // "Error in hook callback: stream closed" совпадает с паттернами и fast-retry, и external
     const result = classifyStageError(
       makeInput({ err: new Error("Error in hook callback: stream closed") }),
     );
     expect(result.kind).toBe("fast_retry");
   });
 
-  // --- BranchIsolationError → blocked_external with no retry ---
+  // --- BranchIsolationError → blocked_external без повтора ---
 
   it("classifies BranchIsolationError(dirty_worktree) as blocked_external with retryAfter=null", async () => {
     const { BranchIsolationError } = await import("../gitBranch.js");

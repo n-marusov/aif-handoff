@@ -1,5 +1,17 @@
-// Browser-safe exports — no Node.js dependencies (no better-sqlite3, pino, etc.)
+/**
+ * Браузерная точка входа пакета (`@aif/shared/browser`).
+ *
+ * Публикуется только то, что безопасно для бандла фронтенда: типы, константы и чистые
+ * функции без Node-зависимостей. Ничто отсюда не должно тянуть better-sqlite3, pino,
+ * node:fs или node:child_process - иначе сборка web либо упадёт, либо утащит серверный код
+ * в браузер. Это один из трёх входов пакета наряду с основным (index.ts) и серверным
+ * (server.ts).
+ */
 
+// Типы существуют только на этапе компиляции и в бандл не попадают, поэтому
+// перечислять их здесь дёшево. Наборы значений (TASK_STATUSES, PARTICIPANT_ROLES и
+// другие) идут сюда потому, что UI должен валидировать данные теми же списками, что
+// и сервер, а не дублировать их у себя.
 export {
   TASK_STATUSES,
   type TaskStatus,
@@ -122,6 +134,9 @@ export {
   type WarmupWorkflowKind,
   type WarmupProfileMode,
 } from "./constants.js";
+// Правила авторизации и переходов - чистые функции без ввода-вывода, поэтому доска
+// может заранее посчитать, какие действия доступны пользователю, не обращаясь к
+// серверу за каждым решением.
 export {
   resolveTaskAction,
   resolveTaskPermissions,
@@ -133,6 +148,9 @@ export {
   type TransitionResult,
 } from "./stateMachine.js";
 export { withTimeout } from "./withTimeout.js";
+// Санитизация и редакция данных о лимитах нужны и в UI: то, что показывается
+// пользователю, обязано проходить те же преобразования, что на сервере, иначе на
+// экран попадут служебные поля провайдера.
 export {
   buildRuntimeLimitSignature,
   normalizeRuntimeLimitSnapshot,
@@ -149,13 +167,16 @@ export {
   type SafeRuntimeErrorReason,
 } from "./runtimeLimitUtils.js";
 
-// Plan path utilities (pure functions, browser-safe — separate module with no Node.js deps)
+// Пути к планам нужны и в UI (показ ссылки на файл), поэтому модуль вынесен отдельно и
+// сознательно не использует node:path.
 export { slugify, generatePlanPath } from "./planPath.js";
 export type { GeneratePlanPathOptions } from "./planPath.js";
 
-// Sync types (browser-safe subset — types only, no Node.js logger dependency)
+// Из sync.ts берутся только типы: сам модуль создаёт логгер pino, который в браузерном
+// бандле недопустим.
 export type { SyncDirection, ConflictResolution, SyncEvent, PlanAnnotation } from "./sync.js";
 
-// Planner mode defaults (pure, browser-safe)
+// Флаги планирования по умолчанию нужны в UI, чтобы форма создания задачи показывала те
+// же значения, которые применит сервер в выбранном режиме.
 export { defaultsForMode } from "./plannerDefaults.js";
 export type { PlannerMode, PlannerFlagDefaults } from "./plannerDefaults.js";

@@ -1,4 +1,4 @@
-/** Centralized localStorage key registry to prevent collisions and ease discovery. */
+/** Централизованный реестр ключей localStorage: защита от коллизий и удобный поиск. */
 export const STORAGE_KEYS = {
   SELECTED_PROJECT: "aif-selected-project",
   DENSITY: "aif-density",

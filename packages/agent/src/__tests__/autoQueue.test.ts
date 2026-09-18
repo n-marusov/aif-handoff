@@ -15,12 +15,12 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   };
 });
 
-// Stub fetch so notifyProjectBroadcast doesn't try to hit the API.
+// Заглушка fetch, чтобы notifyProjectBroadcast не обращался к API.
 const originalFetch = global.fetch;
 const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
 
-// Coordinator reads env at module load. This suite covers the rollout-on
-// auto-queue behavior for branch-isolated projects.
+// Координатор читает env при загрузке модуля. Этот набор покрывает поведение
+// auto-queue с включённым rollout для проектов с изоляцией по веткам.
 vi.stubEnv("AIF_TASK_WORKTREES_ENABLED", "true");
 vi.stubEnv("AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED", "true");
 
@@ -118,7 +118,7 @@ describe("processAutoQueueAdvance", () => {
       expect(processAutoQueueAdvance()).toBe(0);
       expect(findTaskById("t2")?.status).toBe("backlog");
 
-      // Advancing through stages — auto-queue stays blocked until terminal
+      // Продвижение по стадиям — auto-queue остаётся заблокирован до терминальной
       for (const stage of ["plan_review", "implementing", "review"] as const) {
         updateTaskStatus("t1", stage);
         expect(processAutoQueueAdvance()).toBe(0);
@@ -184,7 +184,7 @@ describe("processAutoQueueAdvance", () => {
     beforeEach(() => seedProject("par", { autoQueue: true, parallel: true }));
 
     it("fills the pool up to the per-project concurrency cap in a single tick", () => {
-      // Default COORDINATOR_MAX_CONCURRENT_TASKS_PER_PROJECT = 3
+      // Значение по умолчанию COORDINATOR_MAX_CONCURRENT_TASKS_PER_PROJECT = 3
       seedTask("t1", "par", 100);
       seedTask("t2", "par", 200);
       seedTask("t3", "par", 300);
@@ -205,7 +205,7 @@ describe("processAutoQueueAdvance", () => {
       seedTask("t4", "par", 400);
 
       const advanced = processAutoQueueAdvance();
-      // active counts toward limit (3), so only 2 more advance
+      // active учитывается в лимите (3), поэтому продвигаются только ещё 2
       expect(advanced).toBe(2);
       expect(findTaskById("t2")?.status).toBe("planning");
       expect(findTaskById("t3")?.status).toBe("planning");
@@ -253,7 +253,7 @@ describe("processAutoQueueAdvance", () => {
       const advanced = processAutoQueueAdvance();
       expect(advanced).toBe(1);
       expect(findTaskById("t3")?.status).toBe("planning");
-      // paused ones stay
+      // приостановленные остаются
       expect(findTaskById("t1")?.status).toBe("backlog");
       expect(findTaskById("t2")?.status).toBe("backlog");
     });
@@ -268,13 +268,13 @@ describe("processAutoQueueAdvance", () => {
       seedTask("b", "mix", 200);
       seedTask("c", "mix", 300);
 
-      // Scheduler runs first
+      // Планировщик срабатывает первым
       const fired = processDueScheduledTasks();
       expect(fired).toBe(1);
       expect(findTaskById("scheduled")?.status).toBe("planning");
       expect(findTaskById("scheduled")?.scheduledAt).toBeNull();
 
-      // Auto-queue then tops up to 3 in flight: scheduled + 2 more
+      // Затем auto-queue дополняет пул до 3 в работе: scheduled + ещё 2
       const advanced = processAutoQueueAdvance();
       expect(advanced).toBe(2);
       expect(findTaskById("a")?.status).toBe("planning");
@@ -321,13 +321,13 @@ describe("processAutoQueueAdvance", () => {
     it("scheduler and auto-queue cannot double-advance the same task in one cycle", () => {
       seedProject("race", { autoQueue: true, parallel: false });
       const past = new Date(Date.now() - 60_000).toISOString();
-      // Single task that is BOTH due and the next backlog item by position.
+      // Единственная задача, у которой и срок наступил, и это следующий элемент backlog по позиции.
       seedTask("solo", "race", 100, { scheduledAt: past });
 
       const fired = processDueScheduledTasks();
       const advanced = processAutoQueueAdvance();
 
-      // Scheduler claimed it; auto-queue saw it as already in flight.
+      // Планировщик забрал её; auto-queue увидел её как уже в работе.
       expect(fired).toBe(1);
       expect(advanced).toBe(0);
       expect(findTaskById("solo")?.status).toBe("planning");
@@ -353,8 +353,8 @@ describe("processAutoQueueAdvance", () => {
         configYaml: "git:\n  create_branches: false\n",
       }).rootPath;
 
-      // Project points at a REAL git repo; seedProject uses /tmp/<id>,
-      // so insert directly with the real path.
+      // Проект указывает на НАСТОЯЩИЙ git-репозиторий; seedProject использует /tmp/<id>,
+      // поэтому вставляем напрямую с реальным путём.
       testDb.current
         .insert(projects)
         .values({
@@ -367,7 +367,7 @@ describe("processAutoQueueAdvance", () => {
         .run();
       seedTask("t-dirty-1", "dirty", 100);
 
-      // Introduce uncommitted change
+      // Вносим незакоммиченное изменение
       writeFileSync(join(root, "scratch.txt"), "dirty\n");
 
       const advanced = processAutoQueueAdvance();

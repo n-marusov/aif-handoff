@@ -209,7 +209,7 @@ describe("codex cli transport", () => {
       "--json",
       "--prompt=Language policy: write in Russian.\n\nImplement feature",
     ]);
-    // Prompt was embedded via {prompt} → stdin must not receive it again.
+    // Промпт встроен через {prompt} → stdin не должен получать его снова.
     expect(child.stdin.write).not.toHaveBeenCalled();
 
     child.stdout.emit("data", "ok");
@@ -219,11 +219,11 @@ describe("codex cli transport", () => {
   });
 
   it("still writes prompt to stdin on default path when the prompt collides with a generic arg token", async () => {
-    // Regression: on the default path `args` always contain generic tokens
-    // like `exec`, `--json`, or the model id. A prompt that happens to equal
-    // one of those must NOT be treated as "already embedded" — otherwise the
-    // user's prompt would never reach the CLI. Only the explicit {prompt} /
-    // --prompt placeholder signals are allowed to suppress stdin.
+    // Регрессия: на пути по умолчанию `args` всегда содержат вспомогательные
+    // токены вроде `exec`, `--json` или id модели. Промпт, случайно совпавший
+    // с таким токеном, НЕ должен считаться «уже встроенным» — иначе
+    // пользовательский промпт никогда не дошёл бы до CLI. Только явные
+    // {prompt} / --prompt сигналы-плейсхолдеры вправе подавлять stdin.
     const child = createMockChildProcess();
     spawnMock.mockReturnValueOnce(child);
 
@@ -239,11 +239,11 @@ describe("codex cli transport", () => {
   });
 
   it("skips stdin when {prompt} placeholder is embedded inside a composite arg", async () => {
-    // Guards against the edge case where `{prompt}` sits inside an arbitrary
-    // flag shape (e.g. `--payload=prefix {prompt} suffix`). The substitution
-    // consumes the literal `{prompt}` token, so the stdin suppressor must
-    // rely on a pre-substitution signal — otherwise the composed prompt would
-    // be delivered twice (once inside the arg, once via stdin).
+    // Страж против edge case, где `{prompt}` сидит внутри произвольной
+    // формы флага (например `--payload=prefix {prompt} suffix`). Подстановка
+    // потребляет литеральный токен `{prompt}`, поэтому подавитель stdin должен
+    // опираться на сигнал до подстановки — иначе составной промпт ушёл бы
+    // дважды (один раз внутри аргумента, второй — через stdin).
     const child = createMockChildProcess();
     spawnMock.mockReturnValueOnce(child);
 
@@ -518,7 +518,7 @@ describe("codex cli transport", () => {
 
     const { cliArgs: args } = getSpawnInvocation();
     expect(args).toContain('approval_policy="on-failure"');
-    // Sandbox was not explicitly set → stable non-bypass default kicks in
+    // Sandbox явно не задан → вступает стабильный не-bypass дефолт
     expect(args).toContain('sandbox_mode="workspace-write"');
 
     child.stdout.emit("data", "ok");
@@ -652,8 +652,8 @@ describe("codex cli transport", () => {
     vi.stubEnv("OPENAI_BASE_URL", "https://api.openai.com/v1");
     vi.stubEnv("npm_config_registry", "https://registry.npmjs.org");
 
-    // Explicit API-key opt-in so OPENAI_API_KEY forwards; this test asserts that
-    // OPENAI_BASE_URL is still stripped regardless of the key being present.
+    // Явное включение API-key, чтобы OPENAI_API_KEY пробрасывался; этот тест утверждает,
+    // что OPENAI_BASE_URL вырезается независимо от наличия ключа.
     const runPromise = runCodexCli(createRunInput({ options: { apiKeyEnvVar: "OPENAI_API_KEY" } }));
 
     const [, , spawnOptions] = spawnMock.mock.calls[0] as [
@@ -725,15 +725,15 @@ describe("codex cli transport", () => {
       }),
     );
 
-    // First attempt: no output → start timeout fires
+    // Первая попытка: вывода нет → срабатывает start timeout
     vi.advanceTimersByTime(10);
     expect(child1.kill).toHaveBeenCalledWith("SIGKILL");
     child1.emit("close", null);
 
-    // Let async close handler + retry settle
+    // Даем устояться async close-обработчику и ретраю
     await vi.advanceTimersByTimeAsync(1);
 
-    // Second attempt succeeds
+    // Вторая попытка успешна
     expect(spawnMock).toHaveBeenCalledTimes(2);
     child2.stdout.emit("data", "retry output");
     child2.emit("close", 0);
@@ -754,12 +754,12 @@ describe("codex cli transport", () => {
       }),
     );
 
-    // First attempt: start timeout
+    // Первая попытка: start timeout
     vi.advanceTimersByTime(10);
     child1.emit("close", null);
     await vi.advanceTimersByTimeAsync(1);
 
-    // Second attempt: also times out
+    // Вторая попытка: тоже с таймаутом
     vi.advanceTimersByTime(10);
     child2.emit("close", null);
 
@@ -965,7 +965,7 @@ describe("codex cli transport", () => {
     const result = await runPromise;
     expect(result.outputText).toBe("Listed files.");
 
-    // Tool use triggered once on item.started, NOT re-emitted on item.completed
+    // Tool use срабатывает один раз на item.started и НЕ повторяется на item.completed
     expect(onToolUse).toHaveBeenCalledTimes(1);
     const [toolName, detail] = onToolUse.mock.calls[0];
     expect(toolName).toBe("Bash");
@@ -984,7 +984,7 @@ describe("codex cli transport", () => {
 
     const runPromise = runCodexCli(createRunInput());
 
-    // Split a single JSON line across two chunks to exercise the line buffer
+    // Разрезаем одну JSON-строку на два чанка, чтобы проверить буфер строк
     const line1 = JSON.stringify({
       type: "thread.started",
       thread_id: "thread-split",

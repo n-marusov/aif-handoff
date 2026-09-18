@@ -1,3 +1,21 @@
+/**
+ * Координатор конвейера задач.
+ *
+ * На каждом цикле опроса переводит задачу по статусам:
+ * Backlog -> Planning -> Improve -> Plan Review -> Implementing -> Verify -> Review -> Done -> Accepted.
+ *
+ * Почему один polling-цикл, а не отдельный воркер на задачу:
+ * - состояние конвейера хранится в БД, цикл безопасно переживает перезапуск;
+ * - несколько координаторов синхронизируются через CAS-захваты, а не через память процесса;
+ * - задачи, работающие в общем checkout, исполняются монопольно и не конфликтуют по файлам.
+ *
+ * Инвариант: порядок стадий в PIPELINE обязателен. Он не допускает обхода доменных гейтов
+ * (например, перехода из plan_review в implementing без решения Plan Review Gate).
+ *
+ * Потенциальное улучшение: выделить policy-слой с явными правилами переходов/гейтов,
+ * чтобы убрать дублирование условий между координатором и стадиями.
+ */
+
 import {
   clearTaskActiveRuntimeSelection,
   clearTaskRuntimeLimitSnapshot,
@@ -75,13 +93,23 @@ import {
   recoverStaleInProgressTasks,
 } from "./taskWatchdog.js";
 
+// Конфигурация цикла координатора фиксируется при старте процесса.
+// Это исключает дрейф правил в пределах одного uptime-периода.
 const log = logger("coordinator");
 const env = getEnv();
 const AUTO_QUEUE_COMMIT_GATE_ENABLED = env.AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED;
+// Минимум 60s защищает от некорректного нулевого таймаута стадии.
+// Иначе задача зациклится на одном статусе конвейера.
 const STAGE_RUN_TIMEOUT_MS = Math.max(env.AGENT_STAGE_RUN_TIMEOUT_MS, 60_000);
-const CLAIM_LOCK_DURATION_MS = STAGE_RUN_TIMEOUT_MS + 5 * 60 * 1000; // stage timeout + 5 min buffer
+// Блокировка живёт дольше таймаута стадии, чтобы второй координатор не перехватил задачу
+// во время пост-обработки (логи/фиксация состояния).
+const CLAIM_LOCK_DURATION_MS = STAGE_RUN_TIMEOUT_MS + 5 * 60 * 1000; // таймаут стадии + 5 минут запаса
+// Идентификатор владельца блокировки создаётся на каждый процесс.
+// Это ключ для корректного сравнения владельца в БД.
 export const COORDINATOR_ID = crypto.randomUUID();
 
+// RuntimeRegistry внедряется извне.
+// Так coordinator не зависит от bootstrap и проще тестируется.
 let _runtimeRegistry: RuntimeRegistry | null = null;
 export function setRuntimeRegistry(registry: RuntimeRegistry): void {
   _runtimeRegistry = registry;
@@ -91,10 +119,14 @@ export function getRuntimeRegistrySync(): RuntimeRegistry | null {
 }
 setCoordinatorId(COORDINATOR_ID);
 
+// In-memory метрики координатора за life-cycle процесса.
+// В проде не сбрасываются, чтобы не терять динамику инцидентов.
 const runtimeCounters = {
   fastRetryStreamInterruptions: 0,
 };
 
+// Контракт стадии конвейера: входные статусы, рабочий статус, целевой статус и runner.
+// Пока runner выполняется, задача удерживается в inProgress-колонке Kanban.
 interface StatusTransition {
   from: TaskStatus[];
   inProgress: TaskStatus;
@@ -103,7 +135,12 @@ interface StatusTransition {
   label: CoordinatorStage;
 }
 
+// Порядок PIPELINE определяет доменный маршрут в пределах тика.
+// Self-loop стадии plan_review идут до implementer, чтобы реализация не стартовала
+// без решения Plan Review Gate.
 const PIPELINE: StatusTransition[] = [
+  // Planner формирует План задачи (для fix-задач: FIX_PLAN.md).
+  // В skills-режиме успешный выход направляется в Improve.
   {
     from: ["planning"],
     inProgress: "planning",
@@ -111,6 +148,8 @@ const PIPELINE: StatusTransition[] = [
     runner: runPlanner,
     label: "planner",
   },
+  // Improve доступен только в skills-mode.
+  // Вход в стадию возможен после planner при runPlanImprove=true.
   {
     from: ["improve"],
     inProgress: "improve",
@@ -118,6 +157,8 @@ const PIPELINE: StatusTransition[] = [
     runner: runImprover,
     label: "improver",
   },
+  // Plan Checker не меняет статус plan_review.
+  // Решение хранится в planReviewState, а не в названии статуса.
   {
     from: ["plan_review"],
     inProgress: "plan_review",
@@ -125,6 +166,8 @@ const PIPELINE: StatusTransition[] = [
     runner: runPlanChecker,
     label: "plan-checker",
   },
+  // Plan Publisher также self-loop.
+  // Если публикация не готова (ветка/файл), задача остаётся в plan_review.
   {
     from: ["plan_review"],
     inProgress: "plan_review",
@@ -132,6 +175,9 @@ const PIPELINE: StatusTransition[] = [
     runner: runPlanReviewPublisher,
     label: "plan-publisher",
   },
+  // Implementer запускается:
+  // - из plan_review после approved;
+  // - из implementing при повторном цикле после rework_requested.
   {
     from: ["plan_review", "implementing"],
     inProgress: "implementing",
@@ -139,6 +185,8 @@ const PIPELINE: StatusTransition[] = [
     runner: runImplementer,
     label: "implementer",
   },
+  // Verify подтверждает готовность результата к ревью.
+  // Успех стадии переводит задачу в Review, но не завершает конвейер.
   {
     from: ["verify"],
     inProgress: "verify",
@@ -146,6 +194,8 @@ const PIPELINE: StatusTransition[] = [
     runner: runVerifier,
     label: "verifier",
   },
+  // Reviewer работает с Auto Review Gate.
+  // Если gate не применим, задача идёт в done по базовому сценарию.
   {
     from: ["review"],
     inProgress: "review",
@@ -153,6 +203,8 @@ const PIPELINE: StatusTransition[] = [
     runner: runReviewer,
     label: "reviewer",
   },
+  // Done Checker переводит done -> accepted.
+  // accepted отделяет ручное подтверждение от машинного завершения.
   {
     from: ["done"],
     inProgress: "done",
@@ -162,8 +214,11 @@ const PIPELINE: StatusTransition[] = [
   },
 ];
 
-// ── Stage Semaphore ──────────────────────────────────────────
+// ── Семафор стадий ───────────────────────────────────────────
 
+// Ограничитель параллелизма сразу по двум осям: на проект со стадией (keyMax) и глобально
+// (globalMax). Нужен, чтобы упор в лимит рантайма или в диск на одной стадии не утянул
+// за собой обработку остальных проектов.
 class StageSemaphore {
   private counts = new Map<string, number>();
   private activeCount = 0;
@@ -174,11 +229,14 @@ class StageSemaphore {
     resolve: () => void;
   }> = [];
 
+  // Проверка без побочных эффектов: используется и при захвате, и при разборе очереди,
+  // поэтому не должна менять счётчики.
   private canAcquire(key: string, keyMax: number, globalMax: number): boolean {
     const current = this.counts.get(key) ?? 0;
     return current < keyMax && this.activeCount < globalMax;
   }
 
+  // Неблокирующий вариант: нужен тестам и диагностике, где ждать разрешения нельзя.
   tryAcquire(key: string, keyMax: number, globalMax: number): boolean {
     if (!this.canAcquire(key, keyMax, globalMax)) return false;
     this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
@@ -186,6 +244,8 @@ class StageSemaphore {
     return true;
   }
 
+  // Ожидание отдаётся промисом, а не блокирующим циклом: координатор ждёт разрешения
+  // асинхронно и не занимает поток, пока другие стадии продолжают работу.
   acquire(key: string, keyMax: number, globalMax: number): Promise<void> {
     if (this.tryAcquire(key, keyMax, globalMax)) {
       return Promise.resolve();
@@ -196,6 +256,8 @@ class StageSemaphore {
     });
   }
 
+  // Защита от двойного освобождения: release без предшествующего acquire молча
+  // игнорируется, иначе activeCount ушёл бы в минус и семафор разрешил лишний параллелизм.
   release(key: string): void {
     const current = this.counts.get(key) ?? 0;
     if (current <= 0) return;
@@ -221,6 +283,8 @@ class StageSemaphore {
     return this.waiters.length;
   }
 
+  // Сброс только для тестов: при непустой очереди он потерял бы ожидающие промисы,
+  // поэтому здесь лучше упасть громко, чем оставить задачу в вечном ожидании.
   reset(): void {
     if (this.waiters.length > 0) {
       throw new Error("Cannot reset stage semaphore while acquisitions are queued");
@@ -229,6 +293,9 @@ class StageSemaphore {
     this.activeCount = 0;
   }
 
+  // Перебор очереди с начала, а не только первого ожидающего: если голова очереди не
+  // проходит по лимиту своей стадии, следующий waiter из другой стадии должен получить
+  // разрешение сейчас, иначе семафор начнёт голодать.
   private drainWaiters(): void {
     let granted = true;
     while (granted) {
@@ -251,8 +318,10 @@ class StageSemaphore {
 
 const stageSemaphore = new StageSemaphore();
 
-// ── Public API ───────────────────────────────────────────────
+// ── Публичный API ────────────────────────────────────────────
 
+// Возвращаем копию, а не ссылку: иначе вызывающий код мог бы менять счётчики в обход API
+// и ломать сопоставимость метрик между снятыми снапшотами.
 export function getCoordinatorRuntimeCounters(): Readonly<typeof runtimeCounters> {
   return { ...runtimeCounters };
 }
@@ -265,14 +334,19 @@ export function getStageSemaphore(): StageSemaphore {
   return stageSemaphore;
 }
 
-// ── Stage execution ──────────────────────────────────────────
+// ── Исполнение стадий ────────────────────────────────────────
 
+// Внешний таймаут вокруг стадии. AbortController нужен не самому таймауту, а затем, чтобы
+// после срабатывания можно было погасить дочерний процесс субагента и не оставить его
+// висеть после того, как координатор уже посчитал стадию проваленной.
 async function runStageWithTimeout(
   runner: (taskId: string, projectRoot: string) => Promise<void>,
   taskId: string,
   projectRoot: string,
   stageLabel: string,
 ): Promise<void> {
+  // Контроллер регистрируется в общем реестре до запуска, а не хранится локально: погасить
+  // субагента можно и извне (отмена человеком, снятие владения), поэтому ссылка нужна снаружи.
   const abort = new AbortController();
   setActiveStageAbortController(taskId, abort);
 
@@ -283,6 +357,8 @@ async function runStageWithTimeout(
       `Stage ${stageLabel} timed out after ${STAGE_RUN_TIMEOUT_MS}ms`,
     );
   } catch (err) {
+    // abort идемпотентен, но предупреждение имеет смысл только для настоящего обрыва: если
+    // сигнал уже взведён таймаутом, повторный лог лишь запутал бы разбор инцидента.
     if (!abort.signal.aborted) {
       abort.abort();
       log.warn({ taskId, stage: stageLabel }, "Aborted subagent process after stage timeout");
@@ -293,7 +369,7 @@ async function runStageWithTimeout(
   }
 }
 
-/** Update task status with optional field overrides and broadcast. */
+/** Обновляет статус задачи и отправляет согласованное WS-уведомление. */
 function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
@@ -305,22 +381,29 @@ function updateTaskStatus(
     id: "coordinator",
     displayNameSnapshot: "Coordinator",
   });
+  // Если статус не изменился, отправляем task:updated.
+  // Если изменился — task:moved для перемещения карточки между колонками.
   const broadcastType =
     info.fromStatus && info.fromStatus === status ? "task:updated" : "task:moved";
   void notifyTaskBroadcast(taskId, broadcastType, { ...info, toStatus: status });
 }
 
+// Auto-queue commit gate перед терминальным статусом.
+// Ошибка пробрасывается вверх: задача не должна закрыться с грязным worktree.
 async function ensureCommitBeforeTerminalStatus(task: TaskRow, projectRoot: string): Promise<void> {
   if (!AUTO_QUEUE_COMMIT_GATE_ENABLED) {
     return;
   }
   try {
+    // Flush activity обязателен даже при ошибке, чтобы причина блокировки попала
+    // в историю задачи до следующего тика.
     await ensureAutoQueueTaskCommit({ taskId: task.id, projectRoot });
   } finally {
     flushActivityQueue(task.id);
   }
 }
 
+// Базовый SHA фиксируется до стадии, чтобы позже верифицировать факт нового коммита.
 function resolveAutoQueueCommitPreparation(
   projectRoot: string,
 ): { status: "pending"; baseSha: string | null } | { status: "not_applicable"; baseSha: null } {
@@ -329,6 +412,8 @@ function resolveAutoQueueCommitPreparation(
     : { status: "not_applicable", baseSha: null };
 }
 
+// Проект требует serial execution, если задачи делят один физический checkout.
+// Это защищает ветки и файлы от конкурентных мутаций.
 function projectRequiresSerialExecution(project: ProjectRow): boolean {
   const hasSharedBranchTask = hasActiveBranchBoundTasksForProject(project.id);
   const taskWorktreesUnavailable =
@@ -345,17 +430,18 @@ function projectRequiresSerialExecution(project: ProjectRow): boolean {
 }
 
 /**
- * A branchless fix task has no deterministic branch/worktree yet, so it mutates
- * the shared project checkout. It must never run concurrently with any other
- * task for the same project — the coordinator treats it as an exclusive claim.
+ * Branchless fix-задача работает в общем checkout проекта.
+ * Её запуск всегда эксклюзивный в пределах проекта.
  */
 function branchlessFixTaskRequiresExclusiveRun(task: TaskRow): boolean {
   return task.isFix === true && (!task.branchName || !task.worktreePath);
 }
 
-/** Exported for focused unit tests of the parallel-eligibility guard. */
+/** Экспорт для unit-тестов guard-правила параллелизма. */
 export const __testBranchlessFixTaskRequiresExclusiveRun = branchlessFixTaskRequiresExclusiveRun;
 
+// Scheduled advance не стартует на грязном worktree.
+// Иначе следующая ветка задачи создастся из несогласованного состояния.
 function scheduledTaskHasDirtyAutoQueueWorktree(
   task: TaskRow,
   project: ProjectRow | null | undefined,
@@ -377,6 +463,8 @@ function scheduledTaskHasDirtyAutoQueueWorktree(
   return true;
 }
 
+// Соответствие стадии конвейера профилю runtime: plan/review/task.
+// Это позволяет разделять стоимость и качество работ по этапам.
 function runtimeProfileModeForStage(stage: CoordinatorStage): "task" | "plan" | "review" {
   if (stage === "planner" || stage === "improver" || stage === "plan-checker") {
     return "plan";
@@ -387,10 +475,12 @@ function runtimeProfileModeForStage(stage: CoordinatorStage): "task" | "plan" | 
   return "task";
 }
 
+// Improve включается только для skills-mode сценария.
 function shouldRunSkillsModeImprove(task: TaskRow): boolean {
   return task.runPlanImprove && !task.useSubagents;
 }
 
+// Переопределение success-перехода: planner -> improve для skills-mode.
 function getStageSuccessStatus(task: TaskRow, stage: StatusTransition): TaskStatus {
   if (stage.label === "planner" && shouldRunSkillsModeImprove(task)) {
     return "improve";
@@ -398,10 +488,13 @@ function getStageSuccessStatus(task: TaskRow, stage: StatusTransition): TaskStat
   return stage.onSuccess;
 }
 
+// Рассчитывает retryAfter для blocked_external.
+// Приоритет: подсказка провайдера (resetAt/retryAfterSeconds) -> локальная задержка повтора.
 function resolveRuntimeGateRetryAfter(gateDecision: ReturnType<typeof evaluateRuntimeLimitGate>): {
   retryAfter: string;
   source: "resetAt" | "retryAfterSeconds" | "random_backoff";
 } {
+  // resetAt учитывается только если это будущий момент.
   if (gateDecision.futureHint.resetAt && gateDecision.futureHint.isFuture) {
     return {
       retryAfter: gateDecision.futureHint.resetAt,
@@ -430,6 +523,8 @@ function resolveRuntimeGateRetryAfter(gateDecision: ReturnType<typeof evaluateRu
   };
 }
 
+// Текст причины формируется из структурированных полей gate-решения.
+// Логика не зависит от message-matching.
 function buildRuntimeGateBlockedReason(
   gateDecision: ReturnType<typeof evaluateRuntimeLimitGate>,
 ): string {
@@ -451,6 +546,8 @@ function buildRuntimeGateBlockedReason(
   return `Coordinator pre-start runtime gate: ${scope} limit still blocked (hint=${hintSource})`;
 }
 
+// Pre-start runtime gate: переводит задачу в blocked_external до вызова рантайма.
+// CAS-обновление гарантирует, что блокируется именно актуальный кандидат.
 function proactivelyBlockTaskForRuntimeGate(
   task: TaskRow,
   stage: CoordinatorStage,
@@ -460,6 +557,7 @@ function proactivelyBlockTaskForRuntimeGate(
   const snapshot = gateDecision.snapshot;
   const { retryAfter, source } = resolveRuntimeGateRetryAfter(gateDecision);
   const blockedReason = buildRuntimeGateBlockedReason(gateDecision);
+  // Лимит-гейт увеличивает retryCount как полноценную неудачную попытку.
   const retryCount = (task.retryCount ?? 0) + 1;
   const persistedAt = new Date().toISOString();
   const applied = blockTaskForRuntimeGateIfEligible({
@@ -516,13 +614,11 @@ function proactivelyBlockTaskForRuntimeGate(
   );
 }
 
+// Guard совместимости legacy и plan-review потоков.
+// Не допускает запуск implementer до approved плана для VCS-связанных задач.
 function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow): boolean {
-  // Only plan-review tasks should be claimed by the plan-publisher stage. Tasks
-  // without a VCS issue link (or with the feature flag off) stay on the legacy
-  // flow and must not be claimed by the publisher or auto-implemented by the
-  // implementer before plan approval. An implementing task that still lacks an
-  // approved plan (e.g. a legacy VCS task after the flag was enabled, or a
-  // manual move) is also ineligible so the implementer never runs unapproved.
+  // Plan Publisher обрабатывает только задачи с активным Plan Review Gate.
+  // Implementer отклоняется, пока planReviewState != approved.
   if (stageLabel === "plan-publisher") {
     return !taskRequiresPlanReview(task.id);
   }
@@ -534,9 +630,11 @@ function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow):
   return false;
 }
 
+// Единая pre-start проверка runtime-лимитов.
+// Может вызываться повторно после ожидания семафора, т.к. snapshot уже мог измениться.
 function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition): boolean {
-  // The plan publisher is a deterministic git + HTTP operation — it never
-  // consumes runtime tokens, so provider usage limits must not defer it.
+  // Plan Publisher не потребляет runtime-токены, поэтому usage-limit gate
+  // к нему не применяется.
   if (stage.label === "plan-publisher") {
     return false;
   }
@@ -564,10 +662,14 @@ function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition):
   return true;
 }
 
-// ── Single task processing ───────────────────────────────────
+// ── Обработка одной задачи ───────────────────────────
 
-/** Returns true on success, false on failure. */
+/**
+ * Возвращает true, если текущая стадия закрыта в рамках этого тика.
+ * true означает "перебирать дальше не нужно", а не только "бизнес-успех".
+ */
 async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+  // Контракт владения: AI-координатор не меняет human-owned задачу.
   if (task.executionOwner !== "ai") {
     log.warn(
       { taskId: task.id, stage: stage.label, executionOwner: task.executionOwner },
@@ -585,6 +687,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     return false;
   }
 
+  // Инициализация .ai-factory перед запуском субагента.
+  // Без RuntimeRegistry шаг пропускается (например, в unit-тестах).
   if (_runtimeRegistry) {
     const initResult = initProject({
       projectRoot: task.worktreePath ?? project.rootPath,
@@ -612,6 +716,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
   const sourceStatus = task.status;
   const taskTitle = task.title;
 
+  // При переходе между статусами очищаем active runtime selection.
+  // Новый этап должен заново разрешить effective runtime profile.
   if (sourceStatus !== stage.inProgress) {
     clearTaskActiveRuntimeSelection(task.id);
   }
@@ -624,6 +730,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
 
   try {
     const executionRoot = task.worktreePath ?? project.rootPath;
+    // Перечитываем задачу перед запуском: между выбором кандидата и этим моментом владелец
+    // мог смениться на человека, и тогда запускать субагента нельзя.
     const executionBoundaryTask = findTaskById(task.id);
     if (!executionBoundaryTask || executionBoundaryTask.executionOwner !== "ai") {
       log.warn(
@@ -641,10 +749,10 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     flushActivityQueue(task.id);
 
     if (stage.label === "planner") {
-      // After plan generation, verify that the plan file was actually
-      // created with content. A stream error or empty model response
-      // can produce a commit without a valid plan. Stay in planning
-      // so the next poll cycle retries the planner.
+      // После генерации плана проверяем, что файл плана действительно
+      // создан с содержимым. Ошибка потока или пустой ответ модели
+      // могут дать коммит без валидного плана. Остаёмся в planning,
+      // чтобы следующий цикл опроса повторил planner.
       const plannedTask = findTaskById(task.id);
       let planValid = false;
       if (plannedTask) {
@@ -679,10 +787,10 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     }
 
     if (stage.label === "improver") {
-      // After improve completes, check if a valid plan exists.
-      // If the plan is still empty (e.g. upstream stream error or
-      // missing content), return to planning so the planner
-      // can regenerate it — never leave the task looping in improve.
+      // После завершения improve проверяем наличие валидного плана.
+      // Если план всё ещё пуст (например, сбой вышестоящего потока или
+      // потеря содержимого), возвращаемся в planning, чтобы planner
+      // перегенерировал его — не оставляем задачу циклиться в improve.
       const improvedTask = findTaskById(task.id);
       let planValid = false;
       if (improvedTask) {
@@ -717,12 +825,12 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     }
 
     if (stage.label === "plan-publisher") {
-      // The publisher self-loops on plan_review. The runner stamps
-      // planReviewState=published via markTaskPlanPublished (self-loop,
-      // stays at plan_review). When publishing is deferred (missing
-      // branch or plan file) the task stays at plan_review so the next
-      // poll retries — the status is never changed without a successful
-      // publish.
+      // Издатель делает self-loop по plan_review. Раннер проставляет
+      // planReviewState=published через markTaskPlanPublished (self-loop,
+      // остаёмся на plan_review). Когда публикация отложена (нет
+      // ветки или файла плана) задача остаётся на plan_review, и следующий
+      // опрос повторит попытку — статус никогда не меняется без успешной
+      // публикации.
       const current = findTaskById(task.id);
       const published =
         current?.planReviewState === "published" && current.status === "plan_review";
@@ -751,6 +859,9 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       return true;
     }
 
+    // Реализатор, не изменивший ни одного файла, не считается успехом: сбрасываем состояние
+    // коммит-гейта и оставляем задачу в implementing, чтобы повторный запуск был вынужден
+    // либо написать код, либо явно упасть.
     if (stage.label === "implementer") {
       const implementationTask = findTaskById(task.id);
       if (hasImplementationNoOp(implementationTask?.implementationLog)) {
@@ -783,6 +894,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       flushActivityQueue(task.id);
     }
 
+    // skipReview - явное желание автора проскочить verify и review. Пути назад нет, поэтому
+    // единственное, что здесь обязательно, - коммит-гейт перед статусом done.
     if (stage.label === "implementer" && task.skipReview) {
       clearTaskActiveRuntimeSelection(task.id);
       clearTaskRuntimeLimitSnapshot(task.id);
@@ -801,6 +914,9 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       return true;
     }
 
+    // Ревьюер - единственная стадия с автоматическим шлюзом: он сам решает, принять работу,
+    // отправить на доработку или передать человеку, и объявляет это исходом, который ниже
+    // разбирается по статусу.
     if (stage.label === "reviewer") {
       const outcome = await handleAutoReviewGate({
         taskId: task.id,
@@ -810,6 +926,9 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       await publishGitLabTask(task.id, project.rootPath);
       flushActivityQueue(task.id);
 
+      // Передача человеку делается через handoffTaskExecution, а не простой записью полей:
+      // только этот путь меняет ревизию владения, которую видит UI, и гарантирует, что
+      // координатор больше не возьмёт задачу себе.
       if (outcome?.status === "manual_review_required") {
         clearTaskActiveRuntimeSelection(task.id);
         clearTaskRuntimeLimitSnapshot(task.id);
@@ -881,6 +1000,9 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
             manualReviewRequired: false,
             autoReviewState: outcome.autoReviewState,
             autoQueueCommitStatus: "pending",
+            // Прежний commitSha становится базой новой попытки, а сам commitSha обнуляется:
+            // так гейт поймёт, что старый коммит уже учтён и не примет его за результат
+            // доработки.
             autoQueueCommitBaseSha: findTaskById(task.id)?.commitSha ?? null,
             commitSha: null,
             autoQueueCommitError: null,
@@ -900,6 +1022,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
         return true;
       }
 
+      // Принятие шлюзом - это подтверждённое завершение, но коммит всё равно проверяется:
+      // ревью могло одобрить дерево с несохранёнными изменениями.
       if (outcome?.status === "accepted") {
         await ensureCommitBeforeTerminalStatus(task, project.rootPath);
         clearTaskActiveRuntimeSelection(task.id);
@@ -916,6 +1040,9 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       }
     }
 
+    // Общий успешный выход стадии. Итерации ревью сохраняются только у реализатора: для
+    // остальных стадий счётчик сбрасывается, иначе он накапливался бы между независимыми
+    // циклами доработки.
     const successStatus = getStageSuccessStatus(task, stage);
     if (successStatus === "done" || successStatus === "accepted") {
       await ensureCommitBeforeTerminalStatus(task, project.rootPath);
@@ -938,6 +1065,9 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     );
     return true;
   } catch (err) {
+    // Классификация ошибки - отдельный слой: координатор не разбирает текст сообщения, а
+    // получает готовое решение (быстрый повтор, внешняя блокировка или откат статуса),
+    // поэтому новые типы сбоев добавляются в классификатор, а не сюда.
     const recovery = classifyStageError({
       taskId: task.id,
       stageLabel: stage.label,
@@ -948,6 +1078,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
 
     switch (recovery.kind) {
       case "fast_retry":
+        // Обрыв потока - не ошибка задачи, а сбой транспорта: статус не меняется, счётчик
+        // растёт, и следующий тик просто повторит стадию.
         runtimeCounters.fastRetryStreamInterruptions += 1;
         log.warn(
           {
@@ -972,6 +1104,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
         break;
 
       case "blocked_external":
+        // Снимок лимита сохраняется при наличии: по нему следующий тик поймёт, что задача
+        // ждёт не ресурса задачи, а внешнего окна провайдера.
         if (recovery.limitSnapshot) {
           persistTaskRuntimeLimitSnapshot(task.id, recovery.limitSnapshot);
         } else {
@@ -991,6 +1125,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
         break;
 
       case "revert":
+        // Откат оставляет задачу в статусе стадии: она не блокируется и не переносится,
+        // а ждёт нового запуска после устранения причины.
         clearTaskRuntimeLimitSnapshot(task.id);
         updateTaskStatus(
           task.id,
@@ -1006,15 +1142,18 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
   }
 }
 
-// ── Scheduled-task trigger ───────────────────────────────────
+// ── Триггер запланированных задач ───────────────────
 
 /**
- * Fire due scheduled tasks into the planning stage.
+ * Запускает запланированные задачи с наступившим сроком в стадию planning.
  *
- * Backlog tasks with `scheduledAt <= now` transition to `planning` (same path
- * as the human `start_ai` event). Clears `scheduledAt` atomically, records an
- * activity-log entry, and broadcasts `task:scheduled_fired`.
+ * Backlog-задачи с `scheduledAt <= now` переходят в `planning` (тот же путь,
+ * что и событие `start_ai` от человека). Атомарно очищает `scheduledAt`, пишет
+ * запись в activity-журнал и рассылает `task:scheduled_fired`.
  */
+// Планировщик обрабатывает только задачи с наступившим scheduledAt. Проверка на грязное
+// дерево стоит до захвата специально: иначе задача сменила бы статус, но фактически не
+// стартовала, и в канбане остался бы ложный след.
 export function processDueScheduledTasks(): number {
   const nowIso = new Date().toISOString();
   const due = listDueScheduledTasks(nowIso);
@@ -1036,9 +1175,9 @@ export function processDueScheduledTasks(): number {
         AUTO_QUEUE_COMMIT_GATE_ENABLED && project?.autoQueueMode === true
           ? resolveAutoQueueCommitPreparation(task.worktreePath ?? project.rootPath)
           : undefined;
-      // CAS-style claim: only proceed if the row is still backlog+unpaused
-      // at the moment of the write. Prevents racing with auto-queue or with
-      // a parallel coordinator instance.
+      // CAS-захват: продолжаем, только если строка всё ещё backlog+не приостановлена
+      // на момент записи. Защищает от гонки с auto-queue или с
+      // параллельным экземпляром координатора.
       if (!claimBacklogTaskForAdvance(task.id, autoQueueCommit)) {
         log.debug({ taskId: task.id }, "Scheduler: task no longer backlog/unpaused, skipped");
         continue;
@@ -1052,9 +1191,9 @@ export function processDueScheduledTasks(): number {
         fromStatus: task.status,
         toStatus: "planning",
       });
-      // Mirror the standard status broadcast that updateTaskStatus would
-      // have sent, so kanban columns re-render through the existing
-      // task:moved code path (and Telegram fires for the transition).
+      // Дублирует стандартный broadcast статуса, который отправил бы
+      // updateTaskStatus, чтобы колонки канбана перерисовались существующим
+      // путём кода task:moved (и Telegram сработал на переход).
       void notifyTaskBroadcast(task.id, "task:moved", {
         title: task.title,
         fromStatus: task.status,
@@ -1074,22 +1213,25 @@ export function processDueScheduledTasks(): number {
   return fired;
 }
 
-// ── Auto-queue advance ───────────────────────────────────────
+// ── Продвижение автоочереди ─────────────────────────
 
 /**
- * For each project with `autoQueueMode = true`, fill the pipeline up to the
- * project's pool depth by advancing backlog tasks (lowest `position` first)
- * into `planning`. Pool depth is `1` for sequential projects and
- * `COORDINATOR_MAX_CONCURRENT_TASKS_PER_PROJECT` for parallel projects, so the same
- * code path covers both:
- *   - non-parallel project: strict sequential — next task starts only after
- *     the previous reaches a terminal status (done/verified)
- *   - parallel project: keeps the in-flight count at the parallel cap
+ * Для каждого проекта с `autoQueueMode = true` заполняет конвейер до глубины пула,
+ * продвигая в `planning` backlog-задачи (сначала — с наименьшим `position`).
+ * Глубина пула: `1` для последовательных проектов и
+ * `COORDINATOR_MAX_CONCURRENT_TASKS_PER_PROJECT` для параллельных, поэтому один
+ * путь кода покрывает оба случая:
+ *   - непараллельный проект: строгая последовательность — следующая задача стартует
+ *     только после терминального статуса предыдущей (done/verified)
+ *   - параллельный проект: держит число в работе на уровне параллельного предела
  *
- * "In flight" = any non-terminal pipeline status (planning..review and
- * blocked_external). Terminal = done/verified. Backlog itself is the source
- * pool and doesn't count.
+ * «В работе» = любой нетерминальный статус конвейера (planning..review и
+ * blocked_external). Терминальные = done/verified. Сам backlog — источник
+ * пула и не учитывается.
  */
+// Автоочередь сама наполняет конвейер из backlog, поэтому человеку не нужно вручную
+// запускать каждую следующую задачу. Она работает только поверх существующих статусов и
+// не трогает задачи, уже находящиеся в работе.
 export function processAutoQueueAdvance(): number {
   const projects = listAutoQueueProjects();
   if (projects.length === 0) {
@@ -1099,15 +1241,15 @@ export function processAutoQueueAdvance(): number {
 
   let advanced = 0;
   for (const project of projects) {
-    // Serialization predicate combines:
-    //   - current config (`git.create_branches=true` on a real git repo), AND
-    //   - task state (any in-flight task already has a persisted branchName).
+    // Предикат сериализации объединяет:
+    //   - текущий конфиг (`git.create_branches=true` в настоящем git-репозитории) И
+    //   - состояние задач (у любой задачи в работе уже сохранён branchName).
     //
-    // Config alone is not enough: an operator can toggle `create_branches=off`
-    // mid-pipeline. Legacy branch-bound tasks without worktreePath still
-    // switch HEAD in the shared root, so they force serial execution. Projects
-    // that support task worktrees can keep the parallel pool open because the
-    // planner provisions an isolated cwd before mutating files.
+    // Одного конфига мало: оператор может переключить `create_branches=off`
+    // посреди конвейера. Legacy задачи, привязанные к ветке без worktreePath,
+    // всё равно переключают HEAD в общем корне, поэтому требуют последовательного
+    // исполнения. Проекты с рабочими деревьями для задач держат параллельный пул
+    // открытым: planner готовит изолированный cwd до правки файлов.
     const requiresSerialExecution = projectRequiresSerialExecution(project);
     if (project.parallelEnabled && requiresSerialExecution) {
       log.warn(
@@ -1115,6 +1257,8 @@ export function processAutoQueueAdvance(): number {
         "Auto-queue parallel pool disabled while tasks share one Git working tree",
       );
     }
+    // Глубина пула: последовательный проект держит ровно одну задачу в конвейере,
+    // параллельный - до настроенного лимита, но не выше возможностей рабочего дерева.
     const limit =
       project.parallelEnabled && !requiresSerialExecution
         ? env.COORDINATOR_MAX_CONCURRENT_TASKS_PER_PROJECT
@@ -1129,6 +1273,8 @@ export function processAutoQueueAdvance(): number {
       continue;
     }
 
+    // Пока есть задача с незавершённым коммит-состоянием, новые стартовать нельзя: их
+    // изменения смешались бы в одном дереве с недокоммиченными.
     if (AUTO_QUEUE_COMMIT_GATE_ENABLED && hasBlockingAutoQueueCommitForProject(project.id)) {
       log.warn(
         { projectId: project.id },
@@ -1137,12 +1283,12 @@ export function processAutoQueueAdvance(): number {
       continue;
     }
 
-    // Dirty-worktree gate. Terminal statuses (done/verified) don't
-    // guarantee the previous task's diff was committed — manual-review
-    // pauses the pipeline with a clean-status but dirty repo. Advancing
-    // the next task now would let its planner create a feature branch
-    // on top of stale changes (or fail checkout outright). Pause
-    // auto-queue advance for this project until the work tree is clean.
+    // Гейт грязного рабочего дерева. Терминальные статусы (done/verified) не
+    // гарантируют, что диф предыдущей задачи закоммичен — manual-review
+    // ставит конвейер на паузу с чистым статусом, но грязным репозиторием.
+    // Продвижение следующей задачи позволило бы её planner создать feature-ветку
+    // поверх устаревших изменений (или сорвать checkout совсем). Пауза
+    // auto-queue для этого проекта, пока рабочее дерево не очистится.
     if (
       isGitRepo(project.rootPath) &&
       (!env.AIF_TASK_WORKTREES_ENABLED || !projectSupportsTaskWorktrees(project.rootPath))
@@ -1157,9 +1303,11 @@ export function processAutoQueueAdvance(): number {
       }
     }
 
-    // Fill the pool up to the limit in this single tick. Loop bound keeps it
-    // cheap (limit is small, default 3) and avoids waiting another full poll
-    // cycle to start the second/third task.
+    // Заполняет пул до предела за один этот тик. Ограничитель цикла держит
+    // это дешёвым (лимит мал, по умолчанию 3) и не даёт ждать ещё один полный
+    // цикл опроса ради старта второй/третьей задачи.
+    // Заполняем пул до предела за один тик, чтобы не ждать следующего опроса ради запуска
+    // второй задачи; граница цикла мала (по умолчанию 3), так что это дёшево.
     while (active < limit) {
       const next = nextBacklogTaskByPosition(project.id);
       if (!next) {
@@ -1172,9 +1320,9 @@ export function processAutoQueueAdvance(): number {
 
       const nowIso = new Date().toISOString();
       try {
-        // CAS-style claim: only proceed if the row is still backlog+unpaused.
-        // If false, another pass (scheduler / parallel coordinator / human
-        // start_ai click) won the race — re-read pool counters and continue.
+        // CAS-захват: продолжаем, только если строка всё ещё backlog+не приостановлена.
+        // Если false — другой проход (планировщик / параллельный координатор /
+        // клик start_ai человеком) выиграл гонку — перечитать счётчики пула и продолжить.
         const autoQueueCommit = AUTO_QUEUE_COMMIT_GATE_ENABLED
           ? resolveAutoQueueCommitPreparation(next.worktreePath ?? project.rootPath)
           : undefined;
@@ -1186,8 +1334,8 @@ export function processAutoQueueAdvance(): number {
           active = countActivePipelineTasksForProject(project.id);
           continue;
         }
-        // Mirror the broadcast that updateTaskStatus would have produced for
-        // the backlog → planning transition (CAS write skips it).
+        // Дублирует broadcast, который дал бы updateTaskStatus для перехода
+        // backlog → planning (CAS-запись его пропускает).
         void notifyTaskBroadcast(next.id, "task:moved", {
           title: next.title,
           fromStatus: next.status,
@@ -1214,7 +1362,7 @@ export function processAutoQueueAdvance(): number {
         );
       } catch (err) {
         log.error({ projectId: project.id, taskId: next.id, err }, "Auto-queue advance failed");
-        // Bail out of this project's loop on error; try again next tick.
+        // При ошибке выходим из цикла этого проекта; повторим на следующем тике.
         break;
       }
     }
@@ -1226,16 +1374,20 @@ export function processAutoQueueAdvance(): number {
   return advanced;
 }
 
-// ── Poll cycle ───────────────────────────────────────────────
+// ── Цикл опроса ──────────────────────────────────────
 
 let activePollPromise: Promise<void> | null = null;
 let followUpPollRequested = false;
 
+// Один тик обслуживания. Порядок шагов не произвольный: сначала снимаются протухшие локи и
+// разблокируются задачи с истёкшим retryAfter, затем просыпаются отложенные задачи,
+// синхронизируется внешний трекер и только после этого наполняется автоочередь. Если
+// поменять местами, задача может стартовать, оставаясь под чужим локом.
 async function runPollCycle(): Promise<void> {
   log.debug("Starting poll cycle");
 
-  // Release stale locks BEFORE watchdog — otherwise watchdog moves task to blocked_external
-  // and the lock remains orphaned (heartbeat cleanup filters by in-progress status)
+  // Освобожаем протухшие локи ДО watchdog — иначе watchdog переведёт задачу в blocked_external,
+  // а лок останется сиротой (очистка heartbeat фильтрует по статусу в работе)
   const released = releaseStaleTaskClaims();
   if (released > 0) {
     log.info({ released }, "Released stale task claims");
@@ -1251,19 +1403,23 @@ async function runPollCycle(): Promise<void> {
   const maxProjectLanes = env.COORDINATOR_MAX_CONCURRENT_PROJECTS;
   const globalMaxTasks = env.COORDINATOR_MAX_CONCURRENT_TASKS;
 
-  // Track tasks that failed in this cycle — prevent re-picking in downstream stages
+  // Ошибка на одной стадии не означает, что задачу нельзя взять на следующей: без этого
+  // множества упавший planner тут же был бы выбран implementer'ом в том же тике.
+  // Учитываем упавшие в этом цикле задачи — не брать их на последующих стадиях
   const failedInCycle = new Set<string>();
 
-  // Cache effective project concurrency settings to avoid repeated lookups.
-  // Legacy branch-bound tasks without worktreePath still mutate one shared
-  // projectRoot, so those projects stay serial until the legacy task drains.
+  // Кэширует фактические настройки параллельности проекта, чтобы не перечитывать их.
+  // Legacy задачи, привязанные к ветке без worktreePath, всё ещё мутируют общий
+  // projectRoot, поэтому такие проекты остаются последовательными, пока legacy задача не рассосётся.
+  // Кэш на время тика: проект читается из БД один раз, хотя по нему проходит весь конвейер.
+  // Между тиками кэш не живёт - настройки проекта могут измениться.
   const projectConcurrencyCache = new Map<string, { parallel: boolean; max: number }>();
   function resolveProjectConcurrency(projectId: string): { parallel: boolean; max: number } {
     let cached = projectConcurrencyCache.get(projectId);
     if (cached === undefined) {
       const project = findProjectById(projectId);
       const configuredParallel = project?.parallelEnabled ?? false;
-      // Mirror processAutoQueueAdvance: config OR task-state forces serial.
+      // Как в processAutoQueueAdvance: конфиг ИЛИ состояние задач принуждает к последовательности.
       const requiresSerialExecution = project ? projectRequiresSerialExecution(project) : false;
       cached = {
         parallel: configuredParallel && !requiresSerialExecution,
@@ -1283,6 +1439,8 @@ async function runPollCycle(): Promise<void> {
     return cached;
   }
 
+  // Число обрабатываемых проектов ограничено сверху: один тик не должен забирать все
+  // ресурсы машины, остальные проекты дождутся следующего.
   const projectIds = listCoordinatorActionableProjectIds(maxProjectLanes);
   if (projectIds.length === 0) {
     log.debug("No actionable project lanes");
@@ -1299,9 +1457,12 @@ async function runPollCycle(): Promise<void> {
     "Coordinator project lanes selected",
   );
 
+  // Проекты обрабатываются параллельно, а стадии внутри проекта - строго по порядку PIPELINE.
+  // Так задача не перескочит через стадию внутри одного тика, но разные проекты не
+  // блокируют друг друга.
   async function processProjectLane(projectId: string): Promise<void> {
-    // Once a branchless fix task is claimed, the rest of this project lane waits
-    // for the next cycle so its shared-tree mutation cannot overlap.
+    // После захвата fix-задачи без ветки остальная часть лана проекта ждёт
+    // следующего цикла, чтобы мутации общего дерева не перекрывались.
     let exclusiveRunClaimedThisCycle = false;
     for (const stage of PIPELINE) {
       const concurrency = resolveProjectConcurrency(projectId);
@@ -1309,6 +1470,8 @@ async function runPollCycle(): Promise<void> {
       const projectMax = concurrency.max;
       const stageKey = `${projectId}:${stage.label}`;
 
+      // Берём с запасом (пятикратный размер пула, но не больше 50): часть кандидатов
+      // отсеется проверками вроде плана или лимитов, и без запаса тик остался бы без работы.
       const candidateWindow = Math.min(Math.max(projectMax * 5, projectMax), 50);
       const candidates = findCoordinatorTaskCandidatesForProject(
         projectId,
@@ -1339,7 +1502,7 @@ async function runPollCycle(): Promise<void> {
 
       try {
         for (const task of candidates) {
-          // Per-project concurrency: non-parallel projects limited to 1 task at a time
+          // Параллельность на проект: непараллельные проекты ограничены 1 задачей за раз
           if (spawned.length >= projectMax) {
             log.debug(
               { taskId: task.id, projectId: task.projectId, projectMax, stage: stage.label },
@@ -1348,8 +1511,8 @@ async function runPollCycle(): Promise<void> {
             continue;
           }
 
-          // Branchless fix tasks mutate the shared checkout: they are never
-          // parallel-eligible and run only when nothing else is in flight.
+          // Fix-задачи без ветки мутируют общий checkout: они никогда не
+          // кандидаты в параллель и идут, только когда в работе пусто.
           if (exclusiveRunClaimedThisCycle) {
             log.debug(
               { taskId: task.id, projectId: task.projectId },
@@ -1373,8 +1536,8 @@ async function runPollCycle(): Promise<void> {
             continue;
           }
 
-          // Cross-cycle guard: for non-parallel projects, check DB for any active lock
-          // (another concurrent poll cycle may have already claimed a task for this project)
+          // Межцикловая защита: для непараллельных проектов проверяет БД на активный лок
+          // (другой одновременный цикл опроса мог уже захватить задачу этого проекта)
           if (!parallel && hasActiveLockedTaskForProject(task.projectId)) {
             log.debug(
               { taskId: task.id, projectId: task.projectId },
@@ -1387,13 +1550,20 @@ async function runPollCycle(): Promise<void> {
             continue;
           }
 
+          // Ожидание разрешения стоит после всех дешёвых проверок: занимать слот семафора
+          // под кандидата, который всё равно не пройдёт фильтр, нельзя.
           await stageSemaphore.acquire(stageKey, projectMax, globalMaxTasks);
           let claimedTask: TaskRow | undefined;
           let claimOutcomeUncertain = false;
           let cleanupOwnedByTaskPromise = false;
 
+          // Освобождение идёт через одну функцию, потому что вызывается из двух веток:
+          // штатно - из finally промиса задачи, и аварийно - если после захвата слота
+          // семафора запуск так и не состоялся.
           const releaseOwnedResources = (): void => {
             try {
+              // Если захват бросил исключение на середине, неизвестно, записала ли БД лок:
+              // снимаем по исходному id, чтобы не оставить вечный замок.
               const taskIdToRelease =
                 claimedTask?.id ?? (claimOutcomeUncertain ? task.id : undefined);
               if (taskIdToRelease) {
@@ -1415,6 +1585,8 @@ async function runPollCycle(): Promise<void> {
               "[FIX:149] Revalidating task candidate after coordinator permit",
             );
 
+            // Перепроверка после ожидания: пока задача стояла в очереди семафора, другой
+            // координатор мог занять проект, и кандидат уже не актуален.
             if (!parallel && hasActiveLockedTaskForProject(task.projectId)) {
               log.debug(
                 { taskId: task.id, projectId: task.projectId },
@@ -1428,6 +1600,8 @@ async function runPollCycle(): Promise<void> {
             }
 
             claimOutcomeUncertain = true;
+            // Условный захват по ожидаемому статусу и режиму: если состояние строки
+            // изменилось, захват вернёт undefined, и тик спокойно пойдёт дальше.
             claimedTask = claimCoordinatorTaskIfEligible({
               taskId: task.id,
               expectedProjectId: task.projectId,
@@ -1460,6 +1634,8 @@ async function runPollCycle(): Promise<void> {
               "[FIX:149] Task revalidated and claimed for processing",
             );
 
+            // Задача обрабатывается без await: несколько задач одной стадии должны идти
+            // параллельно, а ограничивают их семафор и размер пула проекта.
             const taskPromise = processOneTask(executionTask, stage)
               .then((success) => {
                 if (!success) failedInCycle.add(executionTask.id);
@@ -1476,13 +1652,15 @@ async function runPollCycle(): Promise<void> {
             spawned.push(taskPromise);
             cleanupOwnedByTaskPromise = true;
           } finally {
+            // Успешный запуск передаёт владение ресурсами промису задачи; иначе освобождаем
+            // их здесь же, чтобы слот семафора не утёк до конца цикла.
             if (!cleanupOwnedByTaskPromise) {
               releaseOwnedResources();
             }
           }
         }
       } finally {
-        // Preserve stage ordering even when setup for a later candidate rejects the lane.
+        // Порядок стадий сохраняется, даже когда настройка позднего кандидата отклонила лан.
         if (spawned.length > 0) {
           log.debug(
             { projectId, stage: stage.label, taskCount: spawned.length },
@@ -1498,6 +1676,8 @@ async function runPollCycle(): Promise<void> {
     }
   }
 
+  // allSettled, а не all: падение одного проекта не должно отменять уже идущие стадии в
+  // других - они всё равно завершатся, и их результат нужно дождаться.
   const laneResults = await Promise.allSettled(
     projectIds.map((projectId) => processProjectLane(projectId)),
   );
@@ -1510,9 +1690,9 @@ async function runPollCycle(): Promise<void> {
     }
   });
 
-  // Post-cycle reconciliation, guarded on "no stage in flight": a worktree that
-  // a task is mid-provisioning must never be mistaken for an orphan. This is the
-  // backstop that keeps `git worktree list` aligned with the live task set.
+  // Пост-цикловая сверка с условием «ни одна стадия не в работе»: рабочее дерево,
+  // которое задача только подготавливает, никогда не должно быть принято за сироту.
+  // Это страховка, синхронизирующая `git worktree list` с живым набором задач.
   if (stageSemaphore.totalActive() === 0) {
     try {
       await reconcileAllProjectWorktrees("poll_cycle");
@@ -1524,6 +1704,9 @@ async function runPollCycle(): Promise<void> {
   log.debug("Poll cycle complete");
 }
 
+// Single-flight: параллельные вызовы (крон и ручной запуск) не создают второй цикл, а
+// просят один дополнительный проход после текущего. Флаг, а не счётчик, потому что больше
+// одного лишнего прохода не нужно: следующий тик всё равно увидит свежее состояние.
 export function pollAndProcess(): Promise<void> {
   if (activePollPromise) {
     followUpPollRequested = true;

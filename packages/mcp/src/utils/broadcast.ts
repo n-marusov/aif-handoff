@@ -11,8 +11,8 @@ export interface BroadcastOptions {
 }
 
 /**
- * Best-effort WS broadcast via API endpoint + Telegram notification.
- * MCP tools call this after mutating task state so the UI updates in real-time.
+ * Рассылает WS-событие через API и, при необходимости, уведомление в Telegram.
+ * Используется инструментами MCP после изменения состояния задачи.
  */
 export async function broadcastTaskChange(
   taskId: string,
@@ -42,7 +42,7 @@ export async function broadcastTaskChange(
     log.warn({ taskId, type, err }, "Task broadcast request failed");
   }
 
-  // Best-effort Telegram — only for actual status changes
+  // Уведомление в Telegram отправляется только при фактической смене статуса.
   if (type === "task:moved" && (!options.fromStatus || options.fromStatus !== options.toStatus)) {
     void sendTelegramNotification({
       taskId,

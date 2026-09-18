@@ -1,16 +1,20 @@
 /**
- * Shared constants for the agent package.
+ * Константы системных правил для субагентских запусков.
+ *
+ * Эти строки участвуют в runtime-подсказках и напрямую влияют на границы
+ * исполнения в конвейере задач.
  */
 
+// Глобальная граница области работ: только текущий корень проекта.
 export const PROJECT_SCOPE_SYSTEM_APPEND =
   "Project scope rule: work strictly inside the current working directory (project root). " +
   "Do not inspect or modify files in the orchestrator monorepo or in parent/sibling directories " +
   "unless the user explicitly asks for that path. Avoid broad discovery outside the current project root.";
 
+// Граница review-режима: проверяется только дельта текущей задачи.
 /**
- * Scope rule injected automatically into review-style subagent queries
- * (profileMode === "review"). Keeps review/security sidecars focused on the
- * current task's diff instead of auditing unrelated code paths.
+ * Правило области работ для review-профиля.
+ * Ограничивает ревью изменениями текущей задачи.
  */
 export const REVIEW_DIFF_SCOPE_SYSTEM_APPEND =
   "Review scope rule: review ONLY code that changed as part of this task's implementation " +

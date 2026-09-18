@@ -60,8 +60,8 @@ export function RoadmapDialog({
     [project, onOpenChange, resetAndCheck],
   );
 
-  // Detect when the parent sets `open` directly (bypassing handleOpenChange).
-  // Only fetches roadmap status — no synchronous setState calls.
+  // Отслеживает, когда родитель выставляет `open` напрямую (минуя handleOpenChange).
+  // Только запрашивает статус roadmap — без синхронных вызовов setState.
   useEffect(() => {
     if (open && !prevOpenRef.current && project) {
       api.checkRoadmapStatus(project.id).then(
@@ -72,7 +72,7 @@ export function RoadmapDialog({
     prevOpenRef.current = open;
   }, [open, project]);
 
-  // Listen for roadmap WS events
+  // Слушает WS-события roadmap
   useEffect(() => {
     const handleComplete = (e: Event) => {
       const detail = (e as CustomEvent).detail;

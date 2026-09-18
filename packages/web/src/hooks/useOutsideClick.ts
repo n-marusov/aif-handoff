@@ -1,8 +1,8 @@
 import { useEffect, type RefObject } from "react";
 
 /**
- * Calls `handler` when a pointer/mouse event fires outside `ref`,
- * or when the Escape key is pressed. Only active when `enabled` is true.
+ * Вызывает `handler`, когда указатель/мышь сработали вне `ref`
+ * или нажата клавиша Escape. Активен только при `enabled` = true.
  */
 export function useOutsideClick(
   ref: RefObject<HTMLElement | null>,

@@ -14,8 +14,8 @@ const FIXTURE_STDOUT_LINES = [
 ];
 
 /**
- * Lightweight stub for a spawned child process. Emits the device-auth fixture
- * across multiple chunks to mimic the real CLI's streaming output.
+ * Легковесная заглушка запускаемого дочернего процесса. Выдаёт фикстуру device-auth
+ * несколькими фрагментами, имитируя потоковый вывод настоящего CLI.
  */
 function createStubChild(): ChildProcessWithoutNullStreams {
   const proc = new EventEmitter() as ChildProcessWithoutNullStreams & EventEmitter;
@@ -30,7 +30,7 @@ function createStubChild(): ChildProcessWithoutNullStreams {
     return true;
   });
 
-  // Emit chunks across microtasks to simulate streaming.
+  // Выдаём фрагменты через микротаски, имитируя потоковый вывод.
   queueMicrotask(() => {
     for (const line of FIXTURE_STDOUT_LINES) {
       stdout.emit("data", Buffer.from(line));
@@ -80,7 +80,7 @@ describe("loginBroker device-auth integration", () => {
     expect(activeBody.verificationUrl).toBe("https://auth.openai.com/codex/device");
     expect(activeBody.userCode).toBe("5PZO-GPZLR");
 
-    // Simulate codex CLI exiting after user completes the browser flow.
+    // Симулируем выход codex CLI после того, как пользователь завершил браузерную авторизацию.
     (stub as unknown as { exitCode: number | null }).exitCode = 0;
     stub.emit("exit", 0, null);
 
@@ -153,7 +153,7 @@ describe("loginBroker device-auth integration", () => {
     (proc as unknown as { killed: boolean }).killed = false;
     (proc as unknown as { exitCode: number | null }).exitCode = null;
     (proc as unknown as { kill: (sig?: string) => boolean }).kill = vi.fn(() => true);
-    // Emit an error event before any stdout — mimics ENOENT on the codex binary.
+    // Генерируем error-событие до любого stdout — имитирует ENOENT бинарника codex.
     queueMicrotask(() => proc.emit("error", new Error("spawn codex ENOENT")));
 
     const runtime = createBrokerRuntime({

@@ -461,10 +461,10 @@ describe("executeSubagentQuery attribution", () => {
     });
 
     const callOptions = queryMock.mock.calls[0][0].options;
-    // The agent requests Co-Authored-By suppression via the documented
-    // empty-string attribution values, and the Claude adapter forwards them to
-    // the SDK unchanged (empty commit/pr hide the trailers). They are NOT
-    // collapsed to {} — that would restore Claude Code's default attribution.
+    // Агент просит подавить Co-Authored-By через задокументированные пустые
+    // значения attribution, и Claude-адаптер передаёт их в SDK без изменений
+    // (пустые commit/pr скрывают трейлеры). Они НЕ сводятся к {} — это
+    // вернуло бы attribution Claude Code по умолчанию.
     expect(callOptions.settings).toEqual({ attribution: { commit: "", pr: "" } });
   });
 
@@ -1806,8 +1806,8 @@ describe("executeSubagentQuery model fallback policy", () => {
   });
 
   it("does not inject lightModel when no task override and no profile model", async () => {
-    // lightModel should only be used when explicitly passed via modelOverride
-    // (e.g. reviewGate.ts), not as a general fallback for all tasks
+    // lightModel должен применяться только когда он явно передан через modelOverride
+    // (например, reviewGate.ts), а не как общий запасной вариант для всех задач
     findTaskByIdMock.mockReturnValue({
       id: "task-1",
       projectId: "project-1",
@@ -2282,14 +2282,14 @@ describe("executeSubagentQuery first-activity watchdog", () => {
   });
 
   it("retries and eventually throws when agent stalls on all attempts", async () => {
-    // Use very short timeouts for the test
+    // Используем очень короткие таймауты для теста
     mockEnvOverrides.AGENT_FIRST_ACTIVITY_TIMEOUT_MS = 100;
     mockEnvOverrides.AGENT_QUERY_START_TIMEOUT_MS = 0;
 
-    // queryMock is called as queryImpl({ prompt, options }).
-    // options.abortController is the per-attempt AbortController from executionIntent.
-    // In production, SDKs use this signal to cancel HTTP requests; here we simulate
-    // the same: yield once (pass start-timeout), then hang until abort fires.
+    // queryMock вызывается как queryImpl({ prompt, options }).
+    // options.abortController — это AbortController на попытку из executionIntent.
+    // В продакшене SDK используют этот сигнал для отмены HTTP-запросов; здесь симулируем
+    // то же самое: один yield (проходим start-timeout), затем висим до срабатывания abort.
     queryMock.mockImplementation(
       (input: { prompt: string; options: { abortController?: AbortController } }) => {
         const ac = input.options?.abortController;
@@ -2323,10 +2323,10 @@ describe("executeSubagentQuery first-activity watchdog", () => {
       }),
     ).rejects.toThrow(/stalled|first_activity_timeout|timed out/i);
 
-    // Should have been called 3 times (1 initial + 2 retries)
+    // Должно было вызываться 3 раза (1 начальная + 2 повтора)
     expect(queryMock).toHaveBeenCalledTimes(3);
 
-    // Verify stall was logged in activity
+    // Проверяем, что зависание записано в журнал активности
     const stallLogs = logActivityMock.mock.calls.filter(
       (call: string[]) => call[1] === "Agent" && call[2]?.includes("stalled"),
     );

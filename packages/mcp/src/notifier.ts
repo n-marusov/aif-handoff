@@ -14,9 +14,9 @@ type BroadcastType = Extract<
 >;
 
 /**
- * Broadcast a task event to the API's WebSocket system.
- * Best-effort: failures are logged but don't block the MCP tool response.
- * Follows the same pattern as packages/agent/src/notifier.ts.
+ * Рассылает событие задачи в WebSocket-систему API.
+ * Best-effort: ошибки логируются, но не блокируют ответ MCP-инструмента.
+ * Повторяет тот же образец, что и packages/agent/src/notifier.ts.
  */
 export async function broadcastTaskEvent(
   apiUrl: string,

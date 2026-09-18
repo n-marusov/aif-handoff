@@ -1,3 +1,11 @@
+// Доменный контракт между пакетами api/agent/runtime/web.
+//
+// Файл задаёт общие формы данных и допустимые значения без runtime-логики.
+// Подход as const + (typeof X)[number] удерживает синхронность списка и типа.
+//
+// Необязательные поля нужно трактовать как "значение может отсутствовать в конкретной
+// выборке", а не только как "NULL в БД".
+
 export const TASK_STATUSES = [
   "backlog",
   "planning",
@@ -11,20 +19,25 @@ export const TASK_STATUSES = [
   "accepted",
 ] as const;
 
+// Порядок статусов = порядок доменного конвейера и колонок Kanban.
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+// Роли участников: администрирование проекта и исполнение задач.
 export const PARTICIPANT_ROLES = ["admin", "member"] as const;
 
 export type ParticipantRole = (typeof PARTICIPANT_ROLES)[number];
 
+// Владелец задачи определяет контур автоматизации и разрешения действий.
 export const EXECUTION_OWNERS = ["ai", "human"] as const;
 
 export type ExecutionOwner = (typeof EXECUTION_OWNERS)[number];
 
+// Тип актора аудита: участник, агент, система или неаутентифицированный источник.
 export const AUDIT_ACTOR_KINDS = ["participant", "agent", "system", "anonymous"] as const;
 
 export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 
+// Состояние Auto-queue commit gate; not_applicable не является ошибкой.
 export type AutoQueueCommitStatus =
   | "pending"
   | "running"
@@ -33,6 +46,7 @@ export type AutoQueueCommitStatus =
   | "not_applicable"
   | "failed";
 
+// Стратегии Auto Review Gate: полный пересмотр или приоритет закрытия старых finding'ов.
 export const AUTO_REVIEW_STRATEGIES = ["full_re_review", "closure_first"] as const;
 
 export type AutoReviewStrategy = (typeof AUTO_REVIEW_STRATEGIES)[number];
@@ -45,28 +59,32 @@ export const AUTO_REVIEW_FINDING_SOURCES = [
 
 export type AutoReviewFindingSource = (typeof AUTO_REVIEW_FINDING_SOURCES)[number];
 
+// Finding авто-ревью хранит источник для UI и правил блокировки.
 export interface AutoReviewFinding {
   id: string;
   text: string;
   source: AutoReviewFindingSource;
 }
 
+// Снимок Auto Review Gate: стратегия, итерация, набор finding'ов.
 export interface AutoReviewState {
   strategy: AutoReviewStrategy;
   iteration: number;
   findings: AutoReviewFinding[];
 }
 
-/** Lifecycle of the plan-review gate for VCS-linked tasks. */
+/** Жизненный цикл Plan Review Gate для задач с VCS-связью. */
 export const PLAN_REVIEW_STATES = ["published", "approved", "changes_requested"] as const;
 
 export type PlanReviewState = (typeof PLAN_REVIEW_STATES)[number];
 
-/** PR/MR body mode: plan review draft vs final implementation summary. */
+/** Режим тела PR/MR: черновик plan review или финальная сводка реализации. */
 export const PULL_REQUEST_MODES = ["plan_review", "implementation"] as const;
 
 export type PullRequestMode = (typeof PULL_REQUEST_MODES)[number];
 
+// Проект в доменной модели: настройки автоматизации конвейера, значения runtime
+// по умолчанию и связи с VCS.
 export interface Project {
   id: string;
   name: string;
@@ -83,7 +101,7 @@ export interface Project {
   defaultPlanRuntimeProfileId?: string | null;
   defaultReviewRuntimeProfileId?: string | null;
   defaultChatRuntimeProfileId?: string | null;
-  /** Aggregate token/cost usage across ALL sources (tasks, chat, commit, roadmap). */
+  /** Агрегированное использование по всем источникам: задачи, чат, коммит, roadmap. */
   tokenInput?: number;
   tokenOutput?: number;
   tokenTotal?: number;
@@ -92,6 +110,8 @@ export interface Project {
   updatedAt: string;
 }
 
+// Контракты интеграции с GitHub: элигибилити, связь с репозиторием, снимки issue и PR.
+// У типов GitLab ниже сохранена та же структура для симметрии.
 export interface GitHubEligibility {
   labels: string[];
   assignee: string | null;
@@ -134,6 +154,8 @@ export interface GitHubIssueSnapshot {
   comments: GitHubIssueCommentSnapshot[];
 }
 
+// Связь задачи с issue/PR и состоянием проверок.
+// lastReviewId защищает от повторной обработки одного ревью-события.
 export interface GitHubIssueLink {
   projectId: string;
   issueNumber: number;
@@ -156,6 +178,7 @@ export interface GitHubIssueLink {
   updatedAt: string;
 }
 
+// Зеркальный контракт eligibility для GitLab.
 export interface GitLabEligibility {
   labels: string[];
   assignee: string | null;
@@ -198,6 +221,7 @@ export interface GitLabIssueSnapshot {
   comments: GitLabIssueCommentSnapshot[];
 }
 
+// Зеркало GitHubIssueLink для GitLab (issue плюс merge request).
 export interface GitLabIssueLink {
   projectId: string;
   iid: number;
@@ -261,9 +285,9 @@ export interface TaskCommentAttachment {
   name: string;
   mimeType: string;
   size: number;
-  /** Inline content (text or base64). Deprecated for binary files — use `path` instead. */
+  /** Инлайн-содержимое (текст или base64). Устарело для бинарных файлов — используйте `path`. */
   content: string | null;
-  /** Relative path in storage/ directory. Present for file-backed attachments. */
+  /** Относительный путь в каталоге storage/. Присутствует у вложений, хранящихся файлом. */
   path?: string;
 }
 
@@ -312,6 +336,8 @@ export interface TaskAssigneeSummary {
   active: boolean;
 }
 
+// Права актора на задачу в терминах интерфейса: что можно сделать кнопками, а не как
+// именно это проверяется. Набор вычисляется функцией resolveTaskPermissions.
 export interface TaskPermissions {
   canAssign: boolean;
   canHandoff: boolean;
@@ -340,6 +366,8 @@ export interface TaskExecutorHistoryEntry {
   createdAt: string;
 }
 
+// Событие журнала аудита со снимками состояния. Снимки денормализованы: история
+// должна читаться без обращения к живым таблицам, которые могли измениться или исчезнуть.
 export interface AuditEvent {
   id: string;
   action: string;
@@ -358,12 +386,17 @@ export interface AuditEvent {
   createdAt: string;
 }
 
+// Текущее владение задачей: владелец, ревизия и состав назначений. Ревизия служит
+// оптимистичной проверкой при передаче владения.
 export interface TaskOwnership {
   executionOwner: ExecutionOwner;
   ownershipRevision: number;
   assignees: TaskAssigneeSummary[];
 }
 
+// Вход передачи владения. Поля expected* - это предварительное условие (optimistic
+// locking): передача выполняется только если фактическое состояние совпадает с тем,
+// которое видел вызывающий. Иначе возвращается конфликт, а не молчаливая перезапись.
 export interface HandoffTaskInput {
   executionOwner: ExecutionOwner;
   assigneeIds: string[];
@@ -374,6 +407,8 @@ export interface HandoffTaskInput {
   resumeAction?: TaskEvent;
 }
 
+// Причины отказа при передаче владения. Коды - часть контракта: вызывающий код
+// различает их, а текст сообщения служит только для человека.
 export type TaskOwnershipConflictCode =
   | "task_not_found"
   | "task_locked"
@@ -388,6 +423,10 @@ export interface TaskOwnershipConflict {
   ownership?: TaskOwnership;
 }
 
+// Задача в доменной модели. Объединяет бизнес-поля и служебные: прогресс этапа,
+// блокировки параллельного исполнения, выбранный рантайм, состояние гейтов автоматизации.
+// Необязательные поля (runtimeLimitSnapshot, github, gitlab, planReview*) заполняются
+// только там, где нужны, поэтому читатель обязан обрабатывать их отсутствие.
 export interface Task {
   id: string;
   projectId: string;
@@ -560,13 +599,13 @@ export interface TaskComment {
   createdAt: string;
 }
 
-/** POST /tasks/:id/comments body */
+/** Тело POST /tasks/:id/comments */
 export interface CreateTaskCommentInput {
   message: string;
   attachments?: TaskCommentAttachment[];
 }
 
-/** POST /tasks body */
+/** Тело POST /tasks */
 export interface CreateTaskInput {
   projectId: string;
   title: string;
@@ -595,7 +634,7 @@ export interface CreateTaskInput {
   scheduledAt?: string | null;
 }
 
-/** PUT /tasks/:id body */
+/** Тело PUT /tasks/:id */
 export interface UpdateTaskInput {
   title?: string;
   description?: string;
@@ -643,6 +682,8 @@ export interface UpdateTaskInput {
   scheduledAt?: string | null;
 }
 
+// Действия над задачей. Список закрытый и является основой конечного автомата: каждое
+// действие обрабатывается отдельной ветвью в stateMachine.ts.
 export const TASK_EVENTS = [
   "start_ai",
   "start_human_work",
@@ -664,19 +705,19 @@ export const TASK_EVENTS = [
 
 export type TaskEvent = (typeof TASK_EVENTS)[number];
 
-/** POST /tasks/:id/events body */
+/** Тело POST /tasks/:id/events */
 export interface TaskEventInput {
   event: TaskEvent;
   deletePlanFile?: boolean;
   commitOnApprove?: boolean;
 }
 
-/** PATCH /tasks/:id/position body */
+/** Тело PATCH /tasks/:id/position */
 export interface ReorderTaskInput {
   position: number;
 }
 
-/** WebSocket event types */
+/** Типы событий WebSocket */
 export type WsEventType =
   | "project:created"
   | "project:organization_updated"
@@ -735,9 +776,9 @@ export interface RoadmapErrorPayload {
 }
 
 /**
- * Emitted when the "create commit" checkbox is used on approve-done, to
- * surface the lifecycle of the fire-and-forget `/aif-commit` run to the UI.
- * `status` is redundant with `type` but makes the payload self-describing.
+ * Событие отправляется, когда при approve-done включён флаг "create commit".
+ * Нужен для отображения жизненного цикла fire-and-forget запуска `/aif-commit` в UI.
+ * Поле `status` частично дублирует `type`, но делает payload самодостаточным.
  */
 export interface TaskCommitPayload {
   taskId: string;
@@ -747,8 +788,9 @@ export interface TaskCommitPayload {
 }
 
 /**
- * Lifecycle of `/aif-qa` runs (manual via `POST /tasks/:id/run-qa` or
- * auto-triggered on `approve_done` when `task.autoQa = true`).
+ * Жизненный цикл запусков `/aif-qa`:
+ * ручной (`POST /tasks/:id/run-qa`) или автостарт при `approve_done`,
+ * если `task.autoQa = true`.
  */
 export interface TaskQaPayload {
   taskId: string;
@@ -817,27 +859,30 @@ export interface WsEvent {
     | TaskUsagePayload;
 }
 
+// Способы подключения к рантайму. Значения строковые, потому что они попадают в
+// конфигурацию и в JSON: SDK - библиотека в процессе, CLI - внешний исполняемый файл,
+// APP_SERVER - отдельный серверный процесс, API - прямой HTTP-вызов провайдера.
 export const RuntimeTransport = {
-  /** Agent SDK — in-process query */
+  /** Agent SDK — запрос в том же процессе */
   SDK: "sdk",
-  /** CLI subprocess — spawn a binary and parse stdout */
+  /** Дочерний процесс CLI — запуск бинарника и разбор stdout */
   CLI: "cli",
-  /** Codex app-server subprocess over stdio JSONL */
+  /** Дочерний процесс Codex app-server поверх stdio JSONL */
   APP_SERVER: "app-server",
-  /** HTTP API — POST to a remote runtime endpoint */
+  /** HTTP API — POST на удалённый эндпоинт runtime */
   API: "api",
 } as const;
 
 export type RuntimeTransport = (typeof RuntimeTransport)[keyof typeof RuntimeTransport];
 
-/** All known transport values for validation and UI selects. */
+/** Все известные значения транспорта для валидации и списков выбора UI. */
 export const RUNTIME_TRANSPORTS: readonly RuntimeTransport[] = Object.values(RuntimeTransport);
 
 export function isRuntimeTransport(value: unknown): value is RuntimeTransport {
   return typeof value === "string" && RUNTIME_TRANSPORTS.includes(value as RuntimeTransport);
 }
 
-/** Runtime descriptor returned by GET /runtime-profiles/runtimes */
+/** Дескриптор runtime, возвращаемый GET /runtime-profiles/runtimes */
 export interface RuntimeDescriptor {
   id: string;
   providerId: string;
@@ -859,6 +904,9 @@ export interface RuntimeProfileUsage {
   costUsd?: number | null;
 }
 
+// Профиль рантайма: рантайм, провайдер, транспорт, модель и заголовки запросов. Профиль
+// может принадлежать проекту или быть глобальным; снимок лимитов хранится здесь же,
+// чтобы интерфейс показывал остаток без обращения к провайдеру.
 export interface RuntimeProfile {
   id: string;
   projectId: string | null;
@@ -922,6 +970,8 @@ export interface EffectiveRuntimeProfileSelection {
   systemRuntimeProfileId: string | null;
 }
 
+// Поля лимитов объявлены объектами-перечислениями: они попадают в JSON и в интерфейс,
+// поэтому значения строковые, а не числовые.
 export const RuntimeLimitSource = {
   PROVIDER_API: "provider_api",
   SDK_EVENT: "sdk_event",
@@ -931,6 +981,8 @@ export const RuntimeLimitSource = {
 
 export type RuntimeLimitSource = (typeof RuntimeLimitSource)[keyof typeof RuntimeLimitSource];
 
+// Состояние лимита: warning - пройден порог предупреждения, blocked - расход исчерпан.
+// Решение принимается по остатку в процентах, а не по абсолютным значениям.
 export const RuntimeLimitStatus = {
   OK: "ok",
   WARNING: "warning",
@@ -940,6 +992,8 @@ export const RuntimeLimitStatus = {
 
 export type RuntimeLimitStatus = (typeof RuntimeLimitStatus)[keyof typeof RuntimeLimitStatus];
 
+// Точность данных важна для решений: exact берётся из ответов API, heuristic рассчитан
+// из событий использования и годится только для отображения.
 export const RuntimeLimitPrecision = {
   EXACT: "exact",
   HEURISTIC: "heuristic",
@@ -948,6 +1002,8 @@ export const RuntimeLimitPrecision = {
 export type RuntimeLimitPrecision =
   (typeof RuntimeLimitPrecision)[keyof typeof RuntimeLimitPrecision];
 
+// Что именно ограничивает провайдер: запросы, токены, время, деньги или использование
+// конкретной модели либо инструмента.
 export const RuntimeLimitScope = {
   REQUESTS: "requests",
   TOKENS: "tokens",
@@ -961,6 +1017,9 @@ export const RuntimeLimitScope = {
 
 export type RuntimeLimitScope = (typeof RuntimeLimitScope)[keyof typeof RuntimeLimitScope];
 
+// Одно окно лимита с его границами и остатком. Числовые поля необязательны, потому что
+// провайдеры отдают разные подмножества: где-то есть только остаток, где-то только
+// использованное количество.
 export interface RuntimeLimitWindow {
   scope: RuntimeLimitScope;
   name?: string | null;
@@ -975,6 +1034,9 @@ export interface RuntimeLimitWindow {
   warningThreshold?: number | null;
 }
 
+// Снимок лимитов на момент checkedAt. Хранится в задаче и в профиле рантайма, чтобы
+// интерфейс показывал остаток без обращения к провайдеру. providerMeta - произвольные
+// метаданные провайдера, которые перед выдачей проходят санитизацию (runtimeLimitUtils).
 export interface RuntimeLimitSnapshot {
   source: RuntimeLimitSource;
   status: RuntimeLimitStatus;
@@ -996,10 +1058,14 @@ export interface RuntimeLimitEventPayload {
   rawType?: string | null;
 }
 
-// ── Chat session types ──────────────────────────────────────
+// ── Типы сессий чата ──────────────────────────────────────
 
+// Источник чат-сессии: из интерфейса или из другого канала. Влияет на то, какие
+// действия предлагаются пользователю.
 export type ChatSessionSource = "web" | "cli" | "agent";
 
+// Чат-сессия: переписка с рантаймом вне контекста задачи. Хранит профиль рантайма и
+// идентификатор сессии провайдера, чтобы продолжить диалог после перезапуска.
 export interface ChatSession {
   id: string;
   projectId: string;
@@ -1042,7 +1108,7 @@ export interface ChatSessionMessage {
   createdAt: string;
 }
 
-// ── Chat types ──────────────────────────────────────────────
+// ── Типы чата ──────────────────────────────────────────────
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -1064,12 +1130,12 @@ export interface ChatRequest {
   conversationId?: string;
   sessionId?: string;
   explore?: boolean;
-  /** Currently open task ID — provides context to the chat agent */
+  /** ID открытой сейчас задачи — даёт контекст чат-агенту */
   taskId?: string;
   attachments?: ChatAttachment[];
 }
 
-// ── Chat actions (structured blocks in AI responses) ───────
+// ── Действия чата (структурные блоки в ответах ИИ) ───────
 
 export interface ChatActionCreateTask {
   type: "create_task";
@@ -1086,9 +1152,9 @@ export interface ChatStreamTokenPayload {
 }
 
 /**
- * Per-turn token usage reported to the frontend alongside the `chat:done`
- * event. Matches `RuntimeUsage` from `@aif/runtime` structurally, duplicated
- * here to avoid forcing `@aif/shared` to depend on the runtime layer.
+ * Расход токенов за один ход, отправляемый на фронтенд вместе с событием
+ * `chat:done`. Структурно совпадает с `RuntimeUsage` из `@aif/runtime`, но
+ * продублирован здесь, чтобы `@aif/shared` не зависел от слоя runtime.
  */
 export interface ChatDoneUsage {
   inputTokens: number;
@@ -1099,7 +1165,7 @@ export interface ChatDoneUsage {
 
 export interface ChatDonePayload {
   conversationId: string;
-  /** Null when the adapter/transport does not report usage for this turn. */
+  /** Null, если адаптер/транспорт не сообщает расход за этот ход. */
   usage?: ChatDoneUsage | null;
   projectId?: string;
   taskId?: string | null;
@@ -1107,20 +1173,20 @@ export interface ChatDonePayload {
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
 }
 
-/** Lightweight task heartbeat broadcast to the board/detail UI. */
+/** Облегчённый хартбит задачи, рассылаемый в UI доски/деталей. */
 export interface TaskHeartbeatPayload {
   taskId: string;
   lastHeartbeatAt: string | null;
 }
 
-/** A tool the agent started but has not yet completed (in-flight). */
+/** Инструмент, который агент запустил, но ещё не завершил (в процессе). */
 export interface TaskCurrentTool {
   name: string;
   detail?: string;
   startedAt: string;
 }
 
-/** Task-scoped usage delta broadcast at run boundary. */
+/** Дельта расхода по задаче, рассылаемая на границе запуска. */
 export interface TaskUsagePayload {
   taskId: string;
   projectId: string;

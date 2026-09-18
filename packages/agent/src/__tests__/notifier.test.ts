@@ -12,7 +12,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {
     ...actual,
-    // Re-parse process env for each call so test-local vi.stubEnv overrides are visible.
+    // Перечитываем env на каждый вызов, чтобы переопределения vi.stubEnv из теста были видны.
     getEnv: () => actual.validateEnv(process.env),
   };
 });
@@ -162,7 +162,7 @@ describe("notifyTaskBroadcast", () => {
         toStatus: "plan_review",
       });
 
-      // Wait a tick for the fire-and-forget void call to resolve
+      // Ждём тик, чтобы fire-and-forget вызов завершился
       await new Promise((r) => setTimeout(r, 10));
 
       const telegramCall = fetchMock.mock.calls.find(
@@ -279,7 +279,7 @@ describe("notifyTaskBroadcast", () => {
     });
 
     it("does not send Telegram message when env is not configured", async () => {
-      // Explicitly clear tokens that may exist in the real environment
+      // Явно очищаем токены, которые могут существовать в реальном окружении
       vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
       vi.stubEnv("TELEGRAM_USER_ID", "");
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
@@ -339,7 +339,7 @@ describe("notifyTaskBroadcast", () => {
 
       await new Promise((r) => setTimeout(r, 10));
 
-      // Broadcast call + Telegram call should both have been attempted
+      // Оба вызова — broadcast и Telegram — должны были быть предприняты
       expect(callCount).toBe(2);
     });
 
@@ -403,7 +403,7 @@ describe("notifyTaskBroadcast", () => {
         (call: any[]) => typeof call[0] === "string" && call[0].includes("api.telegram.org"),
       );
       const body = JSON.parse(telegramCall![1].body);
-      // Square brackets and parens must be escaped
+      // Квадратные скобки и круглые должны быть экранированы
       expect(body.text).toContain("\\[critical\\]");
       expect(body.text).toContain("\\(prod\\)");
     });

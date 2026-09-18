@@ -63,7 +63,7 @@ describe("codex provider config", () => {
     expect(first).toContain("[model_providers.routerai]");
     expect(first).toContain('model_provider = "routerai"');
 
-    // Second call must not duplicate the block.
+    // Второй вызов не должен дублировать блок.
     ensureCodexProviderConfig({
       baseUrl: "https://routerai.ru/api/v1",
       apiKeyEnvVar: "OPENAI_API_KEY",

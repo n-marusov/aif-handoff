@@ -92,10 +92,10 @@ describe("GitHub issue import", () => {
     const taskRow = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
     if (!taskRow) throw new Error("expected task row");
 
-    // Record the updatedAt produced by the first import.
+    // Записываем updatedAt, который дал первый импорт.
     const firstUpdatedAt = taskRow.updatedAt;
 
-    // Identical snapshot re-import must not touch the task row at all.
+    // Повторный импорт идентичного снимка не должен вообще трогать строку задачи.
     importGitHubIssueTask({ ...input, sourceUpdatedAt: new Date().toISOString() });
 
     const after = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
@@ -110,8 +110,8 @@ describe("GitHub issue import", () => {
       snapshot: { ...input.snapshot, title: "Updated title" },
     });
 
-    // The change must be reflected on the linked task row. (updatedAt equality
-    // is not asserted here — both imports can land in the same millisecond.)
+    // Изменение должно отразиться на связанной строке задачи. (равенство updatedAt
+    // здесь не проверяется — оба импорта могут попасть в одну миллисекунду.)
     const taskRow = testDb.current.select().from(tasks).where(eq(tasks.id, changed.taskId)).get();
     expect(taskRow?.title).toBe("#42 Updated title");
     expect(taskRow?.description).toContain("Issue body");

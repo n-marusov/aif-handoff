@@ -4,9 +4,9 @@ import { Bot } from "lucide-react";
 const BLINK_RESET_MS = 800;
 
 /**
- * Small "robot" activity indicator. Blinks (opacity pulse) briefly when a
- * `task:usage_updated` WebSocket event is observed, signaling that token/cost
- * counters just updated without animating the numbers themselves.
+ * Индикатор активности «робот». Коротко мигает (пульс opacity) при событии
+ * WebSocket `task:usage_updated`, сигнализируя об обновлении счётчиков
+ * токенов/стоимости без анимации самих чисел.
  */
 export function RobotBlink() {
   const [active, setActive] = useState(false);

@@ -1,3 +1,17 @@
+/**
+ * Точка входа OpenCode-адаптера рантайма.
+ *
+ * В отличие от Claude и Codex, у OpenCode единственный транспорт - HTTP API к
+ * локально поднятому `opencode serve` (см. ./api.ts). Поэтому адаптер не раздаёт
+ * работу по транспортам, а целиком строится поверх одного API-клиента.
+ *
+ * Здесь собраны три вещи: capabilities-контракт, который workflow-узлы проверяют до
+ * запуска; рантайм-нейтральные обёртки, добавляющие логирование и классификацию
+ * ошибок; и диагностика сбоев для UI. Ошибки всегда проходят через
+ * classifyOpenCodeRuntimeError, поэтому наружу отдаются структурные категории, а не
+ * сырой текст, который потребителю пришлось бы разбирать.
+ */
+
 import {
   RuntimeTransport,
   UsageReporting,
@@ -28,8 +42,14 @@ import {
 import { classifyOpenCodeRuntimeError } from "./errors.js";
 import { RuntimeExecutionError } from "../../errors.js";
 
+// Адаптер принимает ровно тот же структурный интерфейс логгера, что и api.ts:
+// отдельный тип нужен лишь как точка расширения, а не как прослойка-адаптер.
+// Любой совместимый по форме логгер (например pino) подойдёт без обёрток.
 export type OpenCodeRuntimeAdapterLogger = OpenCodeApiLogger;
 
+// Всё опционально: реестр создаёт built-in адаптеры без аргументов, а незаданное
+// доопределяется дефолтами ниже (id, fallback-логгер, отображаемое имя). Оставленные
+// параметры нужны прежде всего тестам и конфигурации с собственным runtimeId.
 export interface CreateOpenCodeRuntimeAdapterOptions {
   runtimeId?: string;
   providerId?: string;
@@ -37,23 +57,41 @@ export interface CreateOpenCodeRuntimeAdapterOptions {
   logger?: OpenCodeRuntimeAdapterLogger;
 }
 
+// Контракт возможностей - это не описание "что умеет библиотека вообще", а обещание
+// "на что можно положиться при любой конфигурации". capabilities.ts ассертит их до
+// старта workflow, поэтому лучше заявить false и явно упасть, чем пообещать
+// поддержку и сломаться в середине прогона.
 const API_CAPABILITIES: RuntimeCapabilities = {
+  // Продолжение сессии идёт обычным POST в ту же сессию - сервер хранит историю сам.
   supportsResume: true,
+  // Форк отдельной ветки сессии сервером не предусмотрен - заявлять его нельзя.
   supportsSessionFork: false,
+  // GET /session отдаёт список, его хватает для UI истории запусков.
   supportsSessionList: true,
+  // Агентские определения (.claude/agents) через этот транспорт не передаются.
   supportsAgentDefinitions: false,
+  // Ответ возвращается целиком, но экранное событие отдаётся по мере готовности.
   supportsStreaming: true,
+  // Модели читаются из /config/providers - discovery опирается на живые данные.
   supportsModelDiscovery: true,
+  // Интерактивный диалог одобрений реализован только у транспортов с approvals.
   supportsApprovals: false,
+  // baseUrl профиля подставляется в запросы - кастомный endpoint поддержан.
   supportsCustomEndpoint: true,
+  // Системный промпт и промпт инструментов - только на уровне текста запроса.
   supportsWorkspaceTools: true,
-  // OpenCode server returns messages but does not surface token counts in its
-  // message payload. The run() path never populates RuntimeRunResult.usage,
-  // so declare the contract honestly as NONE — dashboards will show this
-  // provider as opted-out of usage tracking rather than showing phantom zeros.
+  // OpenCode server возвращает сообщения, но не отдаёт счётчики токенов в
+  // message payload. Путь run() никогда не заполняет RuntimeRunResult.usage,
+  // поэтому контракт честно объявлен как NONE — дашборды покажут этот
+  // провайдер как отказавшийся от учёта, а не с фантомными нулями.
+  // usageReporting: NONE согласуется с честным usage: null в результате запуска -
+  // счётчики токенов не эмулируются нулями, и дашборды видят явный отказ, а не фантомные цифры.
   usageReporting: UsageReporting.NONE,
 };
 
+// Список-fallback на случай недоступного сервера. Он нужен не для работы агента, а
+// чтобы UI не оставался с пустым селектом моделей; как только discovery отвечает,
+// живой список полностью вытесняет этот.
 const DEFAULT_OPENCODE_MODELS: RuntimeModel[] = [
   {
     id: "anthropic/claude-sonnet-4",
@@ -67,6 +105,9 @@ const DEFAULT_OPENCODE_MODELS: RuntimeModel[] = [
   },
 ];
 
+// Реестр строит адаптер без аргументов, поэтому логгер обязан иметь дефолт. Здесь
+// намеренно console, а не pino: библиотека рантайма не тянет зависимость логгера, а
+// вызывающий код всё равно передаёт свой при сборке через options.logger.
 function createFallbackLogger(): OpenCodeRuntimeAdapterLogger {
   return {
     debug(context, message) {
@@ -84,10 +125,19 @@ function createFallbackLogger(): OpenCodeRuntimeAdapterLogger {
   };
 }
 
+// Диагностика - единственное место модуля, где текст ошибки превращается в текст
+// подсказки: этот результат идёт в UI человеку, а не в ветвления логики, поэтому
+// здесь допустимо и сопоставление по строкам. Начинаем со структурной категории, а
+// строковый разбор оставляем только для сбоев, не прошедших классификатор.
 function diagnoseErrorMessage(input: RuntimeDiagnoseErrorInput): string {
+  // Текст исходной ошибки нужен только как хвост подсказки (category permission и
+  // stream передают его дальше); решений по нему не принимается.
   const message = input.error instanceof Error ? input.error.message : String(input.error);
 
-  // Primary: dispatch on structured category when available
+  // Основной путь: развилка по структурной category, когда доступна
+  // Ветвление идёт по category, а не по тексту: формулировки сервера меняются от
+  // релиза к релизу, а категория - стабильный контракт. unknown исключён намеренно:
+  // он означает, что структуры нет и надо пробовать текстовый fallback ниже.
   if (input.error instanceof RuntimeExecutionError && input.error.category !== "unknown") {
     switch (input.error.category) {
       case "auth":
@@ -107,7 +157,10 @@ function diagnoseErrorMessage(input: RuntimeDiagnoseErrorInput): string {
     }
   }
 
-  // Fallback: string matching for unclassified errors or plain Error instances
+  // Резерв: сопоставление строк для неклассифицированных ошибок или plain Error
+  // Здесь остаются только ошибки без распознанной категории, поэтому строки - не
+  // замена структуре, а единственный доступный сигнал. Хвост stderr добавляется,
+  // потому что при падении соединения полезная причина часто остаётся именно там.
   const combined = `${message} ${input.stderrTail ?? ""}`.toLowerCase();
 
   if (
@@ -144,29 +197,49 @@ function diagnoseErrorMessage(input: RuntimeDiagnoseErrorInput): string {
   return `OpenCode error: ${message}`;
 }
 
+/**
+ * Фабрика, а не класс: реестр и bootstrap работают с обычным объектом-значением
+ * RuntimeAdapter, поэтому замыкание на options удобнее наследования - все зависимости
+ * (logger, id) фиксируются один раз при создании.
+ */
 export function createOpenCodeRuntimeAdapter(
   options: CreateOpenCodeRuntimeAdapterOptions = {},
 ): RuntimeAdapter {
+  // Дефолты вместо обязательных параметров: адаптер должен собираться и без настройки
+  // (например, в тестах или в докере с переменными окружения).
   const runtimeId = options.runtimeId ?? "opencode";
   const providerId = options.providerId ?? "opencode";
+  // Логгер разрешается на этапе создания, чтобы внутри методов не проверять его на null.
   const logger = options.logger ?? createFallbackLogger();
 
   return {
+    // descriptor - то, как адаптер видится реестру и UI: идентификаторы, транспорт,
+    // окружение по умолчанию и тот же capabilities, по которому идут ассерты.
     descriptor: {
       id: runtimeId,
       providerId,
+      // displayName отделён от id: пользователь может завести профиль с другим id,
+      // но в интерфейсе всё равно должно быть видно имя технологии.
       displayName: options.displayName ?? "OpenCode",
+      // Проект инициализируется служебным агентом opencode (см. projectInit).
       supportsProjectInit: true,
       projectInitAgentName: "opencode",
+      // lightModel не заявлен: дешёвой модели для автопроверок у этого рантайма нет,
+      // и подставлять произвольную было бы нечестно - reviewGate получит явный null.
       lightModel: null,
+      // UI подсказывает эти значения в форме профиля, чтобы не запоминать их вручную.
       defaultBaseUrlEnvVar: "OPENCODE_BASE_URL",
       defaultModelPlaceholder: "anthropic/claude-sonnet-4",
+      // Список из одного элемента - не ограничение, а фиксация единственного
+      // реализованного транспорта: HTTP API к opencode serve.
       supportedTransports: [RuntimeTransport.API],
       defaultTransport: RuntimeTransport.API,
       capabilities: API_CAPABILITIES,
     },
 
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+      // Логируем вход до вызова: при падении будет видно, с какими параметрами
+      // пришли. Секреты не попадают в лог - api.ts сам чистит options.
       logger.info?.(
         {
           runtimeId,
@@ -180,8 +253,12 @@ export function createOpenCodeRuntimeAdapter(
       );
 
       try {
+        // transport проставляется принудительно: у адаптера один путь, и даже если
+        // выше передали другой транспорт, запуск всё равно идёт через API.
         return await runOpenCodeApi({ ...input, transport: RuntimeTransport.API }, logger);
       } catch (error) {
+        // Логируем и только затем классифицируем: текст исключения нужен в логе,
+        // а наружу уходит уже структурированная ошибка с category/adapterCode.
         logger.error?.(
           {
             runtimeId,
@@ -195,6 +272,8 @@ export function createOpenCodeRuntimeAdapter(
     },
 
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
+      // resume - та же отправка сообщения, но с флагом resume: true: имя метода
+      // говорит о намерении, а не о другом HTTP-эндпоинте.
       logger.info?.(
         {
           runtimeId,
@@ -210,14 +289,20 @@ export function createOpenCodeRuntimeAdapter(
           logger,
         );
       } catch (error) {
+        // Классификация без логирования: run() уже пишет свой контекст, дублировать
+        // его на каждом уровне не нужно.
         throw classifyOpenCodeRuntimeError(error);
       }
     },
 
+    // Тонкие прокси: вся работа с HTTP - в api.ts, здесь только привязка логгера,
+    // чтобы каждый запрос адаптера был виден в общем логе рантайма.
     async listSessions(input: RuntimeSessionListInput): Promise<RuntimeSession[]> {
       return listOpenCodeSessions(input, logger);
     },
 
+    // Возвращает null вместо исключения, когда сессии нет: отсутствие записи -
+    // нормальная ситуация (сессию могли удалить), и превращать её в падение незачем.
     async getSession(input: RuntimeSessionGetInput): Promise<RuntimeSession | null> {
       return getOpenCodeSession(input, logger);
     },
@@ -229,12 +314,17 @@ export function createOpenCodeRuntimeAdapter(
     async validateConnection(
       input: RuntimeConnectionValidationInput,
     ): Promise<RuntimeConnectionValidationResult> {
+      // transport задаётся явно по той же причине, что и в run(): валидация идёт
+      // только через API-транспорт, независимо от того, что пришло в input.
       return validateOpenCodeApiConnection({ ...input, transport: RuntimeTransport.API });
     },
 
     async listModels(input: RuntimeModelListInput): Promise<RuntimeModel[]> {
       try {
         const models = await listOpenCodeApiModels(input);
+        // Пустой ответ считается неудачей: сервер ответил, но моделей не отдал,
+        // поэтому используется тот же fallback, что и при ошибке - иначе UI
+        // получил бы пустой селект без объяснения.
         if (models.length > 0) {
           logger.debug?.(
             {
@@ -247,6 +337,9 @@ export function createOpenCodeRuntimeAdapter(
           return models;
         }
       } catch {
+        // Ошибка discovery не должна валить весь адаптер: список моделей -
+        // вспомогательная возможность, поэтому деградируем до встроенного набора
+        // и сообщаем об этом в лог уровнем warn.
         logger.warn?.(
           {
             runtimeId: input.runtimeId,
@@ -256,10 +349,14 @@ export function createOpenCodeRuntimeAdapter(
         );
       }
 
+      // Сюда попадаем и при исключении, и при пустом ответе - оба случая
+      // равнозначны для UI.
       return DEFAULT_OPENCODE_MODELS;
     },
 
     async diagnoseError(input: RuntimeDiagnoseErrorInput): Promise<string> {
+      // Диагностика синхронна: shared-слой ждёт Promise, поэтому метод помечен
+      // async, но никакой работы с сетью здесь нет.
       return diagnoseErrorMessage(input);
     },
   };

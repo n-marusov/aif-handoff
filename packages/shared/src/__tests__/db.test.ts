@@ -14,7 +14,7 @@ function removeSqliteArtifacts(dbPath: string): void {
     try {
       rmSync(path, { force: true });
     } catch {
-      // Windows can hold SQLite sidecars briefly after close; ignore cleanup noise in tests.
+      // Windows может кратко удерживать sidecar-файлы SQLite после закрытия; игнорируем шум очистки в тестах.
     }
   }
 }
@@ -133,7 +133,7 @@ describe("db", () => {
   });
 
   it("index bootstrap is idempotent — calling createTestDb twice does not throw", () => {
-    // Each call runs ensureTables + ensureIndexes with CREATE INDEX IF NOT EXISTS
+    // Каждый вызов выполняет ensureTables + ensureIndexes с CREATE INDEX IF NOT EXISTS
     const db1 = createTestDb();
     const db2 = createTestDb();
     expect(db1).toBeDefined();
@@ -950,13 +950,13 @@ describe("db", () => {
     const dbPath = join(tmpdir(), `aif-shared-v18-to-v19-${Date.now()}-${Math.random()}.sqlite`);
     const sqlite = new Database(dbPath);
 
-    // Minimal pre-v19 schema with the columns the v6→v18 migrations would have
-    // produced. The point of this test is to lock the v19 contract: the
-    // upgrade must add `branch_name` and `worktree_path`, while leaving every
-    // prior column (esp. the v15 runtime_limit recovery columns) intact. If
-    // this PR lands second after another migration merges to main, this test
-    // will fail and force the rebaser to bump to a free trailing version slot
-    // rather than silently re-using an existing version with different SQL.
+    // Минимальная схема до v19 с колонками, которые должны были создать
+    // миграции v6→v18. Смысл этого теста — зафиксировать контракт v19:
+    // обновление должно добавить `branch_name` и `worktree_path`, оставив при этом
+    // все прежние колонки (особенно колонки восстановления runtime_limit из v15) целыми. Если
+    // этот PR вольётся вторым после слияния другой миграции в main, тест
+    // упадёт и заставит ребейзера перенести миграцию в свободный хвостовой слот версии,
+    // а не молча переиспользовать существующую версию с другим SQL.
     sqlite.exec(`
       CREATE TABLE tasks (
         id TEXT PRIMARY KEY,
@@ -1090,8 +1090,8 @@ describe("db", () => {
     const dbPath = join(tmpdir(), `aif-shared-v33-to-v34-${Date.now()}-${Math.random()}.sqlite`);
     const sqlite = new Database(dbPath);
 
-    // Create minimal pre-v34 schema and insert a task with plan_ready status
-    // and a blocked_from_status referencing plan_ready.
+    // Создаём минимальную схему до v34 и вставляем задачу со статусом plan_ready
+    // и blocked_from_status, ссылающимся на plan_ready.
     sqlite.exec(`
       CREATE TABLE tasks (
         id TEXT PRIMARY KEY,

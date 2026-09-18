@@ -1,3 +1,9 @@
+// Сохранение плана задачи сразу в двух местах: в базу и в канонический файл.
+//
+// Файл нужен потому, что план читают люди и внешние инструменты (в том числе ревью
+// в PR/MR), а база - источник истины для конвейера. Обе записи выполняются в одной
+// функции, чтобы они не разошлись: файл без строки в базе или наоборот.
+
 import { eq } from "drizzle-orm";
 import { getDb } from "./db.js";
 import { projects, tasks } from "./schema.js";
@@ -13,6 +19,9 @@ interface PersistTaskPlanInput {
   planPath?: string;
 }
 
+// projectRoot, isFix и planPath можно не передавать: тогда они дочитываются из базы.
+// Дополнительные запросы выполняются только при нехватке данных - тот вызывающий
+// код, которому всё уже известно, не платит за лишние выборки.
 export function persistTaskPlan(input: PersistTaskPlanInput): { updatedAt: string } {
   let projectRoot = input.projectRoot;
   let isFix = input.isFix;
@@ -29,6 +38,8 @@ export function persistTaskPlan(input: PersistTaskPlanInput): { updatedAt: strin
       .where(eq(tasks.id, input.taskId))
       .get();
 
+    // Отсутствие задачи - ошибка вызывающего кода, а не штатная ситуация: молча
+    // записать план без задачи означало бы осиротевший файл на диске.
     if (!task) {
       throw new Error(`Task ${input.taskId} not found`);
     }
@@ -47,6 +58,8 @@ export function persistTaskPlan(input: PersistTaskPlanInput): { updatedAt: strin
 
     projectRoot = project.rootPath;
     isFix = task.isFix;
+    // Явно переданный planPath приоритетнее сохранённого в задаче: так вызывающий
+    // может перенаправить план, не меняя запись в базе.
     planPath = planPath ?? task.planPath;
   }
 
@@ -57,6 +70,8 @@ export function persistTaskPlan(input: PersistTaskPlanInput): { updatedAt: strin
     planText: input.planText,
   });
 
+  // Метка времени генерируется один раз и идёт и в ответ, и в базу: иначе они
+  // разошлись бы на доли миллисекунды.
   const updatedAt = input.updatedAt ?? new Date().toISOString();
   input.db
     .update(tasks)

@@ -361,8 +361,8 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
       <Dialog
         open={actions.showApproveDoneConfirm}
         onOpenChange={(next) => {
-          // Block dismissing the modal while a commit is in flight so the
-          // user waits for the WS ack (commit_done / commit_failed).
+          // Не даём закрыть модалку, пока коммит в полёте: пользователь
+          // должен дождаться WS-подтверждения (commit_done / commit_failed).
           if (!next && actions.commitPending) return;
           actions.setShowApproveDoneConfirm(next);
         }}

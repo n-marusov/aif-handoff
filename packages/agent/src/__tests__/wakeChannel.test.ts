@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock @aif/shared before imports
+// Мок @aif/shared до импортов
 vi.mock("@aif/shared", () => ({
   logger: () => ({
     info: vi.fn(),
@@ -84,7 +84,7 @@ vi.mock("ws", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock fetch for waitForApiReady
+// Мок fetch для waitForApiReady
 // ---------------------------------------------------------------------------
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -102,7 +102,7 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests
+// Тесты
 // ---------------------------------------------------------------------------
 describe("wakeChannel", () => {
   describe("connectWakeChannel", () => {
@@ -168,7 +168,7 @@ describe("wakeChannel", () => {
       const ws1 = wsMockState.lastCreatedWs!;
       ws1._simulateClose();
 
-      // First reconnect: ~1s base
+      // Первое переподключение: база ~1 с
       vi.advanceTimersByTime(1500);
       expect(wsMockState.lastCreatedWs).not.toBe(ws1);
     });
@@ -182,7 +182,7 @@ describe("wakeChannel", () => {
       ws1._simulateClose();
 
       vi.advanceTimersByTime(60000);
-      // No new WS created after close
+      // После close новый WS не создаётся
       expect(wsMockState.lastCreatedWs).toBe(ws1);
     });
   });
@@ -199,7 +199,7 @@ describe("wakeChannel", () => {
 
   describe("getReconnectDelay", () => {
     it("returns exponentially increasing delays", () => {
-      // With jitter, delay >= base * 2^attempt
+      // С джиттером задержка >= base * 2^attempt
       const d0 = getReconnectDelay(0);
       const d1 = getReconnectDelay(1);
       const d2 = getReconnectDelay(2);
@@ -211,7 +211,7 @@ describe("wakeChannel", () => {
 
     it("caps at RECONNECT_MAX_MS (30s)", () => {
       const d10 = getReconnectDelay(10);
-      // max base = 30000, jitter up to 30% = 39000
+      // макс. база = 30000, джиттер до 30% = 39000
       expect(d10).toBeLessThanOrEqual(39000);
     });
   });
@@ -234,7 +234,7 @@ describe("wakeChannel", () => {
       });
 
       const promise = waitForApiReady();
-      // Advance past first retry delay
+      // Прокручиваем таймер за первую задержку повтора
       await vi.advanceTimersByTimeAsync(READINESS_RETRY_DELAY_MS);
       const result = await promise;
 
@@ -259,7 +259,7 @@ describe("wakeChannel", () => {
       fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
 
       const promise = waitForApiReady();
-      // Advance past all retries (10 retries * 2s = 20s)
+      // Прокручиваем таймер за все повторы (10 повторов * 2 с = 20 с)
       for (let i = 0; i < READINESS_MAX_RETRIES; i++) {
         await vi.advanceTimersByTimeAsync(READINESS_RETRY_DELAY_MS + 100);
       }
@@ -270,6 +270,6 @@ describe("wakeChannel", () => {
   });
 });
 
-// Re-export constants for test assertions
+// Реэкспорт констант для тестовых проверок
 const READINESS_RETRY_DELAY_MS = 2000;
 const READINESS_MAX_RETRIES = 10;

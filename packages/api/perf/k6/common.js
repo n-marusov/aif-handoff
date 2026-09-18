@@ -1,18 +1,18 @@
 import { check } from "k6";
 import http from "k6/http";
 
-// Read base URL from env so the same scripts run against local dev and staging
-// without edits. Defaults target the local dev API on :3009.
+// Базовый URL берётся из окружения, чтобы одни и те же скрипты работали против
+// локального dev и staging без правок. По умолчанию — локальный dev-API на :3009.
 export const BASE_URL = __ENV.AIF_API_URL || "http://localhost:3009";
 
-// Shared tags surface in the k6 summary so we can separate assertions per
-// endpoint when scripts cover multiple routes.
+// Общие теги попадают в сводку k6, чтобы разделять проверки по эндпоинтам,
+// когда скрипты покрывают несколько маршрутов.
 export function tag(name) {
   return { tags: { endpoint: name } };
 }
 
-// Pick the first project id from the dev DB on the setup phase so VUs that
-// need a project identifier do not all pay for the lookup.
+// Первый id проекта из dev-БД определяется на фазе setup, чтобы все VU
+// не платили за этот запрос отдельно.
 export function resolveFirstProjectId() {
   const res = http.get(`${BASE_URL}/projects`);
   if (res.status !== 200) {

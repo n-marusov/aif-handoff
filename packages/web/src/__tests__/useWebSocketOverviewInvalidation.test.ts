@@ -3,15 +3,16 @@ import { QueryClient } from "@tanstack/react-query";
 import { invalidateProjectTaskOverviews } from "@/hooks/useProjects";
 
 /**
- * Regression for the WS overview-invalidation gap (#143 review, must-fix #2).
+ * Регрессия дыры инвалидации overview по WS (#143 review, must-fix #2).
  *
- * `project:runtime_limit_updated` fires when persisted runtime-limit / last
- * usage state changes. The overview aggregates token/cost fields, so this
- * event must invalidate the `["projectTaskOverviews"]` query — otherwise the
- * dashboard header and project cards show stale token/cost after usage
- * updates. The useWebSocket handler calls `invalidateProjectTaskOverviews`
- * (from useProjects) in that branch; this test pins that helper so a future
- * change that drops or renames the query key surfaces immediately.
+ * `project:runtime_limit_updated` срабатывает при изменении сохранённых
+ * лимитов runtime / последнего использования. Overview агрегирует поля
+ * токенов/стоимости, поэтому событие должно инвалидировать запрос
+ * `["projectTaskOverviews"]` — иначе шапка дашборда и карточки проектов
+ * показывают устаревшие токены/стоимость после обновления использования.
+ * В этой ветке обработчик useWebSocket вызывает
+ * `invalidateProjectTaskOverviews` (из useProjects); тест закрепляет хелпер,
+ * чтобы будущая потеря или переименование query-ключа сразу всплыли.
  */
 describe("invalidateProjectTaskOverviews (WS runtime_limit_updated branch)", () => {
   it("invalidates the projectTaskOverviews query", () => {

@@ -8,7 +8,7 @@ import {
 import { isExternalFailure, isFastRetryableFailure, truncateReason } from "../errorClassifier.js";
 
 describe("isExternalFailure", () => {
-  // Primary path: RuntimeExecutionError with structured category
+  // Основной путь: RuntimeExecutionError со структурированной категорией
   it.each([
     ["rate_limit", true],
     ["auth", true],
@@ -32,7 +32,7 @@ describe("isExternalFailure", () => {
     },
   );
 
-  // Secondary path: capability/configuration errors (not RuntimeExecutionError, use instanceof)
+  // Вторичный путь: ошибки возможностей/конфигурации (не RuntimeExecutionError, через instanceof)
   const capabilityError = new RuntimeCapabilityError("runtime does not support workspace tools");
   const resolutionError = new Error("wrapped resolution failure", {
     cause: new RuntimeResolutionError("profile not found"),
@@ -54,7 +54,7 @@ describe("isExternalFailure", () => {
     expect(isExternalFailure(err)).toBe(expected);
   });
 
-  // Plain errors without category are NOT classified as external
+  // Простые ошибки без категории НЕ классифицируются как внешние
   it("returns false for plain Error with external-sounding message", () => {
     expect(isExternalFailure(new Error("rate limit hit"))).toBe(false);
   });

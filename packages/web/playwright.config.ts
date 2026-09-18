@@ -2,9 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 const isolatedUi = process.env.AIF_E2E_ISOLATED_UI === "true";
 
-// Perf suite boots against a running local dev stack (API on 3009, web on 5180).
-// reuseExistingServer keeps iteration fast: when a dev shell is already up, the
-// suite attaches; otherwise playwright boots one from the repo root.
+// Набор perf-тестов запускается против локального dev-стека (API: 3009, web: 5180).
+// reuseExistingServer ускоряет цикл: если dev-процесс уже поднят, тесты подключаются к нему,
+// иначе Playwright поднимает сервер из корня репозитория.
 export default defineConfig({
   testDir: "./e2e",
   testMatch: /.*\.spec\.ts$/,

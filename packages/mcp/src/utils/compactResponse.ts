@@ -1,6 +1,6 @@
 /**
- * Strip heavy text fields from task responses to reduce MCP response size.
- * Full content is still available via handoff_get_task.
+ * Компактизирует ответ задачи для MCP: убирает тяжёлые текстовые поля
+ * и чувствительные атрибуты, сохраняя признаки их наличия.
  */
 export function compactTaskResponse<
   T extends { plan?: unknown; implementationLog?: unknown; reviewComments?: unknown },

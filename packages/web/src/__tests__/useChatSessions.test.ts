@@ -105,7 +105,7 @@ describe("useChatSessions", () => {
     });
 
     expect(mockDeleteChatSession).toHaveBeenCalledWith("s1");
-    // Should switch to s2
+    // Должно переключиться на s2
     expect(result.current.activeSessionId).toBe("s2");
   });
 

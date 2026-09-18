@@ -2,11 +2,10 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // Several agent tests do real git operations on tmp work-trees (init,
-    // checkout, commit). Under parallel vitest workers the default 5s
-    // timeout flakes — bump to 20s globally; deterministic non-git tests
-    // still finish in <100ms, so the larger budget only kicks in on the
-    // slow path.
+    // Часть тестов агента выполняет реальные git-операции во временных worktree
+    // (init, checkout, commit). При параллельном запуске стандартный таймаут 5с
+    // даёт нестабильные падения, поэтому глобально увеличен до 20с.
+    // Быстрые неблокирующие тесты без git по-прежнему завершаются существенно быстрее.
     testTimeout: 20_000,
     server: {
       deps: {

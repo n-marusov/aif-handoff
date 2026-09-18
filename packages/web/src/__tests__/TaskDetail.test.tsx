@@ -235,7 +235,7 @@ describe("TaskDetail", () => {
     const { container } = render(<TaskDetail taskId={null} onClose={vi.fn()} />, {
       wrapper: Wrapper,
     });
-    // Sheet should not be visible
+    // Sheet не должен быть виден
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
@@ -354,9 +354,9 @@ describe("TaskDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(screen.getByText("Approve done task?")).toBeDefined();
 
-    // Uncheck the commit box so the modal closes synchronously (legacy path).
+    // Снимаем галочку коммита, чтобы модалка закрылась синхронно (legacy-путь).
     const checkboxes = screen.getAllByRole("checkbox");
-    fireEvent.click(checkboxes[1]); // commit checkbox
+    fireEvent.click(checkboxes[1]); // чекбокс коммита
     fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[1]);
 
     expect(mutateTaskEvent).toHaveBeenCalledWith({
@@ -375,18 +375,18 @@ describe("TaskDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[1]);
 
-    // Mutation fires with commit=true (default).
+    // Мутация уходит с commit=true (по умолчанию).
     expect(mutateTaskEvent).toHaveBeenCalledWith({
       id: "detail-done",
       event: "approve_done",
       deletePlanFile: false,
       commitOnApprove: true,
     });
-    // Modal stays open; onClose not called yet.
+    // Модалка остаётся открытой; onClose ещё не вызывали.
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByText(/Running \/aif-commit/)).toBeDefined();
 
-    // Simulate WS ack for this task → modal closes.
+    // Симулируем WS-подтверждение для этой задачи → модалка закрывается.
     act(() => {
       window.dispatchEvent(
         new CustomEvent("task:commit_done", {
@@ -422,8 +422,8 @@ describe("TaskDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(screen.getByText("Delete plan file (FIX_PLAN.md)")).toBeDefined();
     const checkboxes = screen.getAllByRole("checkbox");
-    fireEvent.click(checkboxes[0]); // delete plan file checkbox
-    fireEvent.click(checkboxes[1]); // commit checkbox (uncheck) to close modal synchronously
+    fireEvent.click(checkboxes[0]); // чекбокс удаления файла плана
+    fireEvent.click(checkboxes[1]); // чекбокс коммита (снимаем), чтобы закрыть модалку синхронно
     fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[1]);
 
     expect(mutateTaskEvent).toHaveBeenCalledWith({

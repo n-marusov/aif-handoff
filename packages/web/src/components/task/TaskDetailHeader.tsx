@@ -71,7 +71,7 @@ const ACTION_BUTTONS_BY_EVENT: Record<TaskEvent, TaskActionButton> = {
   start_ai: { label: "Start AI", event: "start_ai" },
   start_human_work: { label: "Start work", event: "start_human_work" },
   mark_plan_ready: { label: "Mark plan ready", event: "mark_plan_ready" },
-  // Plan-review gate events are VCS-driven: publishing no longer applies.
+  // События гейта Plan Review управляются VCS: публикация больше не применяется.
   approve_plan: { label: "Approve plan", event: "approve_plan", visible: () => false },
   request_plan_changes: {
     label: "Request plan changes",
@@ -153,8 +153,8 @@ export function TaskDetailHeader({
   ).filter(
     (action) =>
       (action.visible?.(task) ?? true) &&
-      // VCS-linked plan_review tasks must await human PR/MR approval before
-      // implementation can start; the server rejects the action otherwise.
+      // Задачи plan_review, связанные с VCS, должны дождаться ручного одобрения PR/MR,
+      // прежде чем начнётся реализация; иначе сервер отклонит действие.
       !(
         task.status === "plan_review" &&
         (task.github || task.gitlab) &&
@@ -184,9 +184,9 @@ export function TaskDetailHeader({
         checkedAt: task.runtimeLimitUpdatedAt ?? null,
       })
     : null;
-  // Pause is also shown in `backlog` so users can park a task that auto-queue
-  // would otherwise advance — paused backlog tasks are skipped by both the
-  // scheduler and the auto-queue advancer.
+  // Пауза также показывается в `backlog`, чтобы поставить задачу на стоп, которую
+  // иначе продвинул бы auto-queue, — приостановленные задачи бэклога пропускают и
+  // планировщик, и адвaнсер auto-queue.
   const showPauseButton =
     task.executionOwner === "ai" && !["done", "accepted"].includes(task.status);
 

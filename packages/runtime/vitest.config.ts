@@ -16,7 +16,8 @@ export default defineConfig({
       exclude: [
         "src/index.ts",
         "src/adapters/TEMPLATE.ts",
-        // Integration-heavy transport probe is covered by adapter unit tests around public API.
+        // Тяжёлая интеграционная проверка транспорта покрыта unit-тестами адаптера
+        // вокруг публичного API.
         "src/adapters/codex/modelDiscovery.ts",
         "src/**/*SFConflict*",
       ],

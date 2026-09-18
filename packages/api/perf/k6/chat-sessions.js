@@ -1,9 +1,9 @@
 import http from "k6/http";
 import { BASE_URL, okStatus, resolveFirstProjectId, tag } from "./common.js";
 
-// /chat/sessions currently reads Codex session metas from disk. With the 30s
-// in-memory cache a sustained 10-VU load should sit well under the cold-call
-// cost — this script pins the steady-state budget.
+// /chat/sessions читает метаданные сессий Codex с диска. С кешем в памяти на 30с
+// устойчивая нагрузка в 10 VU должна быть заметно дешевле холодного вызова —
+// этот скрипт фиксирует бюджет установившегося режима.
 export const options = {
   scenarios: {
     steady: {

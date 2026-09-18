@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resetEnvCache } from "@aif/shared";
 
-// Create a temp dir to act as monorepo root and home
+// Создаём временный каталог под роль корня монорепо и home
 const tempRoot = mkdtempSync(join(tmpdir(), "settings-test-"));
 const aiFactoryDir = join(tempRoot, ".ai-factory");
 mkdirSync(aiFactoryDir, { recursive: true });
@@ -143,11 +143,11 @@ describe("settings API — config routes", () => {
       updatedAt: "2026-04-20T00:00:00.000Z",
     };
     eligibleAppDefaultProfileIds = new Set(["global-task", "global-chat"]);
-    // Clean up config file between tests
+    // Убираем файл конфигурации между тестами
     try {
       rmSync(configPath);
     } catch {
-      /* ok if missing */
+      /* ок, если отсутствует */
     }
   });
 
@@ -204,7 +204,7 @@ describe("settings API — config routes", () => {
     });
 
     it("writes config and returns success", async () => {
-      // Create initial file so we can verify overwrite
+      // Создаём исходный файл, чтобы проверить перезапись
       writeFileSync(configPath, "language:\n  ui: en\n");
 
       const newConfig = { language: { ui: "de", artifacts: "fr" }, git: { enabled: true } };
@@ -217,7 +217,7 @@ describe("settings API — config routes", () => {
       const body = await res.json();
       expect(body.success).toBe(true);
 
-      // Verify file was actually written by reading back
+      // Проверяем фактическую запись файла повторным чтением
       const readRes = await app.request(`/settings/config?projectId=${TEST_PROJECT_ID}`);
       const readBody = await readRes.json();
       expect(readBody.config.language.ui).toBe("de");
@@ -330,12 +330,12 @@ describe("settings API — config routes", () => {
       try {
         rmSync(claudeConfigPath);
       } catch {
-        /* ok */
+        /* ок */
       }
       try {
         rmSync(join(fakeHome, ".codex"), { recursive: true, force: true });
       } catch {
-        /* ok */
+        /* ок */
       }
     });
 
@@ -357,7 +357,7 @@ describe("settings API — config routes", () => {
       const body = await res.json();
       expect(body.success).toBe(true);
 
-      // Verify it's now installed
+      // Проверяем, что теперь установлено
       const checkRes = await app.request("/settings/mcp");
       const checkBody = await checkRes.json();
       expect(checkBody.installed).toBe(true);

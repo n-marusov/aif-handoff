@@ -9,10 +9,10 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   return { ...actual, getDb: () => testDb.current };
 });
 
-// The sync routes fire-and-forget a real global fetch for the agent submodule
-// bridge; it would consume the first queued response of every stubbed fetch
-// chain and misalign all client call mocks. Keep git-prepare real (some tests
-// assert its failure paths) and no-op only the submodule bridge.
+// Маршруты синхронизации запускают fire-and-forget настоящий глобальный fetch для
+// моста подмодулей агента; он поглотил бы первый ответ из каждой заглушённой
+// цепочки fetch и рассогласовал все моки вызовов клиента. git-prepare оставляем
+// настоящим (некоторые тесты проверяют его пути отказа), обесцениваем только мост подмодулей.
 vi.mock("../services/gitPrepareBridge.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/gitPrepareBridge.js")>();
   return { ...actual, callAgentSubmoduleSync: vi.fn(async () => ({ ok: true })) };
@@ -204,31 +204,31 @@ describe("GitLab client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new GitLabClient("secret", "https://gitlab.com/api/v4");
-    // failed && allow_failure folds like success alongside an explicit success
+    // failed && allow_failure сворачивается как успех вместе с явным успехом
     await expect(client.getCommitChecks("namespace", "repo", "abc")).resolves.toBe("success");
-    // pending/running always folds to pending
+    // pending/running всегда сворачивается в pending
     await expect(client.getCommitChecks("namespace", "repo", "abc")).resolves.toBe("pending");
-    // canceled/skipped fold like success
+    // canceled/skipped сворачиваются как успех
     await expect(client.getCommitChecks("namespace", "repo", "abc")).resolves.toBe("success");
-    // empty statuses → null
+    // пустые статусы → null
     await expect(client.getCommitChecks("namespace", "repo", "abc")).resolves.toBeNull();
   });
 
   it.each([
-    // approved only with a real approver (all tiers)
+    // approved только с реальным одобрившим (все тарифы)
     [{ approved: false, approved_by: [] }, "pending"],
     [{ approved: true, approved_by: [{ user: { username: "reviewer" } }] }, "approved"],
-    // GitLab EE (incl. gitlab.com without approval rules) reports approved:
-    // true vacuously with an empty approved_by; that is NOT a human approval.
+    // GitLab EE (включая gitlab.com без правил одобрения) рапортует approved:
+    // true вхолостую с пустым approved_by; это НЕ человеческое одобрение.
     [{ approved: true, approved_by: [] }, "pending"],
-    // Premium multi-rule not yet satisfied: real approvers exist but the
-    // overall approval requirement is unmet.
+    // Premium, несколько правил ещё не выполнены: реальные одобрившие есть, но
+    // общее требование одобрения не закрыто.
     [{ approved: false, approved_by: [{ user: { username: "reviewer" } }] }, "pending"],
-    // Defensive: missing fields must not crash the parser.
+    // Защитно: отсутствующие поля не должны ронять парсер.
     [{}, "pending"],
   ] as const)(
-    // REQ-FR-integration.pr-mr.resolve-review-decision criterion 2:
-    // approval status requires a non-empty approver list.
+    // REQ-FR-integration.pr-mr.resolve-review-decision, критерий 2:
+    // статус одобрения требует непустого списка одобривших.
     "maps approvals %j to reviewState %s",
     async (approvalsValue, expectedReviewState) => {
       const fetchMock = vi.fn().mockResolvedValue(jsonResponse(approvalsValue));
@@ -366,7 +366,7 @@ describe("GitLab client", () => {
     expect(issueIsEligible(issue, { labels: ["aif"], assignee: "bot", milestone: "v1" })).toBe(
       false,
     );
-    // No filters means everything passes even without matching labels/assignees/milestone.
+    // Без фильтров проходит всё, даже без совпадений labels/assignees/milestone.
     expect(issueIsEligible(issue, { labels: [], assignee: null, milestone: null })).toBe(true);
   });
 
@@ -387,11 +387,11 @@ describe("GitLab client", () => {
       updated_at: "2026-08-16T07:42:03.778Z",
       system: true,
     };
-    // An unapproval note must not be mistaken for an approval.
+    // Заметку об отзыве нельзя принимать за одобрение.
     expect(
       findLatestApprovalNote([{ ...approvalNote, id: 100, body: "unapproved this merge request" }]),
     ).toBeNull();
-    // Human comments never qualify, even with matching wording.
+    // Человеческие комментарии не годятся никогда, даже с совпадающим текстом.
     expect(
       findLatestApprovalNote([
         { ...approvalNote, system: false, body: "approved this merge request" },
@@ -400,7 +400,7 @@ describe("GitLab client", () => {
     expect(findLatestApprovalNote([approvalNote, { ...approvalNote, id: 102 }])).toMatchObject({
       id: 102,
     });
-    // Push-triggered approval reset is not an approval event either.
+    // Сброс одобрения из-за push — тоже не событие одобрения.
     expect(
       findLatestApprovalNote([
         { ...approvalNote, body: "reset approvals from reviewer by pushing to the branch" },
@@ -409,8 +409,8 @@ describe("GitLab client", () => {
     expect(findLatestApprovalNote([])).toBeNull();
   });
 
-  // REQ-FR-integration.pr-mr.resolve-review-decision criterion 9:
-  // revocation cancels; detecting reset/unapprove notes.
+  // REQ-FR-integration.pr-mr.resolve-review-decision, критерий 9:
+  // отзыв аннулирует; детект заметок reset/unapprove.
   it("detects the latest approval-revocation note (unapprove or push reset)", () => {
     const unapproveNote = {
       id: 200,
@@ -427,13 +427,13 @@ describe("GitLab client", () => {
     };
 
     expect(findLatestApprovalResetNote([])).toBeNull();
-    // An approval is not a revocation — the caller compares ids itself.
+    // Одобрение — не отзыв: id сравнивает сам вызывающий.
     expect(
       findLatestApprovalResetNote([
         { ...unapproveNote, id: 199, body: "approved this merge request" },
       ]),
     ).toBeNull();
-    // Human comments never qualify, even with matching wording.
+    // Человеческие комментарии не годятся никогда, даже с совпадающим текстом.
     expect(findLatestApprovalResetNote([{ ...unapproveNote, system: false }])).toBeNull();
     expect(findLatestApprovalResetNote([unapproveNote])).toMatchObject({ id: 200 });
     expect(findLatestApprovalResetNote([unapproveNote, pushResetNote])).toMatchObject({ id: 300 });
@@ -480,8 +480,8 @@ describe("GitLab project routes", () => {
   });
 
   it("passes GitLab routes when both routers are mounted and GIT_PROVIDER is gitlab", async () => {
-    // Regression: with GIT_PROVIDER=gitlab and GitHub mounted BEFORE GitLab
-    // (as in src/index.ts), the GitHub gate must NOT intercept GitLab paths.
+    // Регрессия: при GIT_PROVIDER=gitlab GitHub смонтирован ДО GitLab
+    // (как в src/index.ts), и гейт GitHub НЕ должен перехватывать GitLab-пути.
     const { githubRouter } = await import("../routes/github.js");
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -496,7 +496,7 @@ describe("GitLab project routes", () => {
     app.route("/projects", githubRouter);
     app.route("/projects", gitlabRouter);
 
-    // GitLab connect must reach the GitLab route (not be blocked by GitHub gate).
+    // GitLab connect должен достичь GitLab-маршрута, а не быть заблокирован гейтом GitHub.
     const response = await app.request("/projects/project-1/gitlab", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -506,7 +506,7 @@ describe("GitLab project routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ namespace: "namespace", name: "repo" });
 
-    // GitHub paths must still be blocked when the provider is gitlab.
+    // GitHub-пути обязаны оставаться заблокированными, когда провайдер — gitlab.
     const githubResponse = await app.request("/projects/project-1/github", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -527,7 +527,7 @@ describe("GitLab project routes", () => {
       if (href.includes("/issues")) {
         return Promise.resolve(jsonResponse([]));
       }
-      // connect validation: GET /projects/namespace%2Frepo
+      // валидация connect: GET /projects/namespace%2Frepo
       return Promise.resolve(
         jsonResponse({
           id: 1,
@@ -608,7 +608,7 @@ describe("GitLab project routes", () => {
       tokenConfigured: true,
     });
 
-    // Sync must hit the URL-encoded full namespace path, not a truncated one.
+    // Sync обязан бить по полному URL-encoded пути namespace, а не по обрезанному.
     const synced = await app.request("/projects/project-1/gitlab/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -643,7 +643,7 @@ describe("GitLab project routes", () => {
     const app = new Hono();
     app.route("/projects", gitlabRouter);
 
-    // Connect saves the connection (best-effort prepare warning is not fatal).
+    // Connect сохраняет подключение (best-effort предупреждение prepare не фатально).
     const connected = await app.request("/projects/project-1/gitlab", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -656,7 +656,7 @@ describe("GitLab project routes", () => {
     });
     expect(connected.status).toBe(200);
 
-    // First sync is strict: prepare failure aborts the import with the error.
+    // Первая синхронизация строга: сбой prepare прерывает импорт с ошибкой.
     const synced = await app.request("/projects/project-1/gitlab/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -687,7 +687,7 @@ describe("GitLab project routes", () => {
     const app = new Hono();
     app.route("/projects", gitlabRouter);
 
-    // Seed an unprepared connection so the first sync triggers strict prepare.
+    // Готовим неподготовленное подключение, чтобы первая синхронизация вызвала строгий prepare.
     upsertGitLabRepository({
       projectId: "project-1",
       namespace: "namespace",
@@ -776,13 +776,13 @@ describe("GitLab project routes", () => {
           .mockResolvedValueOnce(
             jsonResponse({
               approved,
-              // EE reports approved:true vacuously; a real approval needs an
-              // approver entry, so mirror a genuine Approve click here.
+              // EE рапортует approved:true вхолостую; реальному одобрению нужна
+              // запись одобрившего, поэтому имитируем настоящий клик Approve здесь.
               approved_by: approved ? [{ user: { username: "reviewer" } }] : [],
             }),
           )
           .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
-          .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
+          .mockResolvedValueOnce(jsonResponse([])), // MR notes (скан на request-changes)
       );
       const app = new Hono();
       app.route("/projects", gitlabRouter);
@@ -907,7 +907,7 @@ describe("GitLab project routes", () => {
         .mockResolvedValueOnce(jsonResponse([])) // issue notes
         .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] }))
         .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
-        .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes (скан на request-changes)
     );
     const app = new Hono();
     app.route("/projects", gitlabRouter);
@@ -936,7 +936,7 @@ describe("GitLab project routes", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repository: "namespace/repo", tokenEnvVar: "MY_TOKEN" }),
     });
-    // The connect schema rejects non-GITLAB_* token env var names with 400.
+    // Схема connect отвергает имена env-переменных токена без префикса GITLAB_* кодом 400.
     expect(response.status).toBe(400);
   });
 
@@ -1009,7 +1009,7 @@ describe("GitLab project routes", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    // No session and no internal token → rejected before any upstream fetch.
+    // Ни сессии, ни внутреннего токена → отказ до любого fetch наверх.
     const unauthorized = await app.request("/projects/project-1/gitlab/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1018,7 +1018,7 @@ describe("GitLab project routes", () => {
     expect(unauthorized.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    // Internal token → trusted-internal bypass, reaches the upstream (unmocked fetch → 502).
+    // Внутренний токен → доверенный внутренний обход, доходит до апстрима (незамокированный fetch → 502).
     const authorized = await app.request("/projects/project-1/gitlab/sync", {
       method: "POST",
       headers: {
@@ -1075,7 +1075,7 @@ describe("GitLab project routes", () => {
     const app = new Hono();
     app.route("/projects", gitlabRouter);
 
-    // Merged MR → verified
+    // Смерженный MR → verified
     vi.stubGlobal(
       "fetch",
       vi
@@ -1109,10 +1109,10 @@ describe("GitLab project routes", () => {
             sha: "0123456789abcdef",
             description: "Closes #154",
           }),
-        ) // getMergeRequest (existing.mrIid path)
+        ) // getMergeRequest (путь existing.mrIid)
         .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] }))
         .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
-        .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes (скан на request-changes)
     );
 
     await app.request("/projects/project-1/gitlab/sync", {
@@ -1122,7 +1122,7 @@ describe("GitLab project routes", () => {
     });
     expect(findTaskById(imported.taskId)?.status).toBe("accepted");
 
-    // Closed unmerged MR → paused
+    // Закрытый без merge MR → paused
     vi.stubGlobal(
       "fetch",
       vi
@@ -1159,7 +1159,7 @@ describe("GitLab project routes", () => {
         )
         .mockResolvedValueOnce(jsonResponse({ approved: false, approved_by: [] }))
         .mockResolvedValueOnce(jsonResponse([{ status: "success", allow_failure: false }]))
-        .mockResolvedValueOnce(jsonResponse([])), // MR notes (request-changes scan)
+        .mockResolvedValueOnce(jsonResponse([])), // MR notes (скан на request-changes)
     );
 
     await app.request("/projects/project-1/gitlab/sync", {
@@ -1206,8 +1206,8 @@ describe("GitLab project routes", () => {
         state: "open",
       },
     });
-    // Park the task at `review` (not yet auto-advanced to done) and link it
-    // to the published implementation MR.
+    // Оставляем задачу на `review` (ещё не авто-переведена в done) и привязываем
+    // к опубликованному MR реализации.
     updateTaskStatus(imported.taskId, "review", {});
     updateGitLabMergeRequest({
       projectId: "project-1",
@@ -1220,7 +1220,7 @@ describe("GitLab project routes", () => {
     const app = new Hono();
     app.route("/projects", gitlabRouter);
 
-    // Human merges the implementation MR.
+    // Человек мержит MR реализации.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1269,7 +1269,7 @@ describe("GitLab project routes", () => {
     });
 
     expect(response.status).toBe(200);
-    // review -> done -> accepted within a single sync pass.
+    // review -> done -> accepted за один проход синхронизации.
     expect(findTaskById(imported.taskId)?.status).toBe("accepted");
     expect(findGitLabIssue("project-1", 154)?.mrState).toBe("merged");
   });
@@ -1360,7 +1360,7 @@ describe("GitLab project routes", () => {
       system: true,
     };
 
-    // First sync: the new requested-changes note must move done → implementing.
+    // Первая синхронизация: новая заметка requested-changes должна перевести done → implementing.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1380,7 +1380,7 @@ describe("GitLab project routes", () => {
     expect(afterFirst?.reviewComments).toBe("approved by auto-review");
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
 
-    // Second sync: the same note id must NOT bounce the task again.
+    // Вторая синхронизация: тот же id заметки НЕ должен снова перекидывать задачу.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1398,7 +1398,7 @@ describe("GitLab project routes", () => {
     expect(afterSecond?.status).toBe("implementing");
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
 
-    // Sync with NO requested-changes note: no transition, metadata unchanged.
+    // Синхронизация БЕЗ заметки requested-changes: без перехода, метаданные не меняются.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1416,8 +1416,8 @@ describe("GitLab project routes", () => {
     expect(afterThird?.status).toBe("implementing");
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(3691116788);
 
-    // Case/whitespace variant of the note body must still be detected: put the
-    // task back into done, then sync with a capitalized note and a fresh id.
+    // Вариант регистра/пробелов в теле заметки всё равно обязан детектироваться:
+    // возвращаем задачу в done, затем синхронизируем с заметкой в верхнем регистре и новым id.
     updateTaskStatus(
       imported.taskId,
       "done",
@@ -1543,7 +1543,7 @@ describe("GitLab project routes", () => {
               system: true,
             },
           ]),
-        ), // MR notes (approval system note)
+        ), // MR notes (системная заметка об одобрении)
     );
 
     const response = await app.request("/projects/project-1/gitlab/sync", {
@@ -1563,7 +1563,7 @@ describe("GitLab project routes", () => {
       lastReviewNoteId: 555,
     });
 
-    // Second sync with the same consumed approval note must not re-process it.
+    // Вторая синхронизация с уже потреблённой заметкой одобрения не должна обрабатывать её снова.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1706,8 +1706,8 @@ describe("GitLab project routes", () => {
         body: "{}",
       });
 
-    // Sync 1: EE/Free reports approved:true with an empty approver list and no
-    // approval system note exists yet; the task must stay in plan_review.
+    // Синхронизация 1: EE/Free рапортует approved:true с пустым списком
+    // одобривших, системной заметки об одобрении ещё нет; задача обязана остаться в plan_review.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1726,8 +1726,8 @@ describe("GitLab project routes", () => {
       lastReviewNoteId: null,
     });
 
-    // Sync 2: the human clicks Approve; the real approval note moves the task
-    // to implementing exactly once.
+    // Синхронизация 2: человек нажимает Approve; настоящая заметка одобрения
+    // переводит задачу в implementing ровно один раз.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1760,14 +1760,14 @@ describe("GitLab project routes", () => {
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(777);
   });
 
-  // Regression for the review finding on the 2026-09-18 GitLab plan-review
-  // patch: an "approved this merge request" note stays in the MR timeline after
-  // a revocation, so trusting the newest approval note alone would still move a
-  // revoked plan_review task to implementing. The sync now compares the
-  // approval note id against the newest unapprove / push-reset note id.
-  // REQ-FR-integration.pr-mr.resolve-review-decision criteria 3-10, 9, 11-14:
-  // revocation gate, competing notes, marker after success, idempotency.
-  // REQ-NFR-integration.compliance.review-event-idempotency (all 4 metrics).
+  // Регрессия на замечание ревью патча GitLab plan-review от 2026-09-18: заметка
+  // "approved this merge request" остаётся в таймлайне MR после отзыва, поэтому
+  // доверие только к самой свежей заметке одобрения всё равно перевело бы
+  // отозванную plan_review задачу в implementing. Теперь синхронизация сверяет id
+  // заметки одобрения с id последней заметки unapprove / push-reset.
+  // REQ-FR-integration.pr-mr.resolve-review-decision, критерии 3-10, 9, 11-14:
+  // гейт отзыва, конкурирующие заметки, метка после успеха, идемпотентность.
+  // REQ-NFR-integration.compliance.review-event-idempotency (все 4 метрики).
   it("ignores a revoked plan_review approval and still applies a newer re-approval", async () => {
     upsertGitLabRepository({
       projectId: "project-1",
@@ -1858,9 +1858,9 @@ describe("GitLab project routes", () => {
         body: "{}",
       });
 
-    // Sync 1: the human approved and then revoked the approval. The historical
-    // approval note plus the vacuous EE snapshot (approved=true, no real
-    // approver) must leave the task parked with no marker written.
+    // Синхронизация 1: человек одобрил, затем отозвал одобрение. Историческая
+    // заметка одобрения плюс вхолостую-снимок EE (approved=true, без реального
+    // одобрившего) должны оставить задачу припаркованной без записи метки.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1875,7 +1875,7 @@ describe("GitLab project routes", () => {
             reviewNote(700, "approved this merge request"),
             reviewNote(750, "unapproved this merge request"),
           ]),
-        ), // MR notes (approval revoked by a newer note)
+        ), // MR notes (одобрение отозвано более новой заметкой)
     );
     const revokedResponse = await syncRequest();
     expect(revokedResponse.status).toBe(200);
@@ -1887,9 +1887,9 @@ describe("GitLab project routes", () => {
       lastReviewNoteId: null,
     });
 
-    // Sync 2: a push reset the approvals and the human approved again. The
-    // newer approval note supersedes the older reset note, so the task advances
-    // exactly once and the marker records the winning note id.
+    // Синхронизация 2: push сбросил одобрения, и человек одобрил снова. Более
+    // свежая заметка одобрения перекрывает старую заметку сброса, поэтому задача
+    // продвигается ровно один раз, а метка записывает id победившей заметки.
     vi.stubGlobal(
       "fetch",
       vi
@@ -1906,7 +1906,7 @@ describe("GitLab project routes", () => {
             reviewNote(760, "reset approvals from reviewer by pushing to the branch"),
             reviewNote(800, "approved this merge request"),
           ]),
-        ), // MR notes (re-approval after a push-triggered reset)
+        ), // MR notes (повторное одобрение после сброса, вызванного push)
     );
     const reapprovedResponse = await syncRequest();
     expect(reapprovedResponse.status).toBe(200);
@@ -2041,11 +2041,11 @@ describe("GitLab project routes", () => {
     });
   });
 
-  // Competing-notes conflict resolution from the 2026-09-18 GitLab plan-review
-  // patch: when an approval and a requested-changes note are both unprocessed,
-  // the higher note id is the reviewer's latest intent and must win. The EE
-  // approvals payload stays vacuously approved=true/empty in both cases, which
-  // proves the transitions are driven by system notes, not the boolean.
+  // Разрешение конфликта конкурирующих заметок из патча GitLab plan-review от
+  // 2026-09-18: если и одобрение, и заметка requested-changes необработаны,
+  // больший id заметки — последнее намерение ревьюера, он и обязан победить. EE-
+  // нагрузка approvals остаётся вхолостую approved=true/пустой в обоих случаях,
+  // что доказывает: переходы управляются системными заметками, а не булевой меткой.
   it("applies the newer approval note when approval and requested-changes race at plan_review", async () => {
     upsertGitLabRepository({
       projectId: "project-1",
@@ -2151,7 +2151,7 @@ describe("GitLab project routes", () => {
               system: true,
             },
           ]),
-        ), // MR notes (competing review actions, approval is newer)
+        ), // MR notes (конкурирующие действия ревью, одобрение новее)
     );
 
     const response = await app.request("/projects/project-1/gitlab/sync", {
@@ -2167,8 +2167,8 @@ describe("GitLab project routes", () => {
     });
     expect(findGitLabIssue("project-1", 154)).toMatchObject({
       mrMode: "plan_review",
-      // The persisted state stays "pending" (approvals-derived): the approval was
-      // driven purely by the system note, never by the vacuous boolean.
+      // Сохранённое состояние остаётся "pending" (из approvals): одобрение
+      // шло исключительно от системной заметки, никогда от вхолостую-булевой метки.
       reviewState: "pending",
       lastReviewNoteId: 900,
     });
@@ -2279,7 +2279,7 @@ describe("GitLab project routes", () => {
               system: true,
             },
           ]),
-        ), // MR notes (competing review actions, changes-request is newer)
+        ), // MR notes (конкурирующие действия ревью, новее запрос изменений)
     );
 
     const response = await app.request("/projects/project-1/gitlab/sync", {

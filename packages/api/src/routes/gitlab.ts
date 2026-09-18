@@ -51,11 +51,11 @@ const REVIEW_MARKER = "<!-- aif-gitlab-review -->";
 
 export const gitlabRouter = new Hono<ParticipantApiEnv>();
 
-// Gate only GitLab-specific paths (/:id/gitlab + /:id/gitlab/*). The router is
-// mounted at /projects alongside the GitHub router; a bare use("*") here would
-// intercept GitHub requests first and block them whenever GIT_PROVIDER is not
-// gitlab. Two patterns are required: Hono's `gitlab*` wildcard does not match
-// the bare `/gitlab` path, only its sub-paths.
+// Гейт только для GitLab-путей (/:id/gitlab + /:id/gitlab/*). Роутер смонтирован
+// на /projects рядом с GitHub-роутером; голый use("*") здесь перехватывал бы
+// GitHub-запросы первыми и блокировал их, когда GIT_PROVIDER не равен
+// gitlab. Нужны два паттерна: wildcard `gitlab*` в Hono не совпадает с путём
+// `/gitlab` без подпути, а только с его подпутями.
 gitlabRouter.use("/:id/gitlab", async (c, next) => {
   const env = getEnv();
   if (env.GIT_PROVIDER !== "gitlab" || !env.AIF_GITLAB_ISSUE_MR_ENABLED) {
@@ -154,9 +154,9 @@ gitlabRouter.put("/:id/gitlab", jsonValidator(gitlabConnectSchema), async (c) =>
       eligibility: body.eligibility,
       enabled: body.enabled,
     });
-    // Best-effort git-prepare on connect: the agent extracts the default branch
-    // and initializes AI Factory files. Failures are logged (not fatal) — the
-    // next Sync now re-runs prepare strictly.
+    // Git-prepare при подключении best-effort: агент извлекает ветку по умолчанию
+    // и инициализирует файлы AI Factory. Сбои только логируются (не фатальны) —
+    // следующая Синхронизация повторит prepare строго.
     const prepare = await callAgentGitPrepare(projectId, { provider: "gitlab", strict: false });
     if (!prepare.ok) {
       log.warn(
@@ -183,9 +183,9 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
   if (!connection.enabled)
     return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitLabIssues(projectId) });
 
-  // First sync (or reconnect) also runs strict git-prepare: extract the default
-  // branch + init AI Factory files. On failure, surface the error immediately
-  // (task stays blocked) instead of importing issues into a broken repo.
+  // Первая синхронизация (или переподключение) тоже запускает строгий git-prepare:
+  // извлечь ветку по умолчанию + инициализировать файлы AI Factory. При сбое ошибка
+  // показывается сразу (задача блокируется), а не импортирует issues в битый репозиторий.
   if (!connection.gitPreparedAt) {
     const prepare = await callAgentGitPrepare(projectId, { provider: "gitlab", strict: true });
     if (!prepare.ok) {
@@ -203,15 +203,15 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
     }
   }
 
-  // Best-effort git pull before issue sync so the local repo reflects the
-  // remote default branch. Failure is non-blocking (logs at debug level).
+  // Git pull перед синхронизацией issues best-effort, чтобы локальный репозиторий
+  // отражал удалённую ветку по умолчанию. Сбой не блокирует (лог на уровне debug).
   const project = findProjectById(projectId);
   if (project?.rootPath) {
     pullDefaultBranch(project.rootPath);
   }
 
-  // Best-effort submodule sync: populate submodules if .gitmodules exists.
-  // Non-blocking — failure is logged but import continues.
+  // Синхронизация подмодулей best-effort: заполнить подмодули, если есть .gitmodules.
+  // Не блокирует — сбой логируется, но импорт продолжается.
   callAgentSubmoduleSync(projectId).catch(() => {});
 
   try {
@@ -282,13 +282,13 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         const mrState: "open" | "closed" | "merged" =
           mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
         const checks = await client.getCommitChecks(connection.namespace, connection.name, mr.sha);
-        // GitLab "requested changes" and "approved" are not exposed through
-        // detailed_merge_status or the approvals API on every tier (EE/Free
-        // reports `approved: true` vacuously with no approval rules). The
-        // reliable event channel is the MR system notes API; detection lives in
-        // the service helpers and the route only consumes the structured note
-        // ids for edge-triggered transitions, mirroring the review-id model in
-        // routes/github.ts.
+        // "requested changes" и "approved" в GitLab доступны не на каждом
+        // тарифе через detailed_merge_status или approvals API (EE/Free
+        // сообщает `approved: true` вхолостую, без правил одобрения).
+        // Надёжный канал событий — API системных заметок MR; детекция
+        // реализована в хелперах сервиса, а маршрут потребляет только
+        // структурированные id заметок для переходов по фронту события,
+        // повторяя модель review-id из routes/github.ts.
         const mrNotes = await client.listMergeRequestNotes(
           connection.namespace,
           connection.name,
@@ -297,12 +297,12 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         const requestChangesNote = findLatestRequestChangesNote(mrNotes);
         const approvalNote = findLatestApprovalNote(mrNotes);
         const approvalResetNote = findLatestApprovalResetNote(mrNotes);
-        // An approval stops being actionable as soon as a newer note revokes it:
-        // both the "unapproved this merge request" action and the push-triggered
-        // "reset approvals ..." sweep leave the original approval note in the MR
-        // timeline, so the note ids decide which one still stands. Without this
-        // check a revoked approval would still move plan_review to implementing.
-        // REQ-FR-integration.pr-mr.resolve-review-decision criteria 3, 9, 10:
+        // Одобрение перестаёт быть действием, как только более новая заметка его
+        // отзывает: и действие "unapproved this merge request", и вызванный push
+        // сброс "reset approvals ..." оставляют исходную заметку об одобрении в
+        // таймлайне MR, поэтому итог решают id заметок. Без этой проверки
+        // отозванное одобрение всё равно перевело бы plan_review в implementing.
+        // REQ-FR-integration.pr-mr.resolve-review-decision, критерии 3, 9, 10:
         // — действующее решение: последнее неотозванное;
         // — отзыв отменяет одобрение;
         // — при нескольких необработанных решениях действует последнее.
@@ -321,10 +321,10 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
             "GitLab approval note superseded by a newer unapprove/reset note; ignoring it",
           );
         }
-        // The lastReviewNoteId edge marker is deliberately NOT written here.
-        // It is recorded only after the matching state transition succeeds, so
-        // a transient CAS conflict stays retryable on the next sync instead of
-        // permanently swallowing the review event.
+        // Краевой маркер lastReviewNoteId намеренно НЕ записывается здесь.
+        // Он фиксируется только после успешного соответствующего перехода
+        // состояния, чтобы преходящий конфликт CAS оставался повторимым на
+        // следующей синхронизации, а не глотал событие ревью навсегда.
         updateGitLabMergeRequest({
           projectId,
           iid: issue.iid,
@@ -343,8 +343,8 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           requestChangesNote && requestChangesNote.id > processedReviewNoteId
             ? requestChangesNote
             : null;
-        // When both an approval and a changes-request sit unprocessed, the
-        // higher note id is the reviewer's current intent and wins.
+        // Если и одобрение, и changes-request остались необработанными,
+        // больший id заметки — актуальное намерение ревьюера, он и побеждает.
         const pendingReviewNote =
           pendingApprovalNote && pendingRequestChangesNote
             ? pendingRequestChangesNote.id > pendingApprovalNote.id
@@ -365,17 +365,17 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
             {},
             { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
           );
-          // Refresh the task row so downstream status checks (merged → verified,
-          // requested-changes → implementing) see the post-transition status.
+          // Обновить строку задачи, чтобы последующие проверки статуса (merged → verified,
+          // requested-changes → implementing) видели статус после перехода.
           task = findTaskById(result.taskId);
         }
         const planReviewMode = existing?.mrMode === "plan_review";
         if (task && mrState === "merged" && (task.status === "done" || task.status === "review")) {
-          // A human merging the implementation MR is the final acceptance:
-          // when the pipeline is still parked at `review` (e.g. manual review
-          // handoff or auto-review gate disabled), the merge itself closes
-          // that stage before the task is accepted.
-          // REQ-FR-integration.pr-mr.resolve-review-decision criterion 7:
+          // Слияние MR реализации человеком и есть итоговое принятие:
+          // когда конвейер ещё стоит на `review` (например, ручной переход
+          // ревью или отключённый гейт авторевью), само слияние закрывает
+          // эту стадию до принятия задачи.
+          // REQ-FR-integration.pr-mr.resolve-review-decision, критерий 7:
           // слияние принимает результат, закрывая стадию ревью.
           if (task.status === "review") {
             updateTaskStatus(
@@ -398,7 +398,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
               {},
               { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
             );
-            // Lifecycle close-out: drop the worktree, keep the branch.
+            // Закрытие жизненного цикла: удалить worktree, сохранить ветку.
             await requestWorktreeCleanupAfterMerge(
               snapshotTaskWorktree(
                 verifiedTask,
@@ -431,9 +431,9 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
             },
           });
           if (approved.ok) {
-            // Record the consumed note id only after a successful transition
-            // so a transient failure does not block retry on the next sync.
-            // REQ-FR-integration.pr-mr.resolve-review-decision criteria 11-12:
+            // Записываем потреблённый id заметки только после успешного перехода,
+            // чтобы преходящий сбой не блокировал повтор на следующей синхронизации.
+            // REQ-FR-integration.pr-mr.resolve-review-decision, критерии 11-12:
             // отметка после успеха; при конфликте — ретрай.
             // REQ-NFR-integration.compliance.review-event-idempotency:
             // идемпотентность, отсутствие потери, наблюдаемость отказа.
@@ -684,10 +684,10 @@ gitlabRouter.post(
 );
 
 /**
- * Publish (or update) the Change Plan MR for an issue-linked task. The task is
- * left in plan_review until a human approves the MR. Description carries the
- * plan review marker and deliberately omits `Closes #...` — the issue must
- * stay open until the final implementation MR is published.
+ * Публикация (или обновление) MR плана изменений для задачи, связанной с issue.
+ * Задача остаётся в plan_review, пока человек не одобрит MR. Описание содержит
+ * маркер ревью плана и намеренно без `Closes #...` — issue должен оставаться
+ * открытым, пока не будет опубликован итоговый MR реализации.
  */
 gitlabRouter.post(
   "/:id/gitlab/tasks/:taskId/publish-plan",

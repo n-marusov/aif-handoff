@@ -6,9 +6,9 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as dotenvConfig } from "dotenv";
 
-// Load root .env before reading env vars.
-// Cannot use @aif/shared/env here — Vite loads config via native Node ESM
-// which cannot resolve .js extensions in TS source files (unlike tsx used by api/agent).
+// Загружаем корневой .env до чтения переменных окружения.
+// @aif/shared/env здесь не используется: Vite читает конфиг через нативный Node ESM,
+// который не резолвит .js-расширения в TS-исходниках (в отличие от tsx в api/agent).
 const __dir = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dir, "../../.env");
 const rootEnvLocal = resolve(__dir, "../../.env.local");
@@ -33,8 +33,8 @@ export default defineConfig(async () => {
     define: {
       "import.meta.env.VITE_API_PORT": JSON.stringify(String(API_PORT)),
     },
-    // Lazy-load the Tailwind plugin so Vite config bundling does not try to parse
-    // the native oxide binary as UTF-8 before Node can load it normally.
+    // Плагин Tailwind загружается лениво, чтобы сборщик конфига Vite
+    // не пытался разобрать нативный бинарник oxide как UTF-8.
     plugins: [react(), tailwindcss()],
     build: {
       rolldownOptions: {

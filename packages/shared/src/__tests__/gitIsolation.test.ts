@@ -174,13 +174,13 @@ describe("gitIsolation", () => {
     const first = buildTaskWorktreePath({ projectRoot, branchName });
     const second = buildTaskWorktreePath({ projectRoot, branchName });
 
-    // Same branch → same path, regardless of which task asked for it.
+    // Одна ветка → один путь, независимо от того, какая задача о нём попросила.
     expect(first).toBe(second);
     expect(first).toContain(`${sep}.worktrees${sep}`);
     expect(first.endsWith(`feature-github-issue-7`)).toBe(true);
     expect(first).not.toContain("12345678");
 
-    // Explicit project id becomes a readable, stable project segment.
+    // Явный идентификатор проекта становится читаемым стабильным сегментом проекта.
     const withProjectId = buildTaskWorktreePath({
       projectRoot,
       branchName,
@@ -189,8 +189,8 @@ describe("gitIsolation", () => {
     expect(withProjectId).toContain(`${sep}project-alpha${sep}`);
     expect(withProjectId.endsWith(`feature-github-issue-7`)).toBe(true);
 
-    // Deterministic fallback segment mixes basename + a stable path hash, so two
-    // projects with the same basename cannot collide.
+    // Детерминированный резервный сегмент смешивает basename + стабильный хеш пути, поэтому два
+    // проекта с одинаковым basename не могут столкнуться.
     const segment = buildProjectWorktreeSegment(projectRoot);
     expect(segment.startsWith(basename(projectRoot))).toBe(true);
     expect(segment).toBe(buildProjectWorktreeSegment(projectRoot));
@@ -232,8 +232,8 @@ describe("gitIsolation", () => {
       );
 
       const branchName = "feature/github-issue-1";
-      // Simulate the retained legacy worktree from the incident: same branch,
-      // different (task-scoped) folder than the canonical branch-scoped path.
+      // Имитируем сохранённый legacy-worktree из инцидента: та же ветка,
+      // но каталог (привязанный к задаче) отличается от канонического пути, привязанного к ветке.
       const legacyPath = join(
         dirname(projectRoot),
         `${basename(projectRoot)}-feature-github-issue-1-legacy`,
@@ -267,9 +267,9 @@ describe("gitIsolation", () => {
       const branchName = "feature/stale-branch";
       const stalePath = buildTaskWorktreePath({ projectRoot, branchName });
       extraPaths.push(stalePath, resolveWorktreeRoot(projectRoot).worktreeRoot);
-      // Register a worktree for the branch, then delete its folder WITHOUT
-      // telling git: the registration survives and git reports it prunable.
-      // Adopting it used to poison every later stage (branch_drift / not-a-repo).
+      // Регистрируем worktree для ветки, затем удаляем его каталог БЕЗ
+      // уведомления git: регистрация сохраняется, и git помечает её prunable.
+      // Переиспользование такого worktree раньше отравляло все последующие этапы (branch_drift / not-a-repo).
       git(projectRoot, ["worktree", "add", "-b", branchName, stalePath, "main"]);
       rmSync(stalePath, { recursive: true, force: true });
 
@@ -613,8 +613,8 @@ describe("gitIsolation", () => {
     "by default warns and continues when git pull --ff-only fails (strict_base_update=false)",
     () => {
       initRepo(projectRoot);
-      // No `origin` remote → `git pull` will fail. Default policy is
-      // best-effort: branch creation should still succeed.
+      // Без удалённого репозитория `origin` → `git pull` упадёт. Политика по умолчанию —
+      // best-effort: создание ветки всё равно должно завершиться успешно.
       git(projectRoot, ["checkout", "-b", "topic-dirty"]);
 
       expect(() =>
@@ -660,15 +660,15 @@ describe("gitIsolation", () => {
   it(
     "throws base_update_failed when HEAD is already on base and strict_base_update=true",
     () => {
-      // Regression: previously the pull lived inside `if (current !== base)`,
-      // so a HEAD that already happened to be on stale local base bypassed
-      // strict_base_update entirely. Now the pull runs unconditionally.
+      // Регрессия: раньше pull жил внутри `if (current !== base)`,
+      // поэтому HEAD, уже оказавшийся на устаревшей локальной базе, полностью
+      // обходил strict_base_update. Теперь pull выполняется безусловно.
       initRepo(projectRoot);
       writeConfig(
         projectRoot,
         "git:\n  enabled: true\n  base_branch: main\n  create_branches: true\n  strict_base_update: true\n",
       );
-      // Stay on `main` — do NOT switch to a topic branch first.
+      // Остаёмся на `main` — НЕ переключаться на тематическую ветку заранее.
 
       let captured: unknown;
       try {
@@ -710,7 +710,7 @@ describe("gitIsolation", () => {
     try {
       applyGitIdentity({ botName: "AIF Bot", botEmail: "" });
       applyGitIdentity({ botName: "", botEmail: "bot@example.com" });
-      // Nothing should have been written to the global config file.
+      // В глобальный конфигурационный файл ничего не должно было записаться.
       expect(existsSync(globalConfig)).toBe(false);
     } finally {
       if (originalGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;

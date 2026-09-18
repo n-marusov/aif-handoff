@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-// jsdom doesn't implement scrollIntoView
+// jsdom не реализует scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
 const mockSendMessage = vi.fn();
@@ -422,7 +422,7 @@ describe("ChatPanel", () => {
 
   it("is hidden when isOpen is false", () => {
     renderPanel({ isOpen: false });
-    // Portal renders to document.body
+    // Портал рендерится в document.body
     const panel = document.body.querySelector("[class*='-translate-x-full']");
     expect(panel).not.toBeNull();
   });
@@ -518,7 +518,7 @@ describe("ChatPanel", () => {
   it("does not render attachment section when message has no attachments", () => {
     mockMessages = [{ role: "user", content: "Plain message" }];
     renderPanel();
-    // Portal renders to document.body — query there
+    // Портал рендерится в document.body — ищем там
     const messageBubbles = document.body.querySelectorAll(".bg-blue-600\\/15");
     expect(messageBubbles.length).toBe(1);
     expect(messageBubbles[0].querySelector(".flex-wrap")).toBeNull();

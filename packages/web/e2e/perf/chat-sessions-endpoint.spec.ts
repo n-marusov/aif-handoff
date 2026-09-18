@@ -1,15 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { PERF_BUDGETS } from "./utils";
 
-// `/chat/sessions` currently pulls Codex session metas from disk. Even with
-// the 30s in-memory cache, cold hits traverse ~/.codex/sessions; this spec
-// pins the budget so regressions there (e.g. dropping the TTL) surface fast.
+// `/chat/sessions` читает метаданные сессий Codex с диска. Даже при 30-секундном
+// кеше в памяти холодные запросы проходят через ~/.codex/sessions; этот тест
+// фиксирует бюджет, чтобы такие регрессии быстро проявлялись.
 test.describe("chat-sessions endpoint timing", () => {
   test("cold and warm reads stay under their budgets", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    // Pick the first project id surfaced by the API so this spec does not
-    // hard-code a fixture that might not exist on a given machine.
+    // Берём первый project id из API, чтобы не жёстко привязываться
+    // к фикстуре, которой может не быть на конкретной машине.
     const projectId = await page.evaluate(async () => {
       const res = await fetch("/projects", { credentials: "include" });
       if (!res.ok) return null;

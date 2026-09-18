@@ -117,7 +117,7 @@ export function register(server: McpServer, context: ToolContext): void {
           "DEBUG [mcp:tool:*] handoff_update_task called with runtime metadata",
         );
 
-        // Validate task exists
+        // Проверяет, что задача существует
         const existing = findTaskById(args.taskId);
         if (!existing) {
           log.error({ taskId: args.taskId }, "Task not found for update");
@@ -133,10 +133,10 @@ export function register(server: McpServer, context: ToolContext): void {
           log,
         });
 
-        // Extract taskId, pass remaining fields to updateTask
+        // Извлекает taskId, остальные поля передаёт в updateTask
         const { taskId, ...fields } = args;
 
-        // Build a summary of changed fields for logging
+        // Готовит сводку изменённых полей для логирования
         const changedFields = Object.keys(fields).filter(
           (key) => fields[key as keyof typeof fields] !== undefined,
         );

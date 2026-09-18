@@ -160,14 +160,14 @@ describe("hooks - activity logging", () => {
       const log = getTaskLog();
       expect(log).toContain("Tool: bash: ls");
       expect(log).toContain("Tool: bash: pwd");
-      // Two lines = two entries
+      // Две строки = две записи
       expect(log.split("\n")).toHaveLength(2);
     });
 
     it("includes timestamp in each entry", () => {
       logActivity(TASK_ID, "Agent", "started planning");
       const log = getTaskLog();
-      // Matches ISO timestamp pattern
+      // Совпадает с ISO-шаблоном временной метки
       expect(log).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     });
   });
@@ -178,7 +178,7 @@ describe("hooks - activity logging", () => {
         makeEnv({
           ACTIVITY_LOG_MODE: "batch",
           ACTIVITY_LOG_BATCH_SIZE: 3,
-          ACTIVITY_LOG_BATCH_MAX_AGE_MS: 60000, // high so timer doesn't fire
+          ACTIVITY_LOG_BATCH_MAX_AGE_MS: 60000, // велико, чтобы таймер не сработал
           ACTIVITY_LOG_QUEUE_LIMIT: 10,
         }),
       );
@@ -188,7 +188,7 @@ describe("hooks - activity logging", () => {
       logActivity(TASK_ID, "Tool", "bash: ls");
       logActivity(TASK_ID, "Tool", "bash: pwd");
 
-      // Only 2 entries, batch size is 3 — should NOT have flushed
+      // Записей только 2, размер батча 3 — сбрасывать в БД не должно
       const log = getTaskLog();
       expect(log).toBe("");
     });
@@ -196,7 +196,7 @@ describe("hooks - activity logging", () => {
     it("flushes when batch size is reached", () => {
       logActivity(TASK_ID, "Tool", "entry 1");
       logActivity(TASK_ID, "Tool", "entry 2");
-      logActivity(TASK_ID, "Tool", "entry 3"); // triggers flush at size 3
+      logActivity(TASK_ID, "Tool", "entry 3"); // сбрасывает при достижении размера 3
 
       const log = getTaskLog();
       expect(log).toContain("entry 1");
@@ -208,10 +208,10 @@ describe("hooks - activity logging", () => {
       logActivity(TASK_ID, "Tool", "buffered 1");
       logActivity(TASK_ID, "Tool", "buffered 2");
 
-      // Not flushed yet
+      // Ещё не сброшено
       expect(getTaskLog()).toBe("");
 
-      // Manual flush
+      // Ручной сброс
       flushActivityQueue(TASK_ID);
 
       const log = getTaskLog();
@@ -220,7 +220,7 @@ describe("hooks - activity logging", () => {
     });
 
     it("flushAllActivityQueues flushes all tasks", () => {
-      // Create a second task
+      // Создаём вторую задачу
       const TASK_ID_2 = "test-task-2";
       testDb.current
         .insert(tasks)
@@ -236,7 +236,7 @@ describe("hooks - activity logging", () => {
       logActivity(TASK_ID, "Tool", "task1-entry");
       logActivity(TASK_ID_2, "Tool", "task2-entry");
 
-      // Neither flushed
+      // Ни одна не сброшена
       expect(getTaskLog()).toBe("");
 
       flushAllActivityQueues();
@@ -251,7 +251,7 @@ describe("hooks - activity logging", () => {
       mockedGetEnv.mockReturnValue(
         makeEnv({
           ACTIVITY_LOG_MODE: "batch",
-          ACTIVITY_LOG_BATCH_SIZE: 100, // high so it won't auto-flush
+          ACTIVITY_LOG_BATCH_SIZE: 100, // велико, чтобы авто-сброс не срабатывал
           ACTIVITY_LOG_BATCH_MAX_AGE_MS: 60000,
           ACTIVITY_LOG_QUEUE_LIMIT: 3,
         }),
@@ -260,7 +260,7 @@ describe("hooks - activity logging", () => {
       logActivity(TASK_ID, "Tool", "oldest");
       logActivity(TASK_ID, "Tool", "middle");
       logActivity(TASK_ID, "Tool", "newest");
-      // Queue full, next push should drop "oldest"
+      // Очередь полна, следующее добавление должно вытеснить "oldest"
       logActivity(TASK_ID, "Tool", "after-limit");
 
       flushActivityQueue(TASK_ID);
@@ -280,7 +280,7 @@ describe("hooks - activity logging", () => {
       const log = getTaskLog();
       expect(log).toContain("before-dispose");
 
-      // Further flush should be a no-op (queue cleared)
+      // Повторный сброс — no-op (очередь уже очищена)
       flushActivityQueue(TASK_ID);
     });
   });

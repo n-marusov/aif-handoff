@@ -13,8 +13,8 @@ vi.mock("../services/gitPrepareBridge.js", () => ({
   callAgentGitPrepare: vi
     .fn()
     .mockResolvedValue({ ok: true, gitPreparedAt: "2026-09-14T21:00:00.000Z" }),
-  // Sync routes fire-and-forget the submodule bridge; the mock factory must
-  // expose the export or the call throws a TypeError before the try block.
+  // Маршруты синхронизации запускают мост подмодулей fire-and-forget; фабрика
+  // моков обязана экспортировать эту функцию, иначе вызов бросит TypeError до try.
   callAgentSubmoduleSync: vi.fn(async () => ({ ok: true })),
 }));
 

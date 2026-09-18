@@ -3,8 +3,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createTestDb } from "@aif/shared/server";
 
-// Set up an in-memory test DB before importing the server (tools reach the DB
-// through @aif/data → @aif/shared/server getDb).
+// Готовим in-memory тестовую БД до импорта сервера (тулзы попадают в БД
+// через @aif/data → @aif/shared/server getDb).
 const testDb = { current: createTestDb() };
 vi.mock("@aif/shared/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared/server")>();
@@ -14,7 +14,7 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   };
 });
 
-// Mock env to avoid shared env validation.
+// Мокируем env, чтобы избежать валидации общего окружения.
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {
@@ -27,7 +27,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
   };
 });
 
-// Import the handler from server.ts — NOT index.ts, which self-runs main().
+// Импортируем обработчик из server.ts — НЕ из index.ts, который сам запускает main().
 const { createMcpHttpHandler, createToolContext } = await import("../server.js");
 
 const env = {
@@ -38,13 +38,13 @@ const env = {
   rateLimitWriteRpm: 30,
   rateLimitReadBurst: 10,
   rateLimitWriteBurst: 5,
-  // Exercise the opt-in stateless multi-session path in the main suite.
+  // В основном наборе проверяем opt-in путь stateless-мультисессий.
   httpMultiSession: true,
   participantsModeEnabled: false,
   authToken: "dedicated-mcp-token",
 };
 
-/** POST an arbitrary JSON-RPC message with the headers the SDK requires (else 406). */
+/** POST произвольного JSON-RPC-сообщения с заголовками, которые требует SDK (иначе 406). */
 function postRpc(
   port: number,
   body: Record<string, unknown>,
@@ -54,7 +54,7 @@ function postRpc(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      // The SDK returns 406 unless the client accepts BOTH content types.
+      // SDK вернёт 406, если клиент не принимает ОБА типа содержимого.
       Accept: "application/json, text/event-stream",
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
@@ -62,7 +62,7 @@ function postRpc(
   });
 }
 
-/** POST a JSON-RPC `initialize` request. */
+/** POST JSON-RPC-запроса `initialize`. */
 function initialize(port: number, authToken: string | null = env.authToken): Promise<Response> {
   return postRpc(
     port,
@@ -80,7 +80,7 @@ function initialize(port: number, authToken: string | null = env.authToken): Pro
   );
 }
 
-/** Read a JSON-RPC payload from either a JSON or an SSE (`data:`) response. */
+/** Читает JSON-RPC-полезную нагрузку из ответа JSON или SSE (`data:`). */
 async function readJsonRpc(res: Response): Promise<Record<string, unknown> | null> {
   const text = await res.text();
   const contentType = res.headers.get("content-type") ?? "";
@@ -124,9 +124,9 @@ describe("MCP HTTP transport — multi-session (opt-in)", () => {
   });
 
   it("lets two independent clients initialize without -32600", async () => {
-    // The core regression: with a single shared stateful transport the second
-    // initialize returned -32600 "Server already initialized". Stateless
-    // per-request transports let every client initialize independently.
+    // Ключевая регрессия: при одном общем stateful-транспорте второй
+    // initialize возвращал -32600 "Server already initialized". Stateless
+    // транспорты на каждый запрос дают каждому клиенту инициализироваться независимо.
     const res1 = await initialize(port);
     const body1 = await readJsonRpc(res1);
     const res2 = await initialize(port);
@@ -141,10 +141,10 @@ describe("MCP HTTP transport — multi-session (opt-in)", () => {
   });
 
   it("lets a client initialize then list tools through the stateless path", async () => {
-    // Proves real MCP usage works, not just the initialize handshake: a
-    // transport change that fixed init but broke tools/list would be caught
-    // here. Stateless per-request transports do not gate tools/list behind a
-    // prior initialize on the same connection, so a fresh POST lists tools.
+    // Доказывает, что реальный сценарий MCP работает, а не только handshake initialize:
+    // изменение транспорта, чинящее init, но ломающее tools/list,
+    // было бы поймано здесь. Stateless-транспорты на каждый запрос не требуют
+    // предварительного initialize на том же соединении, поэтому свежий POST перечисляет тулзы.
     const initRes = await initialize(port);
     expect(initRes.status).toBe(200);
     await readJsonRpc(initRes);
@@ -165,10 +165,10 @@ describe("MCP HTTP transport — multi-session (opt-in)", () => {
   });
 
   it("rejects non-POST /mcp with 405 instead of opening an idle SSE stream", async () => {
-    // The SDK client opens an optional GET SSE stream after init and treats 405
-    // as "no server SSE". Since events are pushed out-of-band via the API
-    // broadcast endpoint, accepting GET would hold an idle server/transport per
-    // client for no benefit — so the stateless path is POST-only.
+    // Клиент SDK после init открывает необязательный GET SSE-поток и воспринимает 405
+    // как «у сервера нет SSE». События публикуются вне полосы через
+    // broadcast-эндпоинт API, поэтому разрешение GET держало бы простой server/transport на
+    // каждого клиента без пользы — значит stateless-путь принимает только POST.
     const res = await fetch(`http://localhost:${port}/mcp`, {
       method: "GET",
       headers: {
@@ -188,10 +188,10 @@ describe("MCP HTTP transport — multi-session (opt-in)", () => {
   });
 
   it("createToolContext builds one stateful, shared RateLimiter", () => {
-    // The handler closes over a single context, so every per-request server
-    // shares this limiter. If it were rebuilt per request the bucket would
-    // reset and rate limiting would silently break — so assert the bucket
-    // accumulates state across calls.
+    // Обработчик замыкается на одном контексте, поэтому каждый сервер на запрос
+    // делит этот ограничитель. Если бы он пересоздавался на каждый запрос, корзина
+    // сбрасывалась бы и лимитирование молча ломалось — поэтому проверяем,
+    // что состояние корзины накапливается между вызовами.
     const context = createToolContext(env);
     for (let i = 0; i < env.rateLimitReadBurst; i++) {
       expect(context.rateLimiter.check("listTasks", "read")).toBe(true);
@@ -292,9 +292,9 @@ describe("MCP HTTP transport — legacy single-session (default, flag off)", () 
   });
 
   it("preserves previous behavior: the 2nd client initialize collides with -32600", async () => {
-    // With the flag off, one shared stateful transport is reused across the
-    // process. The first client initializes, the second collides — the exact
-    // pre-fix behavior that AIF_MCP_HTTP_MULTI_SESSION_ENABLED gates.
+    // С выключенным флагом на весь процесс переиспользуется один общий stateful-
+    // транспорт. Первый клиент инициализируется, второй сталкивается — ровно то
+    // поведение до исправления, которое гейтит AIF_MCP_HTTP_MULTI_SESSION_ENABLED.
     const res1 = await initialize(port);
     const body1 = await readJsonRpc(res1);
     expect(res1.status).toBe(200);

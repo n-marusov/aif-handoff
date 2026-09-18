@@ -3,9 +3,9 @@ import { Hono } from "hono";
 import { projects, tasks, resetEnvCache } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
-// QA routes are gated behind AIF_QA_PIPELINE_ENABLED (off by default). Enable it
-// before importing the route module — schemas.ts calls getEnv() at schema-definition
-// time, which caches the parsed env. The disabled-flag case below toggles it back.
+// QA-маршруты гейтятся флагом AIF_QA_PIPELINE_ENABLED (по умолчанию выключен). Включим его
+// до импорта модуля маршрутов — schemas.ts вызывает getEnv() в момент определения
+// схем, кэшируя разобранный env. Случай с выключенным флагом ниже возвращает его обратно.
 process.env.AIF_QA_PIPELINE_ENABLED = "true";
 
 const testDb = { current: createTestDb() };
@@ -24,7 +24,7 @@ vi.mock("../ws.js", () => ({
   getInjectWebSocket: vi.fn(),
 }));
 
-// Prevent the fire-and-forget runner from executing the real runtime.
+// Не даём fire-and-forget раннеру исполнять настоящий runtime.
 const mockRunQaQuery = vi.fn();
 vi.mock("../services/qaRunner.js", () => ({
   runQaQuery: (...args: unknown[]) => mockRunQaQuery(...args),
@@ -88,9 +88,9 @@ describe("POST /tasks/:id/run-qa", () => {
     seedTask(); // qaStatus idle
     const first = await app.request("/tasks/t1/run-qa", { method: "POST" });
     expect(first.status).toBe(202);
-    // The first request synchronously claimed qaStatus:"running" via the
-    // compare-and-set; the mocked runner never resets it, mirroring an in-flight
-    // run. A second POST must lose the claim and not start a duplicate run.
+    // Первый запрос синхронно захватил qaStatus:"running" через
+    // compare-and-set; замокианный раннер никогда его не сбрасывает, имитируя
+    // идущий прогон. Второй POST обязан проиграть захват и не запускать дублирующий прогон.
     const second = await app.request("/tasks/t1/run-qa", { method: "POST" });
     expect(second.status).toBe(409);
     await new Promise((r) => setTimeout(r, 0));
@@ -99,10 +99,10 @@ describe("POST /tasks/:id/run-qa", () => {
 
   it("releases the running claim with qaStatus error when the dispatch throws", async () => {
     seedTask(); // qaStatus idle
-    // runQaQuery is contracted never to throw, but the dispatch guard must
-    // survive a contract breach (or a failing dynamic import): persist a
-    // terminal qaStatus so the atomic claim does not stay stuck on "running"
-    // and block every future QA start for the task.
+    // runQaQuery по контракту никогда не бросает, но guard рассылки обязан
+    // выдержать нарушение контракта (или упавший динамический импорт): сохранить
+    // терминальный qaStatus, чтобы атомарный захват не залип на "running"
+    // и не блокировал все будущие запуски QA для задачи.
     mockRunQaQuery.mockRejectedValue(new Error("dispatch boom"));
     const res = await app.request("/tasks/t1/run-qa", { method: "POST" });
     expect(res.status).toBe(202);
@@ -113,7 +113,7 @@ describe("POST /tasks/:id/run-qa", () => {
       .all()
       .find((t) => t.id === "t1");
     expect(row?.qaStatus).toBe("error");
-    // Slot released — a follow-up manual run can claim it again.
+    // Слот освобождён — последующий ручной запуск может захватить его снова.
     mockRunQaQuery.mockResolvedValue({ ok: true });
     const retry = await app.request("/tasks/t1/run-qa", { method: "POST" });
     expect(retry.status).toBe(202);
@@ -135,7 +135,7 @@ describe("POST /tasks/:id/run-qa", () => {
     seedTask();
     const res = await app.request("/tasks/t1/run-qa", { method: "POST" });
     expect(res.status).toBe(202);
-    // Fire-and-forget: allow the async import + invocation to settle.
+    // Fire-and-forget: даём устояться асинхронному импорту и вызову.
     await new Promise((r) => setTimeout(r, 0));
     expect(mockRunQaQuery).toHaveBeenCalledWith({
       projectId: "p1",

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// k6 orchestrator: probes the API, optionally boots the dev stack, runs every
-// script in ./k6 sequentially, aggregates summaries, exits non-zero if any
-// threshold fails. Called from the root `ai:load` script and from CI.
+// Оркестратор k6: опрашивает API, при необходимости поднимает dev-стек,
+// последовательно запускает все скрипты из ./k6, агрегирует сводки и завершается
+// с ненулевым кодом, если какой-то порог не выполнен. Вызывается из корневого
+// скрипта `ai:load` и из CI.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
@@ -17,21 +18,21 @@ const API_URL = process.env.AIF_API_URL || "http://localhost:3009";
 const SKIP_DEV_SERVER = process.env.AIF_SKIP_DEV_SERVER === "1";
 const HEALTH_TIMEOUT_MS = 120_000;
 
-/** Ping `/health` until it returns 200 or the deadline elapses. */
+/** Опрашивает `/health` до кода 200 или истечения дедлайна. */
 async function waitForApi(url, deadline) {
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`${url}/health`);
       if (res.ok) return true;
     } catch {
-      // connection refused while dev boots; keep polling
+      // отключение, пока dev-стек поднимается; продолжаем опрос
     }
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
 }
 
-/** Run a single k6 script and write its JSON summary to reports/. */
+/** Запускает один скрипт k6 и пишет его JSON-сводку в reports/. */
 function runK6(scriptPath) {
   return new Promise((resolvePromise) => {
     const scriptName = basename(scriptPath, ".js");
@@ -88,7 +89,7 @@ function stopDevStack(child) {
   try {
     process.kill(-child.pid);
   } catch {
-    // dev stack may have already exited
+    // dev-стек мог уже завершиться
   }
 }
 
@@ -98,8 +99,9 @@ async function main() {
       "[ai:load] k6 binary not found on PATH. Install via `brew install k6` (macOS) or " +
         "see https://k6.io/docs/get-started/installation/. Skipping load step.",
     );
-    // Do not fail the whole ai:validate chain on a missing optional tool —
-    // developers iterating on unrelated code should not be forced to install.
+    // Не роняем всю цепочку ai:validate из-за отсутствующего опционального
+    // инструмента — разработчики, работающие с несвязанным кодом, не обязаны
+    // его ставить.
     process.exit(0);
   }
 

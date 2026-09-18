@@ -80,7 +80,7 @@ describe("useKeyboardShortcut", () => {
     const handler = vi.fn();
     renderHook(() => useKeyboardShortcut({ key: "KeyK", meta: true }, handler));
 
-    // event.key is "k" but event.code is "KeyK"
+    // event.key = "k", но event.code = "KeyK"
     document.dispatchEvent(
       new KeyboardEvent("keydown", {
         key: "k",

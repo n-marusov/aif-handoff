@@ -2,18 +2,18 @@ import { useEffect, useRef } from "react";
 import { useToast } from "@/components/ui/toast";
 import type { TaskCommitPayload } from "@aif/shared/browser";
 
-// Dedupe window for (taskId, type) pairs. StrictMode double-mount, transient
-// dual WS connections during reconnect, and server re-broadcasts can all
-// deliver the same commit event more than once. 2s is long enough to swallow
-// those, short enough that a genuine repeat (e.g. second manual approve) still
-// produces a fresh toast.
+// Окно дедупликации для пар (taskId, type). Двойной маунт StrictMode,
+// временные двойные WS-соединения при реконнекте и ретрансляции сервера
+// могут доставить одно и то же событие коммита несколько раз. 2 с хватает,
+// чтобы поглотить такие повторы, и мало, чтобы настоящий повтор
+// (напр. второе ручное подтверждение) снова дал свежий тост.
 const DEDUPE_WINDOW_MS = 2000;
 
 /**
- * Global listener for `task:commit_*` WS events. Mounts once (in <App/>) and
- * converts the event stream into toasts so the user always gets feedback on
- * the approve-done auto-commit flow — regardless of whether the task detail
- * modal is open.
+ * Глобальный слушатель WS-событий `task:commit_*`. Монтируется один раз (в <App/>)
+ * и превращает поток событий в тосты, чтобы пользователь всегда получал отклик
+ * по потоку approve-done auto-commit — независимо от того, открыта ли модалка
+ * деталей задачи.
  */
 export function useCommitToasts() {
   const { toast } = useToast();

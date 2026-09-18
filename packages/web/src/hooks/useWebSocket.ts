@@ -117,7 +117,7 @@ function resolveWsUrl(): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-/** Per-client WS identifier assigned by server on connect */
+/** Идентификатор клиента WebSocket, назначаемый сервером при подключении. */
 let currentClientId: string | null = null;
 
 export function getWsClientId(): string | null {
@@ -134,8 +134,8 @@ export function useWebSocket(enabled = true) {
   const invalidateTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pendingTaskIds = useRef<Set<string>>(new Set());
   const { settings } = useNotificationSettings();
-  // Keep settings in a ref so the connect callback doesn't depend on them.
-  // This prevents WebSocket churn when notification settings change.
+  // Настройки храним в ref, чтобы их изменение не вызывало
+  // переподключение WebSocket.
   const settingsRef = useRef(settings);
   useEffect(() => {
     settingsRef.current = settings;
@@ -213,7 +213,7 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Capture per-client WS identifier from server (not a WsEvent)
+      // Сохраняем clientId из служебного события ws:connected.
       if (
         raw.type === "ws:connected" &&
         isRecord(raw.payload) &&
@@ -224,7 +224,7 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Dispatch chat events as custom DOM events for the useChat hook
+      // Передаём события чата в DOM-канал для useChat.
       if (
         raw.type === "chat:token" ||
         raw.type === "chat:done" ||
@@ -242,8 +242,8 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Commit lifecycle (approve-done auto-commit): surface to any listener
-      // via custom DOM events; global toast + modal spinner subscribe to these.
+      // События жизненного цикла коммита передаются в DOM для подписчиков
+      // уведомлений и индикатора ожидания.
       if (
         raw.type === "task:commit_started" ||
         raw.type === "task:commit_done" ||
@@ -254,9 +254,8 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // QA lifecycle (manual run-qa + auto-trigger on approve_done): surface to
-      // listeners and invalidate the task query so the QA tab refetches the
-      // updated qaStatus/artifacts (the auto-trigger path has no useRunQa hook).
+      // Жизненный цикл QA: отправляем событие слушателям и повторно запрашиваем
+      // задачу, чтобы вкладка QA получила актуальные qaStatus и артефакты.
       if (
         raw.type === "task:qa_started" ||
         raw.type === "task:qa_done" ||
@@ -330,7 +329,8 @@ export function useWebSocket(enabled = true) {
         }
       }
 
-      // Heartbeat: patch cached card/task lastHeartbeatAt without refetching the board.
+      // Heartbeat обновляет lastHeartbeatAt локально, без полного
+      // повторного запроса доски.
       if (data.type === "task:heartbeat" && hasTaskHeartbeatPayload(data.payload)) {
         const { taskId, lastHeartbeatAt } = data.payload;
         queryClient.setQueryData<Task>(["task", taskId], (current) =>
@@ -347,14 +347,15 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Usage update: refresh only the open task detail and notify the blink indicator.
+      // Обновление usage: обновляем детали задачи и сигнализируем индикатору.
       if (data.type === "task:usage_updated" && hasTaskUsagePayload(data.payload)) {
         queryClient.invalidateQueries({ queryKey: ["task", data.payload.taskId] });
         window.dispatchEvent(new CustomEvent("task:usage_updated", { detail: data.payload }));
         return;
       }
 
-      // Activity update: refresh the task detail log AND patch cached progress fields.
+      // Обновление активности: корректируем кеш прогресса и обновляем
+      // детали задачи.
       if (data.type === "task:activity" && hasTaskActivityPayload(data.payload)) {
         const { taskId, lastActivityAt, currentTool } = data.payload;
         queryClient.setQueryData<Task>(["task", taskId], (current) =>
@@ -374,8 +375,8 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Project auto-queue toggle changed somewhere — refresh the projects
-      // list so the Switch in the project settings dialog stays in sync.
+      // Изменение режима auto-queue требует обновления списка проектов,
+      // чтобы переключатели интерфейса были синхронизированы.
       if (data.type === "project:auto_queue_mode_changed") {
         queryClient.invalidateQueries({ queryKey: ["projects"] });
         if (hasIdPayload(data.payload)) {
@@ -395,7 +396,8 @@ export function useWebSocket(enabled = true) {
           pendingTaskIds.current.add(data.payload.taskId);
           queryClient.invalidateQueries({ queryKey: ["tasks"] });
         }
-        // Overview aggregates token/cost fields, so refresh after usage updates.
+        // Обзор агрегирует usage-поля, поэтому обновляется после событий
+        // лимитов и использования.
         invalidateProjectTaskOverviews(queryClient);
         return;
       }
@@ -408,8 +410,8 @@ export function useWebSocket(enabled = true) {
 
       if (data.type === "task:deleted" && hasIdPayload(data.payload)) {
         statusCacheRef.current.delete(data.payload.id);
-        // Remove the individual task query from cache instead of invalidating
-        // (invalidating would trigger a refetch of the deleted task → 404)
+        // Удаляем запрос задачи из кеша, а не инвалидируем,
+        // чтобы не получить повторный запрос удалённой задачи (404).
         queryClient.removeQueries({
           queryKey: ["task", data.payload.id],
         });
@@ -418,7 +420,7 @@ export function useWebSocket(enabled = true) {
         return;
       }
 
-      // Dispatch roadmap events as custom DOM events for listeners
+      // События roadmap передаются в DOM для внешних слушателей.
       if (data.type === "roadmap:complete" || data.type === "roadmap:error") {
         window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
 
@@ -438,7 +440,8 @@ export function useWebSocket(enabled = true) {
         }
       }
 
-      // Batch invalidation: debounce 150ms to coalesce rapid WS events
+      // Задержка 150мс объединяет частые WS-события в одну пачку
+      // инвалидирования кеша.
       if (hasIdPayload(data.payload)) {
         pendingTaskIds.current.add(data.payload.id);
       }
@@ -503,8 +506,8 @@ export function useWebSocket(enabled = true) {
 
       intentionalCloseRef.current = true;
 
-      // In React.StrictMode (dev) effect cleanup can happen while socket is still
-      // connecting; closing it immediately causes noisy browser console errors.
+      // В StrictMode очистка может сработать в состоянии CONNECTING.
+      // Закрытие откладывается до onopen, чтобы убрать шумные ошибки в консоли.
       if (ws.readyState === WebSocket.CONNECTING) {
         ws.addEventListener(
           "open",

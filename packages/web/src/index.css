@@ -22,15 +22,15 @@
   --color-input: #2a2a2a;
   --color-ring: #10b981;
   --radius: 0rem;
-  /* Typography tokens */
+  /* Токены типографики */
   --text-2xs: 0.6875rem; /* 11px */
   --text-2xs--line-height: 1rem;
   --text-3xs: 0.625rem; /* 10px */
   --text-3xs--line-height: 0.875rem;
-  /* Accessibility floor: keep microcopy at or above 10px. */
+  /* Нижний предел доступности: микротекст не мельче 10px. */
   --text-4xs: 0.625rem; /* 10px */
   --text-4xs--line-height: 0.8125rem;
-  /* Status colors */
+  /* Статусы */
   --color-status-backlog: #6b7280;
   --color-status-planning: #8b5cf6;
   --color-status-ready: #06b6d4;
@@ -38,42 +38,43 @@
   --color-status-review: #3b82f6;
   --color-status-done: #10b981;
   --color-status-failed: #ef4444;
-  /* Priority colors */
+  /* Приоритеты */
   --color-priority-low: #06b6d4;
   --color-priority-medium: #f59e0b;
   --color-priority-high: #f97316;
   --color-priority-urgent: #ef4444;
-  /* Feedback colors */
+  /* Цвета обратной связи */
   --color-success: #10b981;
   --color-success-foreground: #d1fae5;
   --color-warning: #f59e0b;
   --color-warning-foreground: #fef3c7;
   --color-info: #3b82f6;
   --color-info-foreground: #dbeafe;
-  /* Agent/tool colors */
+  /* Цвета агента и инструментов */
   --color-agent: #8b5cf6;
   --color-agent-foreground: #c4b5fd;
   --color-tool: #06b6d4;
   --color-tool-foreground: #a5f3fc;
   --color-tool-error: #ef4444;
-  /* Z-index layers */
+  /* Слои z-index */
   --z-dropdown: 50;
   --z-chat: 55;
   --z-header: 60;
   --z-bubble: 70;
   --z-modal: 80;
   --z-toast: 90;
-  /* Letter-spacing tokens */
+  /* Токены межбуквенного интервала */
   --tracking-ui: 0.16em;
   --tracking-label: 0.18em;
 }
 
 /*
- * Status color tokens — emitted to :root explicitly so they are available
- * to runtime `var(--color-status-*)` lookups (e.g. <StatusDot/>).
- * Tailwind v4 only emits `@theme` vars used by generated utilities,
- * so this block guarantees presence in the default (dark) theme.
- * Names mirror the TaskStatus enum in @aif/shared.
+ * Токены цветов статусов — объявляются в :root явно, чтобы были доступны
+ * для runtime-подстановки `var(--color-status-*)` (например, <StatusDot/>).
+ * Tailwind v4 эмитит только те переменные `@theme`, которые используются
+ * сгенерированными утилитами, поэтому блок гарантирует их наличие в теме
+ * по умолчанию (тёмной).
+ * Имена повторяют enum TaskStatus из @aif/shared.
  */
 :root {
   --color-status-backlog: #6b7280;
@@ -108,7 +109,7 @@
   --color-border: #b7c4bc;
   --color-input: #b7c4bc;
   --color-ring: #0f766e;
-  /* Status colors */
+  /* Статусы */
   --color-status-backlog: #6b7280;
   --color-status-planning: #7c3aed;
   --color-status-ready: #0891b2;
@@ -121,19 +122,19 @@
   --color-status-done: #059669;
   --color-status-verified: #0d9488;
   --color-status-failed: #dc2626;
-  /* Priority colors */
+  /* Приоритеты */
   --color-priority-low: #0891b2;
   --color-priority-medium: #d97706;
   --color-priority-high: #ea580c;
   --color-priority-urgent: #dc2626;
-  /* Feedback colors */
+  /* Цвета обратной связи */
   --color-success: #059669;
   --color-success-foreground: #065f46;
   --color-warning: #d97706;
   --color-warning-foreground: #92400e;
   --color-info: #2563eb;
   --color-info-foreground: #1e40af;
-  /* Agent/tool colors */
+  /* Цвета агента и инструментов */
   --color-agent: #7c3aed;
   --color-agent-foreground: #5b21b6;
   --color-tool: #0891b2;
@@ -202,7 +203,7 @@ h4 {
   font-family: "IBM Plex Mono", monospace;
 }
 
-/* Ensure interactive elements have pointer cursor */
+/* Интерактивные элементы должны указывать на кликабельность */
 button,
 a {
   cursor: pointer;
@@ -213,9 +214,10 @@ a {
   background: var(--color-primary);
 }
 
-/* Custom scrollbar */
-/* Firefox: ::-webkit-scrollbar is ignored, so style via standard properties.
-   Inherits to every scroll container, mirroring the WebKit rules below. */
+/* Полосы прокрутки */
+/* Firefox: ::-webkit-scrollbar игнорируется, поэтому стилизуем стандартными
+   свойствами. Наследуется всеми контейнерами прокрутки, повторяя правила
+   WebKit ниже. */
 html {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;

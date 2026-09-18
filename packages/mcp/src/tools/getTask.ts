@@ -8,7 +8,7 @@ import { buildEffectiveTaskRuntimeMetadata } from "./runtimeTaskMetadata.js";
 
 const log = logger("mcp:tool:get-task");
 
-/** All known Task field names for validation */
+/** Все известные имена полей Task для валидации */
 const TASK_FIELDS = [
   "id",
   "projectId",

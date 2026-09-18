@@ -75,8 +75,8 @@ describe("codex app-server process helpers", () => {
     const env = buildCodexAppServerEnv({
       runtimeId: "codex",
       options: {},
-      // Explicit API-key opt-in: OPENAI_API_KEY may only be forwarded when the
-      // profile asks for API-key auth (otherwise OAuth runs would be hijacked).
+      // Явное включение API-key: OPENAI_API_KEY разрешено пробрасывать только
+      // когда профиль просит API-key авторизацию (иначе OAuth-запуски перехватывались бы).
       apiKeyEnvVar: "OPENAI_API_KEY",
     });
 

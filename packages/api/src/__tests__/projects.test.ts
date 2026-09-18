@@ -633,7 +633,7 @@ describe("projects API", () => {
     const body = await res.json();
     expect(body.error).toContain("ai-factory init failed");
 
-    // Verify project was rolled back from DB
+    // Проверяем, что проект откачен из БД
     const listRes = await app.request("/projects");
     const projects = await listRes.json();
     expect(projects.find((p: { name: string }) => p.name === "Demo")).toBeUndefined();
@@ -658,7 +658,7 @@ describe("projects API", () => {
     const body = await res.json();
     expect(body.error).toContain("registry unavailable");
 
-    // Verify project was rolled back from DB
+    // Проверяем, что проект откачен из БД
     const listRes = await app.request("/projects");
     const projects = await listRes.json();
     expect(projects.find((p: { name: string }) => p.name === "RegistryFail")).toBeUndefined();
@@ -815,7 +815,7 @@ describe("projects API", () => {
       ])
       .run();
 
-    // Create a project first
+    // Сначала создаём проект
     const createRes = await app.request("/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -846,7 +846,7 @@ describe("projects API", () => {
       ])
       .run();
 
-    // Update with per-stage profile IDs
+    // Обновление с id профилей по стадиям
     const updateRes = await app.request(`/projects/${created.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -867,7 +867,7 @@ describe("projects API", () => {
     expect(updated.defaultReviewRuntimeProfileId).toBe("profile-review");
     expect(updated.defaultChatRuntimeProfileId).toBe("profile-chat");
 
-    // Verify persistence by re-fetching
+    // Проверяем персистентность повторным чтением
     const getRes = await app.request(`/projects`);
     const projects = await getRes.json();
     const refetched = projects.find((p: { id: string }) => p.id === created.id);

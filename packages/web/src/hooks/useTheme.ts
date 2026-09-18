@@ -15,7 +15,7 @@ function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("light", theme === "light");
 }
 
-// Initialize on load
+// Инициализация темы при загрузке.
 if (typeof window !== "undefined") {
   applyTheme(store.get());
 }

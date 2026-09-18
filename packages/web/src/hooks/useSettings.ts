@@ -19,10 +19,10 @@ export function useProjectDefaults(projectId: string | null) {
   });
 }
 
-// Module-level cache for the usage-limits feature flag. The flag is driven by
-// an env var and never changes during a session, so a single fetch outside the
-// React Query cache avoids requiring a QueryClientProvider on every isolated
-// component (tests in particular render components without the provider).
+// Кэш уровня модуля для флага функции лимитов использования. Флаг задается
+// переменной окружения и не меняется в течение сессии, поэтому одна загрузка
+// вне кэша React Query избавляет от необходимости QueryClientProvider в каждом
+// изолированном компоненте (тесты рендерят компоненты без провайдера).
 let cachedUsageLimitsEnabled: boolean | null = null;
 let inFlightUsageLimitsFetch: Promise<void> | null = null;
 const usageLimitsListeners = new Set<(value: boolean) => void>();
@@ -35,9 +35,9 @@ async function loadUsageLimitsFlag(): Promise<void> {
       const settings = await api.getSettings();
       cachedUsageLimitsEnabled = settings.usageLimitsEnabled ?? true;
     } catch {
-      // Network/API failure: stay optimistic so a transient error cannot
-      // make the whole usage UI silently disappear. The UI auto-corrects
-      // once the real `/settings` response resolves on retry.
+      // Сбой сети/API: остаёмся оптимистичными, чтобы временная ошибка
+      // не скрыла молча весь интерфейс использования. UI скорректируется сам,
+      // когда реальный ответ `/settings` резолвится при повторе.
       cachedUsageLimitsEnabled = true;
     }
     const value = cachedUsageLimitsEnabled ?? true;
@@ -47,23 +47,23 @@ async function loadUsageLimitsFlag(): Promise<void> {
 }
 
 /**
- * True when the backend has the usage-limits feature enabled. Returns `true`
- * optimistically on the first render (so the usage UI is not briefly hidden
- * before the `/settings` response lands) and flips to `false` if the backend
- * actually has `AIF_USAGE_LIMITS_ENABLED` disabled. Components that render
- * usage-limit surfaces should gate on this so disabled deployments never
- * render stale data once the fetch resolves.
+ * True, когда на бэкенде включена функция лимитов использования. Возвращает
+ * `true` оптимистично на первом рендере (чтобы UI использования не скрывался
+ * на мгновение до ответа `/settings`) и переключается в `false`, если на
+ * бэкенде действительно отключён `AIF_USAGE_LIMITS_ENABLED`. Компонентам,
+ * рендерящим поверхности лимитов использования, стоит гейтиться по этому
+ * флагу, чтобы отключённые развёртывания не показывали устаревшие данные.
  */
 export function useUsageLimitsEnabled(): boolean {
   const [value, setValue] = useState<boolean>(() => cachedUsageLimitsEnabled ?? true);
-  // The rule `react-hooks/set-state-in-effect` normally flags setState inside
-  // an effect. Here the effect is syncing an external module-level store to
-  // component state: the initial branch copies the already-resolved cache
-  // into local state, and the listener branch responds to async fetch
-  // resolution. Neither call causes a render cascade because both produce
-  // the same value across repeated renders. `useSyncExternalStore` was
-  // tried here and caused a runtime render storm with React Query
-  // subscribers, so we keep the useState pattern and silence the rule.
+  // Правило `react-hooks/set-state-in-effect` обычно флагует setState внутри
+  // эффекта. Здесь эффект синхронизирует внешний store уровня модуля с
+  // состоянием компонента: начальная ветка копирует уже разрешённый кэш
+  // в локальное состояние, а ветка слушателя реагирует на асинхронное
+  // завершение загрузки. Ни один вызов не даёт каскада рендеров, потому что
+  // оба возвращают одно и то же значение при повторных рендерах. Здесь
+  // пробовали `useSyncExternalStore` — это вызвало шторм рендеров в рантайме
+  // с подписчиками React Query, поэтому оставляем useState и глушим правило.
   useEffect(() => {
     if (cachedUsageLimitsEnabled !== null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -85,11 +85,11 @@ export function useWarmupEnabled(): boolean {
   return data?.warmupEnabled ?? false;
 }
 
-// Module-level cache for the QA-pipeline feature flag. Mirrors the usage-limits
-// cache so QA-gated components (TaskDetailHeader, TaskSettings, TaskDetail) can
-// read the flag without a QueryClientProvider — those components are rendered
-// in isolation in tests. Unlike usage-limits, the default is pessimistic
-// (`false`): a disabled feature should stay hidden rather than flash visible.
+// Кэш уровня модуля для флага QA-конвейера. Повторяет кэш лимитов использования,
+// чтобы QA-гейтированные компоненты (TaskDetailHeader, TaskSettings, TaskDetail)
+// читали флаг без QueryClientProvider — в тестах они рендерятся изолированно.
+// В отличие от лимитов использования, значение по умолчанию пессимистично
+// (`false`): отключённая функция должна оставаться скрытой, а не мелькать.
 let cachedQaPipelineEnabled: boolean | null = null;
 let inFlightQaPipelineFetch: Promise<void> | null = null;
 const qaPipelineListeners = new Set<(value: boolean) => void>();
@@ -102,9 +102,9 @@ async function loadQaPipelineFlag(): Promise<void> {
       const settings = await api.getSettings();
       cachedQaPipelineEnabled = settings.qaPipelineEnabled ?? false;
     } catch {
-      // Network/API failure: stay hidden. A 403-backed feature flashing visible
-      // is worse than briefly hiding it; the UI auto-corrects once the real
-      // `/settings` response resolves on retry.
+      // Сбой сети/API: остаёмся скрытыми. Мелькающая функция за 403
+      // хуже кратковременного скрытия; UI скорректируется сам, когда реальный
+      // ответ `/settings` резолвится при повторе.
       cachedQaPipelineEnabled = false;
     }
     const value = cachedQaPipelineEnabled ?? false;
@@ -114,11 +114,11 @@ async function loadQaPipelineFlag(): Promise<void> {
 }
 
 /**
- * True when the backend has the QA pipeline feature enabled
- * (`AIF_QA_PIPELINE_ENABLED`). Returns `false` until `/settings` resolves so a
- * disabled deployment never briefly shows QA surfaces, then flips to the real
- * value. See the `useUsageLimitsEnabled` note for why this uses a module-level
- * store instead of `useSyncExternalStore`.
+ * True, когда на бэкенде включён QA-конвейер (`AIF_QA_PIPELINE_ENABLED`).
+ * Возвращает `false`, пока `/settings` не резолвится, чтобы отключённое
+ * развёртывание никогда не показывало QA-поверхности, затем переключается на
+ * реальное значение. См. примечание `useUsageLimitsEnabled` о причинах
+ * использования store уровня модуля вместо `useSyncExternalStore`.
  */
 export function useQaPipelineEnabled(): boolean {
   const [value, setValue] = useState<boolean>(() => cachedQaPipelineEnabled ?? false);
@@ -138,14 +138,14 @@ export function useQaPipelineEnabled(): boolean {
   return value;
 }
 
-/** Test-only: reset the module-level QA-pipeline cache between cases. */
+/** Только для тестов: сбрасывает кэш QA-конвейера уровня модуля между кейсами. */
 export function __resetQaPipelineFlagCacheForTests(): void {
   cachedQaPipelineEnabled = null;
   inFlightQaPipelineFetch = null;
   qaPipelineListeners.clear();
 }
 
-/** Test-only: reset the module-level usage-limits cache between cases. */
+/** Только для тестов: сбрасывает кэш лимитов использования уровня модуля между кейсами. */
 export function __resetUsageLimitsFlagCacheForTests(): void {
   cachedUsageLimitsEnabled = null;
   inFlightUsageLimitsFetch = null;
@@ -153,8 +153,8 @@ export function __resetUsageLimitsFlagCacheForTests(): void {
 }
 
 /**
- * Test-only: synchronously seed the usage-limits cache so components that
- * render usage-limit surfaces stay visible without mocking `/settings`.
+ * Только для тестов: синхронно заполняет кэш лимитов использования, чтобы
+ * компоненты с поверхностями лимитов оставались видимыми без мока `/settings`.
  */
 export function __setUsageLimitsFlagForTests(value: boolean): void {
   cachedUsageLimitsEnabled = value;

@@ -1,5 +1,5 @@
-// MCP stdio transport reserves stdout for JSON-RPC — redirect logs to stderr.
-// This module must be imported before any module that initialises the logger.
+// MCP stdio-транспорт резервирует stdout для JSON-RPC — направляем логи в stderr.
+// Этот модуль обязан импортироваться раньше любых модулей, инициализирующих логгер.
 if (!process.env.LOG_DESTINATION) {
   process.env.LOG_DESTINATION = "stderr";
 }

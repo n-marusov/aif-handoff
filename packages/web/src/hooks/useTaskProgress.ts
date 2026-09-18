@@ -14,7 +14,7 @@ const IN_PROGRESS_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
 
 const DEFAULT_ACTIVITY_SILENCE_MS = 5 * 60 * 1000;
 
-/** Coarse ticking clock so staleness is recomputed without re-rendering every second. */
+/** Грубые тики: устаревание пересчитывается без перерисовки каждую секунду. */
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
 
@@ -27,9 +27,9 @@ function useNow(intervalMs: number): number {
 }
 
 /**
- * Live seconds elapsed since `startedAt` (per-second tick). Returns null when
- * `startedAt` is not set so consumers can render a number only while a tool is
- * actually in flight. Cleared on unmount / when startedAt becomes null.
+ * Секунды с момента `startedAt` (тик раз в секунду). Возвращает null, когда
+ * `startedAt` не задан, чтобы потребители показывали число только пока инструмент
+ * действительно в работе. Сбрасывается при размонтировании / когда startedAt становится null.
  */
 export function useInFlightSeconds(startedAt: string | null | undefined): number | null {
   const [now, setNow] = useState(() => Date.now());
@@ -47,10 +47,10 @@ export function useInFlightSeconds(startedAt: string | null | undefined): number
 }
 
 /**
- * Derive a task's visual progress state from its activity freshness and any
- * in-flight tool. `lastActivityAt` is updated ONLY by activity events (tool
- * completion, subagent start, tool start) — the heartbeat does not count, so
- * an alive-but-hung task flips to "hung" after the silence threshold.
+ * Вычисляет визуальное состояние прогресса задачи по свежести активности и
+ * работающему инструменту. `lastActivityAt` обновляется ТОЛЬКО событиями активности
+ * (завершение инструмента, старт субагента, старт инструмента) — хартбит не считается,
+ * поэтому живая, но зависшая задача переходит в "hung" после порога тишины.
  */
 export function useTaskProgress(
   status: TaskStatus,

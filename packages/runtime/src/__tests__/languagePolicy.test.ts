@@ -54,7 +54,7 @@ describe("buildLanguageDirective", () => {
 
   it("falls back to the raw code when the language is not in the lookup table", () => {
     const out = buildLanguageDirective({ artifacts: "eo", technicalTerms: "keep" });
-    // Empty directive would only happen for en/unset; unknown codes still produce a directive.
+    // Пустая директива бывает только для en/unset; неизвестные коды всё равно дают директиву.
     expect(out).toContain("eo");
     expect(out).toContain("Language policy");
   });

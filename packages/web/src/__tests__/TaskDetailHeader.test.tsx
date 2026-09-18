@@ -144,7 +144,7 @@ describe("TaskDetailHeader", () => {
     );
     expect(screen.getByText("working")).toBeDefined();
     expect(screen.getByText(/· 12s/)).toBeDefined();
-    // The low-level tool name must not leak into the header.
+    // Низкоуровневое имя инструмента не должно попадать в заголовок.
     expect(screen.queryByText(/Bash/)).toBeNull();
   });
 
@@ -164,7 +164,7 @@ describe("TaskDetailHeader", () => {
         onClose={vi.fn()}
       />,
     );
-    // The element stays mounted (no flicker) even though the tool toggled off.
+    // Элемент остаётся смонтированным (без мерцания), хотя инструмент выключился.
     expect(screen.getByText("working")).toBeDefined();
     expect(screen.queryByText(/· /)).toBeNull();
   });

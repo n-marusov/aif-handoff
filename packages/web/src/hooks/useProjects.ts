@@ -13,7 +13,7 @@ import { invalidateProjectWarmupQueries } from "./useProjectWarmup.js";
 const MAX_PROJECTS_RETRIES = 8;
 
 export function shouldRetryProjects(failureCount: number, error: unknown): boolean {
-  // Don't retry client errors (auth/not-found/bad request) — they won't resolve by waiting.
+  // Клиентские ошибки (auth/not-found/bad request) не повторяем — ожидание их не устранит.
   if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
     return false;
   }
@@ -28,8 +28,8 @@ export function useProjects() {
   return useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: api.listProjects,
-    // Projects are bootstrap data — retry transient failures with backoff so the UI
-    // recovers after an API restart, but surface 4xx errors instead of spinning forever.
+    // Проекты — стартовые данные: временные сбои повторяем с backoff, чтобы UI
+    // восстановился после перезапуска API, но ошибки 4xx показываем сразу, а не крутим вечно.
     retry: shouldRetryProjects,
     retryDelay: projectsRetryDelay,
   });

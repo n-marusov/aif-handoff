@@ -93,15 +93,15 @@ describe("bootstrapRuntimeRegistry", () => {
     const a = await bootstrapRuntimeRegistry();
     const b = await bootstrapRuntimeRegistry();
 
-    // Each call creates a fresh registry
+    // Каждый вызов создаёт свежий реестр
     expect(a).not.toBe(b);
     expect(a.listRuntimes().length).toBe(b.listRuntimes().length);
   });
 
-  // Discovery test: enforces that every built-in adapter has declared a
-  // `usageReporting` capability. A new adapter added to bootstrap.ts without
-  // that field would ship with undefined usage tracking — this test is the
-  // last line of defence against that regression.
+  // Discovery-тест: требует, чтобы каждый встроенный адаптер объявил
+  // способность `usageReporting`. Новый адаптер, добавленный в bootstrap.ts без
+  // этого поля, отдавал бы undefined usage tracking — этот тест является
+  // последней линией обороны от такой регрессии.
   it("every built-in adapter declares a valid usageReporting capability", async () => {
     const registry = await bootstrapRuntimeRegistry();
     const runtimes = registry.listRuntimes();

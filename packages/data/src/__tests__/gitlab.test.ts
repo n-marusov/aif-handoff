@@ -64,7 +64,7 @@ describe("GitLab repository data", () => {
       enabled: true,
     });
 
-    // Fresh connection has no preparation timestamp.
+    // У свежего соединения нет отметки подготовки.
     expect(connection.gitPreparedAt).toBeNull();
 
     const prepared = markGitLabRepositoryPrepared("project-1");
@@ -115,12 +115,12 @@ describe("GitLab issue import", () => {
     const taskRow = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
     if (!taskRow) throw new Error("expected task row");
 
-    // Record the updatedAt produced by the first import.
+    // Записываем updatedAt, который дал первый импорт.
     const firstUpdatedAt = taskRow.updatedAt;
-    // Ensure at least 1ms elapses so a spurious write would be observable.
+    // Гарантируем прохождение хотя бы 1 мс, чтобы ложная запись была заметна.
     const before = new Date().toISOString();
 
-    // Identical snapshot re-import must not touch the task row at all.
+    // Повторный импорт идентичного снимка не должен вообще трогать строку задачи.
     importGitLabIssueTask({ ...input, sourceUpdatedAt: before });
 
     const after = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
@@ -135,8 +135,8 @@ describe("GitLab issue import", () => {
       snapshot: { ...input.snapshot, title: "Updated title" },
     });
 
-    // The change must be reflected on the linked task row. (updatedAt equality
-    // is not asserted here — both imports can land in the same millisecond.)
+    // Изменение должно отразиться на связанной строке задачи. (равенство updatedAt
+    // здесь не проверяется — оба импорта могут попасть в одну миллисекунду.)
     const taskRow = testDb.current.select().from(tasks).where(eq(tasks.id, changed.taskId)).get();
     expect(taskRow?.title).toBe("#42 Updated title");
     expect(taskRow?.description).toContain("Issue body");
@@ -237,7 +237,7 @@ describe("GitLab issue import", () => {
     expect(updated?.lastReviewNoteId).toBe(3691116788);
     expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBe(3691116788);
 
-    // Absent value leaves the stored id unchanged.
+    // Отсутствие значения оставляет сохранённый id без изменений.
     updateGitLabMergeRequest({
       projectId: "project-1",
       iid: 42,
@@ -247,7 +247,7 @@ describe("GitLab issue import", () => {
     });
     expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBe(3691116788);
 
-    // Explicit null clears it.
+    // Явный null очищает значение.
     updateGitLabMergeRequest({
       projectId: "project-1",
       iid: 42,
@@ -278,7 +278,7 @@ describe("GitLab issue import", () => {
       lastReviewNoteId: 555,
     });
 
-    // Only the marker moves; every other MR column stays untouched.
+    // Двигается только маркер; остальные колонки MR остаются нетронутыми.
     expect(recorded).toMatchObject({
       lastReviewNoteId: 555,
       mrIid: 7,

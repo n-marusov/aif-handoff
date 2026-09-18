@@ -12,7 +12,7 @@ export function useChatSessions(projectId: string | null) {
     projectId: null,
     sessionId: null,
   });
-  // When true, user explicitly started a new chat - don't auto-select
+  // Если true, пользователь явно начал новый чат — автовыбор сессии отключается.
   const [newChatScopeProjectId, setNewChatScopeProjectId] = useState<string | null>(null);
 
   const sessionsQuery = useQuery<ChatSession[]>({
@@ -26,18 +26,18 @@ export function useChatSessions(projectId: string | null) {
     activeSessionScope.projectId === projectId ? activeSessionScope.sessionId : null;
   const newChatMode = newChatScopeProjectId === projectId;
 
-  // Auto-select the most recent session when sessions load and none is active
+  // При загрузке выбираем самую свежую сессию, если активной ещё нет.
   const resolvedSessionId =
     activeSessionId ?? (newChatMode ? null : (sessionsQuery.data?.[0]?.id ?? null));
 
-  // Pin the auto-selected session so it doesn't shift when the sessions list refetches
+  // Закрепляем выбранную сессию, чтобы повторная загрузка списка не смещала выбор.
   const pinActiveSession = useCallback(() => {
     if (!activeSessionId && resolvedSessionId) {
       setActiveSessionScope({ projectId, sessionId: resolvedSessionId });
     }
   }, [activeSessionId, projectId, resolvedSessionId]);
 
-  // Listen for WS events to invalidate sessions
+  // Слушаем WS-события и сбрасываем кеш списка сессий.
   useEffect(() => {
     const invalidate = () => {
       console.debug("[useChatSessions] Invalidating sessions on WS event");

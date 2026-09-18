@@ -65,7 +65,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         try {
           target.setSelectionRange(sel.start, sel.end);
         } catch {
-          // ignore — element may not support selection ranges in current state
+          // игнорируем — элемент может не поддерживать selection ranges в текущем состоянии
         }
       }
     }, [expanded]);

@@ -35,7 +35,7 @@ describe("classifyOpenRouterRuntimeError", () => {
     expect(classified.adapterCode).toBe("OPENROUTER_RUNTIME_ERROR");
   });
 
-  // Rate limit (message-based fallback)
+  // Rate limit (резерв по сообщению)
   it.each([
     "rate limit exceeded",
     "rate_limit reached",
@@ -52,14 +52,14 @@ describe("classifyOpenRouterRuntimeError", () => {
     expect(err.category).toBe("rate_limit");
   });
 
-  // Rate limit (HTTP status-based — the correct way)
+  // Rate limit (по HTTP status — правильный способ)
   it("classifies HTTP 429 as rate_limit via status", () => {
     const err = classifyOpenRouterRuntimeError(new Error("response body"), 429);
     expect(err.adapterCode).toBe("OPENROUTER_RATE_LIMIT");
     expect(err.category).toBe("rate_limit");
   });
 
-  // Auth (message-based fallback)
+  // Auth (резерв по сообщению)
   it.each([
     "Unauthorized access",
     "Invalid API key provided",
@@ -71,7 +71,7 @@ describe("classifyOpenRouterRuntimeError", () => {
     expect(err.category).toBe("auth");
   });
 
-  // Auth (HTTP status-based — the correct way)
+  // Auth (по HTTP status — правильный способ)
   it("classifies HTTP 401 as auth via status", () => {
     const err = classifyOpenRouterRuntimeError(new Error("response body"), 401);
     expect(err.adapterCode).toBe("OPENROUTER_AUTH_ERROR");
@@ -94,7 +94,7 @@ describe("classifyOpenRouterRuntimeError", () => {
     },
   );
 
-  // Model not found
+  // Модель не найдена
   it.each([
     "model not found",
     "no endpoints found for this model",
@@ -106,7 +106,7 @@ describe("classifyOpenRouterRuntimeError", () => {
     expect(err.category).toBe("model_not_found");
   });
 
-  // Context length
+  // Длина контекста
   it.each(["context_length_exceeded", "maximum context length is 4096"])(
     "classifies context length: %s",
     (msg) => {
@@ -116,7 +116,7 @@ describe("classifyOpenRouterRuntimeError", () => {
     },
   );
 
-  // Content filter
+  // Фильтр контента
   it.each(["content_filter triggered", "content_policy violation"])(
     "classifies content filter: %s",
     (msg) => {
@@ -126,7 +126,7 @@ describe("classifyOpenRouterRuntimeError", () => {
     },
   );
 
-  // Transport
+  // Транспорт
   it.each(["Connection refused", "ECONNREFUSED", "Network error", "fetch failed"])(
     "classifies transport error: %s",
     (msg) => {
@@ -136,14 +136,14 @@ describe("classifyOpenRouterRuntimeError", () => {
     },
   );
 
-  // Fallback
+  // Резерв
   it("falls back to OPENROUTER_RUNTIME_ERROR for unknown errors", () => {
     const err = classifyOpenRouterRuntimeError(new Error("something unexpected"));
     expect(err.adapterCode).toBe("OPENROUTER_RUNTIME_ERROR");
     expect(err.category).toBe("unknown");
   });
 
-  // HTTP status classification
+  // Классификация по HTTP status
   it("classifies by HTTP status 429 as rate_limit", () => {
     const err = classifyOpenRouterRuntimeError(new Error("some response body"), 429);
     expect(err.adapterCode).toBe("OPENROUTER_RATE_LIMIT");
@@ -180,7 +180,7 @@ describe("classifyOpenRouterRuntimeError", () => {
   });
 
   it("prefers HTTP status over message classification", () => {
-    // Message says "rate limit" but status says 401 (auth)
+    // Сообщение говорит "rate limit", но статус 401 (auth)
     const err = classifyOpenRouterRuntimeError(new Error("rate limit reached"), 401);
     expect(err.category).toBe("auth");
   });

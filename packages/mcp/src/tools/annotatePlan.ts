@@ -43,14 +43,14 @@ export function register(server: McpServer, context: ToolContext): void {
           "handoff_annotate_plan called",
         );
 
-        // Insert or update the annotation
+        // Вставляет или обновляет аннотацию
         const annotatedPlan = insertPlanAnnotation(
           args.planContent,
           args.taskId,
           args.sectionHeading,
         );
 
-        // Parse the resulting annotations for metadata
+        // Разбирает итоговые аннотации для метаданных
         const annotations = parsePlanAnnotations(annotatedPlan);
 
         log.info(

@@ -562,16 +562,16 @@ describe("ProjectSelector", () => {
 
     render(<ProjectSelector selectedId="p-1" onSelect={() => {}} onDeselect={() => {}} />);
 
-    // Open create dialog
+    // Открываем диалог создания
     fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
     fireEvent.click(screen.getByText("New project"));
 
-    // Fill form
+    // Заполняем форму
     fireEvent.change(screen.getByPlaceholderText("My Project"), {
       target: { value: "Test Project" },
     });
 
-    // Submit
+    // Отправка
     fireEvent.click(screen.getByText("Create"));
 
     expect(mockToast).toHaveBeenCalledWith(
@@ -663,7 +663,7 @@ describe("ProjectSelector", () => {
     fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
     fireEvent.click(screen.getByTitle("Edit"));
 
-    // Repository accepts a full clone URL; the token env var is auto-set.
+    // Поле репозитория принимает полный clone URL; переменная токена проставляется автоматически.
     fireEvent.change(screen.getByPlaceholderText("https://gitlab.example.com/group/project"), {
       target: { value: "https://gitlab.com/vedo-ecosystem/vedo-core" },
     });

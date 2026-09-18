@@ -13,8 +13,8 @@ describe("randomUUID", () => {
   });
 
   it("falls back to getRandomValues when randomUUID is missing (insecure http context)", () => {
-    // Simulate plain-HTTP, non-localhost origin: randomUUID is undefined,
-    // getRandomValues is still present. This is the case that used to throw
+    // Имитируем обычный HTTP на внешнем хосте: randomUUID отсутствует,
+    // но getRandomValues доступен. Ранее этот случай приводил к
     // `TypeError: crypto.randomUUID is not a function`.
     vi.stubGlobal("crypto", {
       getRandomValues: <T extends ArrayBufferView>(arr: T): T => {
@@ -26,7 +26,7 @@ describe("randomUUID", () => {
 
     const id = randomUUID();
     expect(id).toMatch(V4);
-    // Version + variant nibbles must be set correctly.
+    // Биты версии и варианта должны быть выставлены корректно.
     expect(id[14]).toBe("4");
     expect(["8", "9", "a", "b"]).toContain(id[19]);
   });

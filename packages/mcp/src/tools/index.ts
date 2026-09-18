@@ -48,7 +48,7 @@ export function registerMcpTool(
 }
 
 /**
- * Tool registration helper. Each tool module exports a `register` function
- * that takes the MCP server and context to register its tool.
+ * Помощник регистрации инструментов. Каждый модуль инструмента экспортирует функцию `register`,
+ * которая получает MCP-сервер и контекст, чтобы зарегистрировать свой инструмент.
  */
 export type ToolRegistrar = (server: McpServer, context: ToolContext) => void;

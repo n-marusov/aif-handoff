@@ -3,9 +3,9 @@ import type { RuntimeRunInput } from "../types.js";
 import { getCliSpawnInvocation } from "./helpers/cliSpawn.js";
 import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
 
-// vi.hoisted ensures the mock fixtures initialize before vi.mock's hoisted
-// factory runs. Without this, the factory below hits a TDZ error trying to
-// read `mockChild` — vi.mock is hoisted above regular top-level code.
+// vi.hoisted гарантирует, что mock-фикстуры инициализируются до запуска
+// поднятой фабрики vi.mock. Без этого фабрика ниже ловит TDZ-ошибку, читая
+// `mockChild`, — vi.mock всплывает выше обычного кода верхнего уровня.
 const { mockStdout, mockStderr, mockStdin, mockChild } = vi.hoisted(() => {
   const stdout = { on: vi.fn() };
   const stderr = { on: vi.fn() };
@@ -44,9 +44,9 @@ function createInput(overrides: Partial<RuntimeRunInput> = {}): RuntimeRunInput 
 }
 
 /**
- * Simulate the CLI stdout stream by firing each JSONL line as a separate
- * `data` chunk, then firing `close` with the given exit code. Optionally
- * feeds stderr text.
+ * Симулирует stdout-поток CLI: каждая JSONL-строка прилетает отдельным
+ * `data`-чанком, затем приходит `close` с указанным кодом выхода.
+ * Опционально передаёт текст в stderr.
  */
 function simulateStreamAndClose(code: number, jsonlLines: unknown[] = [], stderr = "") {
   const stdoutHandler = mockStdout.on.mock.calls.find((c: unknown[]) => c[0] === "data")?.[1] as
@@ -70,7 +70,7 @@ function simulateStreamAndClose(code: number, jsonlLines: unknown[] = [], stderr
   closeHandler?.(code);
 }
 
-/** Build a typical successful stream-json transcript. */
+/** Строит типичный успешный transcript stream-json. */
 function successfulStream(options: {
   sessionId: string;
   text: string;
@@ -166,7 +166,7 @@ describe("runClaudeCli", () => {
         "-p",
       ]),
     );
-    // Prompt is no longer on argv — it is streamed via stdin
+    // Промпт больше не в argv — он стримится через stdin
     expect(cliArgs).not.toContain("Implement the feature");
     expect(mockStdin.write).toHaveBeenCalledWith("Implement the feature");
     expect(mockStdin.end).toHaveBeenCalled();
@@ -252,7 +252,7 @@ describe("runClaudeCli", () => {
   });
 
   it("passes very large prompts via stdin without putting them on argv", async () => {
-    // 2 MB prompt — well beyond macOS ARG_MAX (1 MiB) and Windows cmd.exe (~8 KB).
+    // 2 МБ промпт — далеко за пределами macOS ARG_MAX (1 МиБ) и Windows cmd.exe (~8 КБ).
     const largePrompt = "x".repeat(2_000_000);
     const input = createInput({ prompt: largePrompt });
     const promise = runClaudeCli(input);
@@ -262,7 +262,7 @@ describe("runClaudeCli", () => {
 
     const { cliArgs } = getSpawnInvocation();
     expect(cliArgs).not.toContain(largePrompt);
-    // argv stays small — total size is a few hundred bytes of flags
+    // argv остаётся маленьким — суммарно несколько сотен байт флагов
     const argvSize = cliArgs.reduce((sum, arg) => sum + arg.length, 0);
     expect(argvSize).toBeLessThan(1_000);
     expect(mockStdin.write).toHaveBeenCalledWith(largePrompt);
@@ -520,10 +520,10 @@ describe("runClaudeCli", () => {
   });
 
   it("does NOT double-emit stream:text when include-partial-messages is on (deltas + assistant block together)", async () => {
-    // When --include-partial-messages is enabled, Claude emits BOTH
-    // stream_event deltas AND the complete assistant content block for the
-    // same text. The adapter must rely on deltas only so the chat route
-    // doesn't concatenate the full text twice into fullAssistantResponse.
+    // При включённом --include-partial-messages Claude выдаёт И stream_event
+    // дельты, И готовый assistant-блок контента для того же
+    // текста. Адаптер обязан полагаться только на дельты, чтобы маршрут
+    // чата не склеивал полный текст дважды в fullAssistantResponse.
     const onEvent = vi.fn();
     const input = createInput({
       prompt: "say hi",
@@ -542,7 +542,7 @@ describe("runClaudeCli", () => {
           delta: { type: "text_delta", text: "hi" },
         },
       },
-      // Complete assistant block arrives after the delta with the same text
+      // Готовый assistant-блок приходит после дельты с тем же текстом
       {
         type: "assistant",
         session_id: "sess-dedup",
@@ -564,21 +564,21 @@ describe("runClaudeCli", () => {
     ]);
 
     const result = await promise;
-    // Final output text should be "hi", NOT "hihi"
+    // Финальный output text должен быть "hi", а не "hihi"
     expect(result.outputText).toBe("hi");
 
     const streamTextEvents = onEvent.mock.calls
       .map((c) => c[0] as { type: string; message?: string })
       .filter((e) => e.type === "stream:text");
-    // Exactly ONE stream:text event — from the delta, not the assistant block
+    // Ровно ОДНО событие stream:text — из дельты, а не из assistant-блока
     expect(streamTextEvents).toHaveLength(1);
     expect(streamTextEvents[0]?.message).toBe("hi");
   });
 
   it("still emits tool:use from assistant blocks even when partial messages is on", async () => {
-    // Tool use content blocks are NOT streamed as deltas, only the complete
-    // assistant block carries them. Partial-messages mode must not suppress
-    // tool:use emission.
+    // Tool use блоки контента НЕ стримятся дельтами — только готовый
+    // assistant-блок их несёт. Режим partial-messages не должен
+    // подавлять выдачу tool:use.
     const onToolUse = vi.fn();
     const onEvent = vi.fn();
     const input = createInput({

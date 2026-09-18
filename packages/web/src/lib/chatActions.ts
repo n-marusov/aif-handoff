@@ -3,7 +3,7 @@ import type { ChatAction, ChatActionCreateTask } from "@aif/shared/browser";
 const ACTION_REGEX = /<!--ACTION:CREATE_TASK-->\s*(\{[\s\S]*?\})\s*<!--\/ACTION-->/g;
 
 export interface ParsedMessage {
-  /** Message text with action blocks removed */
+  /** Текст сообщения без блоков действий */
   text: string;
   actions: ChatAction[];
 }
@@ -27,7 +27,7 @@ export function parseChatActions(content: string): ParsedMessage {
         actions.push(action);
       }
     } catch {
-      // Malformed JSON — skip
+      // Некорректный JSON — пропускаем
     }
     return "";
   });

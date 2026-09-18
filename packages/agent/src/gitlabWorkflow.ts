@@ -1,3 +1,20 @@
+/**
+ * Синхронизация проектов GitLab и публикация merge request-ов для пайплайна Handoff.
+ *
+ * Модуль держит две роли: фоновый опрос репозиториев (best-effort, ошибки только
+ * логируются) и публикация MR-ов по стадиям (сбой блокирует стадию через
+ * StageManualBlockError и ждет оператора).
+ *
+ * Почему форма такая: агент не хранит токены GitLab. Операции, требующие доступа к API,
+ * делегируются API-сервису по внутреннему HTTP, а за агентом остается только git-часть
+ * (пуш ветки) и детерминированный порядок шагов.
+ *
+ * Файл сознательно симметричен packages/agent/src/githubWorkflow.ts: те же точки входа
+ * и тот же порядок "коммит - пуш - публикация"; отличаются только провайдерские детали
+ * (merge request против pull request, /gitlab/ против /github/ в путях API, iid вместо
+ * issueNumber в логах).
+ */
+
 import { execFileSync } from "node:child_process";
 import {
   appendTaskActivityLog,
@@ -11,7 +28,13 @@ import { internalApiHeaders } from "./notifier.js";
 import { StageManualBlockError } from "./stageErrorHandler.js";
 
 const log = logger("gitlab-workflow");
+
+// Ограничение частоты опроса: синхронизация идет тем же циклом, что и обработка задач,
+// и без троттлинга каждый тик дергал бы GitLab API по каждому репозиторию.
 const SYNC_INTERVAL_MS = 60_000;
+
+// Карта живет только в памяти процесса и прикрывает случай, когда lastSyncedAt в БД еще
+// свежий, но попытка уже провалилась: повторять ее на каждом тике не нужно.
 const lastSyncAttempts = new Map<string, number>();
 
 interface GitLabApiFailure {
@@ -20,6 +43,8 @@ interface GitLabApiFailure {
   retryAt?: string | null;
 }
 
+// Тело ошибки читается отдельным шагом: ответ может быть не JSON (прокси, HTML-страница),
+// и падение парсинга не должно подменять исходную ошибку публикации.
 async function readFailure(response: Response): Promise<GitLabApiFailure> {
   try {
     return (await response.json()) as GitLabApiFailure;
@@ -28,6 +53,8 @@ async function readFailure(response: Response): Promise<GitLabApiFailure> {
   }
 }
 
+// Единая точка проверки режима: и синхронизация, и обе публикации должны отвечать на
+// один и тот же вопрос. Дублирование условия по местам вызова быстро разъехалось бы.
 function gitLabModeActive(): boolean {
   const env = getEnv();
   return env.GIT_PROVIDER === "gitlab" && env.AIF_GITLAB_ISSUE_MR_ENABLED;
@@ -35,6 +62,8 @@ function gitLabModeActive(): boolean {
 
 export async function synchronizeGitLabProjects(now = Date.now()): Promise<void> {
   if (!gitLabModeActive()) {
+    // В лог уходят оба входных условия: при выключенном режиме иначе не отличить
+    // "выбран другой провайдер" от "флаг раскатки не включен".
     log.debug(
       { gitProvider: getEnv().GIT_PROVIDER, gitLabEnabled: getEnv().AIF_GITLAB_ISSUE_MR_ENABLED },
       "GitLab synchronization skipped because provider selector or rollout flag is disabled",
@@ -43,6 +72,9 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
   }
   const baseUrl = getEnv().API_BASE_URL;
   for (const connection of listEnabledGitLabRepositories()) {
+    // Сравниваются два независимых времени: успешная синхронизация по данным БД и
+    // последняя попытка в этом процессе. Второе не дает ретраить упавший проект на
+    // каждом тике.
     const lastSync = connection.lastSyncedAt ? Date.parse(connection.lastSyncedAt) : 0;
     const lastAttempt = lastSyncAttempts.get(connection.projectId) ?? 0;
     if (
@@ -51,10 +83,15 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
     ) {
       continue;
     }
+    // Отметка ставится до запроса: иначе медленный или зависший вызов разрешил бы
+    // параллельный дубль на следующем тике.
     lastSyncAttempts.set(connection.projectId, now);
 
+    // Сеть к GitLab закрыта внутри API-сервиса: агент не хранит токен и обращается к
+    // нему по внутреннему HTTP с заголовками internalApiHeaders().
     const url = `${baseUrl}/projects/${connection.projectId}/gitlab/sync`;
     try {
+      // Жесткий таймаут: фоновый тик не должен зависать из-за недоступного API.
       const response = await fetch(url, {
         method: "POST",
         headers: internalApiHeaders(),
@@ -74,6 +111,8 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
         );
       }
     } catch (error) {
+      // Синхронизация best-effort: сбой логируется и не прерывает обход остальных
+      // репозиториев и работу координатора.
       log.warn(
         { projectId: connection.projectId, err: error },
         "GitLab repository sync unavailable",
@@ -82,6 +121,9 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
   }
 }
 
+// Пуш выполняется execFileSync с массивом аргументов, а не через shell-строку: имя
+// ветки приходит из данных задачи и не должно попадать в интерпретацию оболочки.
+// stdio уводит вывод git в pipe, чтобы он не утек в лог координатора.
 function pushBranch(projectRoot: string, branch: string): void {
   execFileSync("git", ["push", "--set-upstream", "origin", branch], {
     cwd: projectRoot,
@@ -90,6 +132,8 @@ function pushBranch(projectRoot: string, branch: string): void {
 }
 
 export async function publishGitLabPlanTask(taskId: string, projectRoot: string): Promise<boolean> {
+  // false означает "не применимо" (чужой провайдер, выключенный флаг): настоящие сбои
+  // бросают StageManualBlockError и останавливают стадию до вмешательства оператора.
   if (!gitLabModeActive()) {
     log.debug(
       { taskId, gitProvider: getEnv().GIT_PROVIDER },
@@ -98,14 +142,22 @@ export async function publishGitLabPlanTask(taskId: string, projectRoot: string)
     return false;
   }
   const issue = findGitLabIssueByTaskId(taskId);
+  // Задача без синхронизированного issue не публикуется: привязывать MR не к чему.
   if (!issue) return false;
 
   const task = findTaskById(taskId);
+  // Ветка обязательна: без нее пушить нечего, и это не временный сбой, а неверная
+  // конфигурация потока, поэтому исключение, а не false.
   if (!task?.branchName) {
     throw new StageManualBlockError("GitLab plan MR publication requires a task branch.");
   }
+
+  // Работа ведется в worktree задачи, если он есть: корень проекта может быть занят
+  // другой задачей с собственной веткой.
   const executionRoot = task.worktreePath ?? projectRoot;
 
+  // Пуш предшествует вызову API: сервис публикации исходит из того, что ветка уже
+  // существует на remote.
   try {
     pushBranch(executionRoot, task.branchName);
   } catch (error) {
@@ -115,6 +167,8 @@ export async function publishGitLabPlanTask(taskId: string, projectRoot: string)
     );
   }
 
+  // Публикация MR - операция API-сервиса: там живут токены и логика прав доступа.
+  // Агент лишь сообщает, какую ветку нужно опубликовать.
   const url = `${getEnv().API_BASE_URL}/projects/${task.projectId}/gitlab/tasks/${taskId}/publish-plan`;
   let response: Response;
   try {
@@ -125,6 +179,7 @@ export async function publishGitLabPlanTask(taskId: string, projectRoot: string)
       signal: AbortSignal.timeout(getEnv().AGENT_GIT_PUBLISH_TIMEOUT_MS),
     });
   } catch (error) {
+    // Транспортный сбой отличается от отказа API по статусу: здесь сеть или таймаут.
     log.error({ taskId, branch: task.branchName, err: error }, "GitLab plan MR API unavailable");
     throw new StageManualBlockError(
       "GitLab plan MR publication is unavailable. Check the API service and retry.",
@@ -142,6 +197,8 @@ export async function publishGitLabPlanTask(taskId: string, projectRoot: string)
       },
       "GitLab plan MR publication failed",
     );
+    // retryAt приходит от API при rate limit: сообщение говорит оператору, когда именно
+    // повторять, вместо общего "попробуйте позже".
     throw new StageManualBlockError(
       failure.retryAt
         ? `GitLab rate limit reached until ${failure.retryAt}. Retry after that time.`
@@ -149,6 +206,8 @@ export async function publishGitLabPlanTask(taskId: string, projectRoot: string)
     );
   }
 
+  // Запись в лог активности идет только после успешного ответа: журнал отражает факт
+  // публикации, а не попытку.
   const completedAt = new Date().toISOString();
   appendTaskActivityLog(
     taskId,
@@ -162,6 +221,7 @@ export async function publishGitLabPlanTask(taskId: string, projectRoot: string)
 }
 
 export async function publishGitLabTask(taskId: string, projectRoot: string): Promise<boolean> {
+  // Симметрично publishGitLabPlanTask: тот же гейт режима, но проверка через хелпер.
   if (!gitLabModeActive()) {
     log.debug(
       { taskId, gitProvider: getEnv().GIT_PROVIDER },
@@ -172,6 +232,9 @@ export async function publishGitLabTask(taskId: string, projectRoot: string): Pr
   const issue = findGitLabIssueByTaskId(taskId);
   if (!issue) return false;
 
+  // Режим plan_review ожидается выставленным еще на этапе планирования. Его отсутствие
+  // не блокирует финальную публикацию, но означает расхождение с ожидаемым потоком,
+  // поэтому WARN, а не ERROR.
   if (getEnv().AIF_PLAN_REVIEW_PR_ENABLED && issue.mrMode !== "plan_review") {
     log.warn(
       {
@@ -189,8 +252,12 @@ export async function publishGitLabTask(taskId: string, projectRoot: string): Pr
     throw new StageManualBlockError("GitLab merge request publication requires a task branch.");
   }
   const executionRoot = task.worktreePath ?? projectRoot;
+
+  // Коммит-гейт выполняется с ожиданием и до пуша: незакоммиченные правки иначе остались
+  // бы в рабочем дереве, а на remote ушла бы пустая ветка.
   const commit = await ensureAutoQueueTaskCommit({ taskId, projectRoot: executionRoot });
 
+  // Порядок как в плановом пути: сначала ветка на remote, затем публикация MR.
   try {
     pushBranch(executionRoot, task.branchName);
   } catch (error) {
@@ -200,6 +267,8 @@ export async function publishGitLabTask(taskId: string, projectRoot: string): Pr
     );
   }
 
+  // Задача перечитывается после коммита: хук коммита мог дописать implementationLog, а в
+  // тело запроса должно уйти актуальное состояние, а не снапшот до коммита.
   const refreshed = findTaskById(taskId);
   const url = `${getEnv().API_BASE_URL}/projects/${task.projectId}/gitlab/tasks/${taskId}/publish`;
   let response: Response;

@@ -18,11 +18,11 @@ const baseInput: RuntimeRunInput = {
 describe("buildClaudeQueryOptions — settings forwarding", () => {
   it("defaults to attribution suppression when settings is undefined", () => {
     const options = buildClaudeQueryOptions(baseInput, {
-      // settings intentionally omitted
+      // settings намеренно опущены
     } satisfies ClaudeRuntimeExecutionOptions);
 
-    // Empty commit/pr are the documented Claude Code mechanism to hide the
-    // Co-Authored-By trailers; they are the default suppression request.
+    // Пустые commit/pr — задокументированный механизм Claude Code скрывать
+    // трейлеры Co-Authored-By; это и есть запрос подавления по умолчанию.
     expect(options.settings).toEqual({ attribution: { commit: "", pr: "" } });
   });
 
@@ -31,8 +31,8 @@ describe("buildClaudeQueryOptions — settings forwarding", () => {
       settings: { attribution: { commit: "", pr: "" } },
     } satisfies ClaudeRuntimeExecutionOptions);
 
-    // Must pass through verbatim — collapsing to {} would restore Claude Code's
-    // default attribution (see ClaudeSdkSettings docs).
+    // Должно проходить дословно — схлопывание в {} вернуло бы дефолтный
+    // attribution Claude Code (см. документацию ClaudeSdkSettings).
     expect(options.settings).toEqual({ attribution: { commit: "", pr: "" } });
   });
 
@@ -54,8 +54,8 @@ describe("buildClaudeQueryOptions — settings forwarding", () => {
       },
     } satisfies ClaudeRuntimeExecutionOptions);
 
-    // Non-attribution keys (outputStyle, sandbox, permissions, …) must survive
-    // — `settings` is an extensible bag, not an attribution-only object.
+    // Не-attribution ключи (outputStyle, sandbox, permissions, …) обязаны выживать —
+    // `settings` это расширяемый мешок, а не объект только про attribution.
     expect(options.settings).toEqual({
       attribution: { commit: "", pr: "" },
       outputStyle: "technical",
@@ -64,10 +64,10 @@ describe("buildClaudeQueryOptions — settings forwarding", () => {
 });
 
 describe("buildClaudeQueryOptions — executable selection (guard invariant)", () => {
-  // The version guard must inspect the same binary `query()` launches
-  // (probed === launched). With no explicit override the SDK runs its bundled
-  // binary, so the option must be absent and the guard reads the SDK manifest;
-  // with an explicit override the same path is both probed and forwarded.
+  // Version guard обязан инспектировать тот же бинарник, что запускает `query()`
+  // (probed === launched). Без явного override SDK исполняет свой встроенный
+  // бинарник — опция должна отсутствовать, а guard читает манифест SDK;
+  // при явном override тот же путь и зондируется, и пробрасывается.
   it("omits pathToClaudeCodeExecutable when none is configured (SDK uses bundled binary)", () => {
     const options = buildClaudeQueryOptions(baseInput, {
       pathToClaudeCodeExecutable: undefined,

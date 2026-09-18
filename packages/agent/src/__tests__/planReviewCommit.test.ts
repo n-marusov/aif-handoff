@@ -82,7 +82,7 @@ describe("ensurePlanReviewCommit", () => {
     const { rootPath } = createGitTestRoot("plan-review-commit-blocked-");
     seedTask(rootPath);
     writePlan(rootPath);
-    // Dirty product file outside the plan.
+    // Грязный продуктовый файл вне плана.
     writeFileSync(join(rootPath, "README.md"), "# test\nchanged\n");
 
     const before = headSha(rootPath);
@@ -155,7 +155,7 @@ describe("ensurePlanReviewCommit", () => {
     });
     writeFileSync(join(rootPath, "README.md"), "# test\n");
     execFileSync("git", ["add", "-A"], { cwd: rootPath, stdio: "ignore" });
-    // Deterministic base commit authored via env identity (no local config).
+    // Детерминированный базовый коммит создан от env-идентичности (без локального конфига).
     execFileSync(
       "git",
       [
@@ -180,8 +180,8 @@ describe("ensurePlanReviewCommit", () => {
 
     expect(report.status).toBe("committed");
     expect(report.commitSha).toBeTruthy();
-    // Commit author must be resolved (either from fallback or pre-existing
-    // system config) — never "unknown".
+    // Автор коммита должен разрешиться (из резервной идентичности или из
+    // предсуществующей системной конфигурации) — никогда "unknown".
     const author = execFileSync("git", ["log", "-1", "--format=%an <%ae>"], {
       cwd: rootPath,
       encoding: "utf8",

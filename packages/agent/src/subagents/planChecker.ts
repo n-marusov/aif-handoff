@@ -1,3 +1,23 @@
+/**
+ * Сабагент проверки плана: приводит план к формату чек-листа перед кодированием.
+ *
+ * Зачем: стадии реализации и верификации опираются на чекбоксы, чтобы отмечать
+ * прогресс и отличать сделанное от оставшегося. Планы, написанные свободным
+ * текстом, ломают этот контракт, поэтому нормализацию делает отдельный проход
+ * между планированием и реализацией.
+ *
+ * Инварианты и подводные камни:
+ * - Сначала локальные эвристики, и только потом LLM. Преобразование обычного
+ *   списка в чекбоксы - детерминированная операция, и тратить на неё вызов
+ *   модели с непредсказуемым результатом бессмысленно.
+ * - Результат модели перепроверяется на «похожесть на полный план». Модель
+ *   регулярно возвращает обрывок или пересказ, и сохранить такое вместо плана -
+ *   значит потерять работу планировщика.
+ * - Если ни модель, ни локальная конвертация не дали чек-листа, исходный план
+ *   остаётся нетронутым: лучше план без чекбоксов, чем испорченный план.
+ * - Ветка восстанавливается до чтения репозитория и проверяется после прогона -
+ *   тот же контракт изоляции, что у implementer и reviewer.
+ */
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
 import { logger, looksLikeFullPlanUpdate } from "@aif/shared";
 import { executeSubagentQuery } from "../subagentQuery.js";
@@ -8,6 +28,8 @@ const log = logger("plan-checker");
 const AGENT_NAME = "plan-checker";
 
 export function normalizeMarkdownFence(text: string): string {
+  // Модель заворачивает ответ в тройные бэктики - классика. Бертём содержимое
+  // первого блока; если блока нет, считаем ответ чистым текстом.
   const fenced = text.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i);
   if (!fenced) return text.trim();
   return fenced[1].trim();
@@ -17,14 +39,14 @@ export function hasChecklistItems(text: string): boolean {
   return /^\s*[-*]\s+\[(?: |x|X)\]\s+/m.test(text);
 }
 
-/** Count plain bullet items that could be converted to checkboxes. */
+/** Считает обычные буллеты, которые можно превратить в чекбоксы. */
 export function countConvertibleBullets(text: string): number {
   const lines = text.split("\n");
   let count = 0;
   for (const line of lines) {
-    // Plain bullet that is NOT already a checkbox
+    // Обычный буллет, который ЕЩЁ НЕ чекбокс
     if (/^\s*[-*]\s+(?!\[(?: |x|X)\])/.test(line)) {
-      // Skip lines that look like headings/context (too short or no actionable verb)
+      // Пропускаем строки, похожие на заголовки/контекст (слишком короткие или без глагола действия)
       const content = line.replace(/^\s*[-*]\s+/, "").trim();
       if (content.length > 3) count++;
     }
@@ -32,12 +54,14 @@ export function countConvertibleBullets(text: string): number {
   return count;
 }
 
-/** Convert plain bullet items to checkboxes locally (no LLM needed). */
+/** Конвертирует обычные буллеты в чекбоксы локально (LLM не нужен). */
 export function convertBulletsToCheckboxes(text: string): string {
   return text.replace(/^(\s*)([-*])\s+(?!\[(?: |x|X)\])/gm, "$1$2 [ ] ");
 }
 
-/** Check if the plan already uses checklist format throughout. */
+/** Проверяет, использует ли план формат чек-листа целиком. */
+// «Уже чек-лист» означает и наличие чекбоксов, и отсутствие конвертируемых
+// пунктов. Проверять только первое нельзя: план мог быть размечен наполовину.
 export function isPlanAlreadyChecklist(text: string): boolean {
   const convertible = countConvertibleBullets(text);
   return hasChecklistItems(text) && convertible === 0;
@@ -51,8 +75,8 @@ export async function runPlanChecker(taskId: string, projectRoot: string): Promi
     throw new Error(`Task ${taskId} not found`);
   }
 
-  // Same branch-restore contract as implementer/reviewer: must run before any
-  // repo read or plan persist. BranchIsolationError → blocked_external.
+  // Тот же контракт восстановления ветки, что у implementer/reviewer: обязан
+  // идти до любого чтения репо или записи плана. BranchIsolationError → blocked_external.
   if (task.branchName && !task.isFix) {
     restorePersistedBranch({
       projectRoot,
@@ -67,13 +91,13 @@ export async function runPlanChecker(taskId: string, projectRoot: string): Promi
     return;
   }
 
-  // Fast path: skip LLM call if plan already has proper checklist format
+  // Быстрый путь: пропустить вызов LLM, если план уже в правильном формате чек-листа
   if (isPlanAlreadyChecklist(task.plan)) {
     log.info({ taskId }, "Plan already in checklist format — skipping plan-checker agent");
     return;
   }
 
-  // Try local conversion first — if only simple bullet→checkbox conversion is needed
+  // Сначала пробуем локальную конвертацию — если нужна только простая bullet→checkbox
   const convertible = countConvertibleBullets(task.plan);
   if (convertible > 0 && hasChecklistItems(task.plan)) {
     const locallyConverted = convertBulletsToCheckboxes(task.plan);
@@ -123,7 +147,7 @@ Requirements:
     maxBudgetUsd: planCheckerBudget,
   });
 
-  // Post-run drift check: subagent must not have switched HEAD.
+  // Пост-проверка дрейфа: сабагент не должен был переключить HEAD.
   if (task.branchName && !task.isFix) {
     assertCurrentBranch(projectRoot, task.branchName);
   }
@@ -149,7 +173,7 @@ Requirements:
       "Plan checker returned non-plan-like content; attempting local fallback",
     );
 
-    // Fallback: try local conversion of the ORIGINAL plan
+    // Резервный путь: пробуем локальную конвертацию ИСХОДНОГО плана
     const fallback = convertBulletsToCheckboxes(task.plan);
     if (hasChecklistItems(fallback)) {
       log.info({ taskId }, "Local fallback conversion succeeded — saving converted plan");

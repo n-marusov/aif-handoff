@@ -1,3 +1,12 @@
+/**
+ * Адаптация входов model-discovery к процессу Codex app-server.
+ *
+ * Модуль — тонкий переходник: наружу (в discovery) отдаётся узкий тип RuntimeModelListInput,
+ * а app-server ожидает более широкий CodexAppServerLaunchInput. Смысл прослойки в том, чтобы
+ * не тащить детали запуска процесса в код обхода моделей и иметь одну точку перевода опций
+ * (включая приведение optional-полей к явному null).
+ */
+
 import type { RuntimeModelListInput } from "../../../types.js";
 import {
   buildCodexAppServerEnv,
@@ -9,6 +18,8 @@ import {
   type CodexAppServerProcessContext,
 } from "../appServer/process.js";
 
+// Публичные обёртки ниже повторяют сигнатуры app-server, но принимают discovery-вход.
+// Это осознанный фасад: вызывающий не должен знать про toLaunchInput.
 export function resolveDiscoveryExecutable(input: RuntimeModelListInput): string {
   return resolveCodexAppServerExecutable(toLaunchInput(input));
 }
@@ -19,6 +30,8 @@ export function buildCodexAppServerDiscoveryEnv(
   return buildCodexAppServerEnv(toLaunchInput(input));
 }
 
+// Полная версия отдаёт ещё и статистику фильтрации env: сколько ключей проброшено,
+// сколько отфильтровано как неразрешённые. Нужна для диагностики и тестов.
 export function buildCodexAppServerDiscoveryEnvWithStats(input: RuntimeModelListInput): {
   env: Record<string, string>;
   forwardedCount: number;
@@ -35,10 +48,14 @@ export function spawnCodexAppServer(input: RuntimeModelListInput): CodexAppServe
   });
 }
 
+// terminateProcess остаётся async-обёрткой даже над потенциально синхронным завершением:
+// единый контракт упрощает подмену в тестах и вызов в finally.
 export async function terminateProcess(context: CodexAppServerProcessContext): Promise<void> {
   await terminateCodexAppServerProcess(context);
 }
 
+// Единственное место перевода типов. Optional-поля принудительно превращаются в null:
+// app-server различает "не задано" (null) и undefined, и ему нужна явная форма.
 function toLaunchInput(input: RuntimeModelListInput): CodexAppServerLaunchInput {
   return {
     runtimeId: input.runtimeId,

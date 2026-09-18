@@ -80,8 +80,8 @@ describe("prepareGitLabRepository", () => {
     gitQuiet(root, ["config", "user.email", "t@t.local"]);
     gitQuiet(root, ["config", "user.name", "T"]);
     gitQuiet(root, ["config", "commit.gpgsign", "false"]);
-    // Real POST /projects creates an initial scaffold commit; mirror that so
-    // the branch is born (unborn branches break -M/commit/push semantics).
+    // Реальный POST /projects создаёт первичный коммит скаффолдинга; повторяем
+    // это, чтобы ветка родилась (unborn-ветки ломают семантику -M/commit/push).
     gitQuiet(root, ["commit", "--allow-empty", "-m", "init: project scaffold", "--no-verify"]);
   }
 
@@ -101,7 +101,7 @@ describe("prepareGitLabRepository", () => {
     root = mkdtempSync(join(tmpdir(), "aif-gitlab-prepare-"));
     origin = createOriginWithMain();
     vi.stubEnv("GITLAB_TOKEN", "secret-token");
-    // Allow local filesystem submodule clones (blocked by default since Git 2.38.1)
+    // Разрешаем клоны сабмодулей по локальной ФС (по умолчанию заблокированы с Git 2.38.1)
     execFileSync("git", ["config", "--global", "protocol.file.allow", "always"], {
       encoding: "utf8",
       stdio: ["ignore", "ignore", "pipe"],
@@ -183,8 +183,8 @@ describe("prepareGitLabRepository", () => {
 
   it("commits scaffold files even when .ai-factory already existed", () => {
     initLocalRepo("master");
-    // .ai-factory already present (no init needed) but scaffold files are
-    // untracked (e.g. leftover from a partial run) — they must be committed.
+    // .ai-factory уже есть (init не нужен), но файлы скаффолдинга untracked
+    // (например, остатки частичного прогона) — их нужно закоммитить.
     mkdirSync(join(root, ".ai-factory"), { recursive: true });
     writeFileSync(join(root, ".ai-factory", "config.yaml"), "language:\n  ui: en\n");
     gitQuiet(root, ["add", ".ai-factory"]);
@@ -204,9 +204,9 @@ describe("prepareGitLabRepository", () => {
     gitQuiet(root, ["commit", "--allow-empty", "-m", "local init", "--no-verify"]);
     gitQuiet(root, ["remote", "add", "origin", origin]);
     gitQuiet(root, ["push", "-u", "origin", "main"]);
-    // Now defaultBranch is reported as master by GitLab but origin has main.
-    // A correct implementation extracts by connection.defaultBranch → master is
-    // absent on origin, so it falls to the empty-origin path and renames local.
+    // Теперь GitLab сообщает defaultBranch как master, но на origin есть main.
+    // Корректная реализация извлекает по connection.defaultBranch → master
+    // отсутствует на origin, поэтому уходим в путь пустого origin и переименовываем локальную.
     const connection = makeConnection(origin, { defaultBranch: "master" });
 
     prepareGitLabRepository({ projectRoot: root, connection });
@@ -232,10 +232,10 @@ describe("prepareGitLabRepository", () => {
   });
 
   it("initializes git submodules when .gitmodules exists on the remote", () => {
-    // Create a bare repo to serve as the submodule target
+    // Создаём bare-репозиторий как цель сабмодуля
     const subBare = mkdtempSync(join(tmpdir(), "aif-gitlab-sub-bare-"));
     gitQuiet(subBare, ["init", "--bare", "--initial-branch=main"]);
-    // Push content to submodule repo so submodule update can clone it
+    // Пушим содержимое в репозиторий сабмодуля, чтобы submodule update смог его склонировать
     const subWs = mkdtempSync(join(tmpdir(), "aif-gitlab-sub-ws-"));
     gitQuiet(subWs, ["init", "--initial-branch=main"]);
     gitQuiet(subWs, ["config", "user.email", "t@t.local"]);
@@ -244,7 +244,7 @@ describe("prepareGitLabRepository", () => {
     gitQuiet(subWs, ["remote", "add", "origin", subBare]);
     gitQuiet(subWs, ["push", "-u", "origin", "main"]);
 
-    // Set up the origin repo with a properly-registered submodule
+    // Готовим origin-репозиторий с корректно зарегистрированным сабмодулем
     const ws = mkdtempSync(join(tmpdir(), "aif-gitlab-ws-"));
     gitQuiet(ws, ["init", "--initial-branch=main"]);
     gitQuiet(ws, ["config", "user.email", "t@t.local"]);
@@ -253,7 +253,7 @@ describe("prepareGitLabRepository", () => {
     gitQuiet(ws, ["remote", "add", "origin", origin]);
     gitQuiet(ws, ["push", "-u", "origin", "main"]);
 
-    // Use git submodule add to properly register the submodule (creates .gitmodules + gitlink entry)
+    // Используем git submodule add для корректной регистрации (создаёт .gitmodules + gitlink-запись)
     const subUrl = subBare.replace(/\\/g, "/");
     gitQuiet(ws, ["submodule", "add", subUrl, "lib"]);
     gitQuiet(ws, ["commit", "-m", "add submodule", "--no-verify"]);
@@ -262,12 +262,12 @@ describe("prepareGitLabRepository", () => {
     const connection = makeConnection(origin);
     prepareGitLabRepository({ projectRoot: root, connection });
 
-    // Submodule should be checked out (lib/.git should exist)
+    // Сабмодуль должен быть чекаучен (lib/.git должен существовать)
     expect(existsSync(join(root, "lib", ".git"))).toBe(true);
   });
 
   it("throws submodule_failed when a submodule URL is unreachable", () => {
-    // Create a bare repo to serve as a temporary valid submodule target
+    // Создаём bare-репозиторий как временную валидную цель сабмодуля
     const tmpBare = mkdtempSync(join(tmpdir(), "aif-gitlab-tmp-bare-"));
     gitQuiet(tmpBare, ["init", "--bare", "--initial-branch=main"]);
     const tmpWs = mkdtempSync(join(tmpdir(), "aif-gitlab-tmp-ws-"));
@@ -278,7 +278,7 @@ describe("prepareGitLabRepository", () => {
     gitQuiet(tmpWs, ["remote", "add", "origin", tmpBare]);
     gitQuiet(tmpWs, ["push", "-u", "origin", "main"]);
 
-    // Set up origin with a properly-registered submodule
+    // Готовим origin с корректно зарегистрированным сабмодулем
     const ws = mkdtempSync(join(tmpdir(), "aif-gitlab-ws-"));
     gitQuiet(ws, ["init", "--initial-branch=main"]);
     gitQuiet(ws, ["config", "user.email", "t@t.local"]);
@@ -289,7 +289,7 @@ describe("prepareGitLabRepository", () => {
 
     const tmpUrl = tmpBare.replace(/\\/g, "/");
     gitQuiet(ws, ["submodule", "add", tmpUrl, "missing"]);
-    // Replace the submodule URL with a non-existent path so submodule update fails
+    // Заменяем URL сабмодуля на несуществующий путь, чтобы submodule update упал
     const badUrl = join(tmpdir(), "aif-gitlab-nonexistent-" + Date.now()).replace(/\\/g, "/");
     writeFileSync(
       join(ws, ".gitmodules"),

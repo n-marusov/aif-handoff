@@ -160,7 +160,7 @@ describe("roadmapGeneration", () => {
       expect(existsSync(result.roadmapPath)).toBe(true);
       expect(readFileSync(result.roadmapPath, "utf8")).toContain("# Project Roadmap");
 
-      // Prompt must include roadmap generation instructions
+      // Промпт обязан включать инструкции генерации карты
       const callArgs = mockRunApiRuntimeOneShot.mock.calls[0][0];
       expect(callArgs.prompt).toContain("ROADMAP.md");
     });
@@ -352,9 +352,9 @@ describe("roadmapGeneration", () => {
 
       const stored = findTasksByRoadmapAlias(projectId, "sprint-1");
       expect(stored).toHaveLength(2);
-      // Every generated task must have skipReview=true so the auto-pipeline
-      // doesn't pause on review for roadmap imports. Regular (non-parallel)
-      // projects fall back to fast-mode flag defaults.
+      // Каждая сгенерированная задача обязана иметь skipReview=true, чтобы
+      // автоконвейер не замирал на ревью при импорте карты. Обычные (не
+      // параллельные) проекты скатываются к дефолтам быстрого режима.
       for (const task of stored) {
         expect(task.skipReview).toBe(true);
         expect(task.plannerMode).toBe("fast");
@@ -365,8 +365,8 @@ describe("roadmapGeneration", () => {
 
     it("should apply full-mode defaults for parallel-enabled projects (still skipReview=true)", () => {
       const { projectId } = createProjectWithRoadmap("# Roadmap");
-      // Force parallelEnabled — roadmap import must honor the same rule
-      // POST /tasks applies: parallel projects are locked to full mode.
+      // Принудительно parallelEnabled — импорт карты обязан соблюдать то же
+      // правило, что и POST /tasks: параллельные проекты закреплены за full-режимом.
       testDb.current
         .update(projects)
         .set({ parallelEnabled: true })
@@ -493,11 +493,11 @@ describe("roadmapGeneration", () => {
         tasks: [{ title: "Setup DB", description: "", phase: 1, phaseName: "Init", sequence: 1 }],
       };
 
-      // First import
+      // Первый импорт
       const first = importGeneratedTasks(projectId, generation);
       expect(first.created).toBe(1);
 
-      // Second import — same title should be skipped
+      // Второй импорт — то же заголовок должен быть пропущен
       const second = importGeneratedTasks(projectId, generation);
       expect(second.created).toBe(0);
       expect(second.skipped).toBe(1);
@@ -519,11 +519,11 @@ describe("roadmapGeneration", () => {
       expect(result.byPhase[2]).toEqual({ created: 2, skipped: 0 });
     });
 
-    // Regression: lee-to/aif-handoff#55 — roadmap import used to assign every
-    // task the shared default plan path `.ai-factory/PLAN.md` because
-    // importGeneratedTasks didn't compute a per-task planPath, so successive
-    // tasks would overwrite each other's plan file on disk. The fix derives a
-    // unique slug-based planPath per task while leaving plannerMode untouched.
+    // Регрессия: lee-to/aif-handoff#55 — импорт карты раньше назначал всем
+    // задачам общий путь плана по умолчанию `.ai-factory/PLAN.md`, потому что
+    // importGeneratedTasks не вычислял planPath для каждой задачи, и
+    // последующие задачи затёрли бы файл плана предыдущих на диске. Фикс
+    // выводит уникальный planPath на основе slug для каждой задачи, не трогая plannerMode.
     it("should assign a unique per-task planPath on roadmap import (#55)", () => {
       const { projectId } = createProjectWithRoadmap("# Roadmap");
 
@@ -575,8 +575,8 @@ describe("roadmapGeneration", () => {
         expect(path.endsWith(".md")).toBe(true);
       }
 
-      // Each planPath must match the slug computed from the title via the
-      // shared helper — keeps the contract with `generatePlanPath` explicit.
+      // Каждый planPath обязан совпадать со slug из заголовка, вычисленным общим
+      // хелпером — это явно держит контракт с `generatePlanPath`.
       for (const task of tasks) {
         const expectedPath = generatePlanPath(task.title, "full", {
           plansDir: ".ai-factory/plans/",
@@ -588,10 +588,10 @@ describe("roadmapGeneration", () => {
       }
     });
 
-    // Regression: slug collisions between distinct titles must not produce
-    // duplicate planPaths. When two titles slugify to the same string (e.g.
-    // punctuation-only differences), the second task should get a `-2`
-    // suffix before `.md`, and so on.
+    // Регрессия: коллизии slug между разными заголовками не должны давать
+    // дублирующиеся planPath. Если два заголовка сводятся к одному slug
+    // (например, различаясь только пунктуацией), вторая задача должна получить
+    // суффикс `-2` перед `.md`, и далее по нарастанию.
     it("should resolve slug collisions with numeric suffixes", () => {
       const { projectId } = createProjectWithRoadmap("# Roadmap");
 
@@ -635,8 +635,8 @@ describe("roadmapGeneration", () => {
       );
     });
 
-    // A second import against the same project should keep stepping the
-    // suffix forward instead of overwriting any existing plan file.
+    // Второй импорт того же проекта должен продолжать наращивать суффикс,
+    // а не перезаписывать существующий файл плана.
     it("should avoid collisions across repeated imports", () => {
       const { projectId } = createProjectWithRoadmap("# Roadmap");
 

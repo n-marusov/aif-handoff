@@ -1,3 +1,17 @@
+// Изоляция работы агента с git: ветки, worktree и защитные проверки состояния.
+//
+// Каждая задача получает собственную ветку и отдельную рабочую копию (worktree), поэтому
+// параллельные исполнители не мешают друг другу: они не делят ни индекс, ни рабочее
+// дерево. Отсюда и требования к состоянию: грязное дерево, расхождение с базовой веткой
+// или чужой HEAD должны останавливать работу до того, как будут сделаны правки.
+//
+// Модуль серверный: использует node:child_process, node:fs и node:path, поэтому
+// экспортируется только через Node-вход пакета (@aif/shared), но не через browser.
+//
+// Все вызовы git идут через runGit, а проверки состояния возвращают null или false
+// вместо исключений. Исключением (BranchIsolationError) сигнализируется только
+// невозможность продолжить работу.
+
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -15,6 +29,9 @@ import { getProjectConfig, type AifProjectGit } from "./projectConfig.js";
 
 const log = logger("git-isolation");
 
+// Ошибка изоляции с машиночитаемым признаком kind. По нему вызывающий код решает, что
+// делать: заблокировать задачу, вернуть на доработку или прекратить попытку. Разбирать
+// текст сообщения для таких решений нельзя - формулировки меняются.
 export class BranchIsolationError extends Error {
   readonly kind:
     | "dirty_worktree"
@@ -46,10 +63,15 @@ export class BranchIsolationError extends Error {
   }
 }
 
+// Проверка типа через instanceof: единственный надёжный способ отличить ошибку
+// изоляции от прочих сбоев.
 export function isBranchIsolationError(err: unknown): err is BranchIsolationError {
   return err instanceof BranchIsolationError;
 }
 
+// Вход подготовки ветки задачи. switchOnly означает "только переключиться на уже
+// существующую ветку", а explicitBranchName позволяет использовать имя из внешнего
+// источника вместо сгенерированного.
 export interface EnsureFeatureBranchInput {
   projectRoot: string;
   taskId: string;
@@ -71,20 +93,19 @@ export interface EnsureTaskWorktreeInput {
   explicitBranchName?: string | null;
   explicitWorktreePath?: string | null;
   /**
-   * Stable project identity used to build the worktree project segment.
-   * When absent the segment falls back to a deterministic
-   * `<basename>-<shortHash(projectRoot)>` derived from the filesystem path.
+   * Стабильный идентификатор проекта для сегмента worktree. Если он не задан, сегмент
+   * строится детерминированно из пути: `<basename>-<короткий хеш(projectRoot)>`.
    */
   projectId?: string | null;
 }
 
-/** A single entry from `git worktree list --porcelain`. */
+/** Одна запись из вывода `git worktree list --porcelain`. */
 export interface WorktreeEntry {
-  /** Absolute path of the worktree checkout. */
+  /** Абсолютный путь рабочей копии. */
   path: string;
-  /** Commit currently checked out in the worktree (null when unknown). */
+  /** Коммит, на котором сейчас стоит worktree (null, если неизвестен). */
   head: string | null;
-  /** Short branch name, without the `refs/heads/` prefix (null when detached/bare). */
+  /** Короткое имя ветки без префикса `refs/heads/` (null при detached или bare). */
   branch: string | null;
   bare: boolean;
   detached: boolean;
@@ -98,8 +119,13 @@ export interface EnsureTaskWorktreeResult {
   reason?: string;
 }
 
+/** Максимальная длина слага в имени ветки. */
 const BRANCH_SLUG_MAX = 40;
 
+/**
+ * Превращает заголовок задачи в ASCII-имя для ветки: кириллица и спецсимволы в именах
+ * веток создают проблемы при работе с удалёнными репозиториями и в командной оболочке.
+ */
 export function slugifyTitle(title: string): string {
   const normalized = title
     .toLowerCase()
@@ -111,6 +137,8 @@ export function slugifyTitle(title: string): string {
   return trimmed || "task";
 }
 
+// Имя ветки собирается из префикса, слага заголовка и идентификатора задачи. Краткий
+// идентификатор в конце гарантирует уникальность: разные заголовки могут дать один слаг.
 export function buildBranchName(prefix: string, title: string, taskId: string): string {
   const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
   const slug = slugifyTitle(title);
@@ -118,6 +146,8 @@ export function buildBranchName(prefix: string, title: string, taskId: string): 
   return `${normalizedPrefix}${slug}-${shortId}`;
 }
 
+// Сегмент пути для worktree: всё небезопасное в имени каталога заменяется. Сегмент
+// становится частью пути на диске, поэтому входным данным здесь доверять нельзя.
 function sanitizeWorktreeSegment(value: string): string {
   const sanitized = value
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
@@ -126,13 +156,17 @@ function sanitizeWorktreeSegment(value: string): string {
   return sanitized || "task";
 }
 
+// Каталог worktree по умолчанию. Имя начинается с точки, чтобы каталог не попадал в
+// индексы и в вывод инструментов проекта.
 const WORKTREE_ROOT_DIR_NAME = ".worktrees";
 const PROJECT_SEGMENT_HASH_LENGTH = 8;
 
 /**
- * Deterministic per-project worktree segment. Prefers the persisted project id
- * so two projects with the same basename never collide; otherwise derives a
- * stable `<basename>-<shortHash(projectRoot)>` from the filesystem path.
+ * Детерминированный сегмент worktree для проекта.
+ *
+ * Предпочитается сохранённый идентификатор проекта, чтобы два проекта с одинаковым именем
+ * каталога не столкнулись. Если идентификатора нет, сегмент выводится из пути файловой
+ * системы и тоже стабилен: `<basename>-<короткий хеш(projectRoot)>`.
  */
 export function buildProjectWorktreeSegment(
   projectRoot: string,
@@ -148,8 +182,10 @@ export function buildProjectWorktreeSegment(
 }
 
 /**
- * Resolve the root folder that hosts task worktrees. Precedence:
- * explicit override → `AIF_WORKTREE_ROOT` → `<dirname(projectRoot)>/.worktrees`.
+ * Корень, в котором размещаются worktree задач. Приоритет источников: явное
+ * переопределение → переменная `AIF_WORKTREE_ROOT` → `<dirname(projectRoot)>/.worktrees`.
+ *
+ * Вынесение за пределы проекта позволяет держать worktree на отдельном томе.
  */
 export function resolveWorktreeRoot(
   projectRoot: string,
@@ -179,10 +215,11 @@ export interface BuildTaskWorktreePathInput {
 }
 
 /**
- * Branch-scoped task worktree path. The path is a pure function of the BRANCH
- * (plus the project segment), never of the task id — re-running the same issue
- * must land on the same folder so a retained worktree can be adopted instead of
- * triggering `git worktree add` conflicts.
+ * Путь worktree, привязанный к ветке.
+ *
+ * Путь - чистая функция от ветки и сегмента проекта, но не от идентификатора задачи:
+ * повторный запуск той же задачи обязан попасть в тот же каталог, чтобы сохранённый
+ * worktree можно было переиспользовать, а не получать конфликт `git worktree add`.
  */
 export function buildTaskWorktreePath(input: BuildTaskWorktreePathInput): string {
   const { projectRoot, branchName } = input;
@@ -205,8 +242,8 @@ export function buildTaskWorktreePath(input: BuildTaskWorktreePathInput): string
 }
 
 function normalizeWorktreeEntry(partial: Partial<WorktreeEntry>): WorktreeEntry {
-  // Git reports worktree paths with POSIX separators even on Windows; resolve
-  // them to native form so callers can compare against `path.join` results.
+  // Git отдаёт пути worktree с POSIX-разделителями даже на Windows; приводим их к
+  // нативному виду, чтобы вызывающий код мог сравнивать с результатами path.join.
   const rawPath = partial.path ?? "";
   return {
     path: rawPath ? resolve(rawPath) : rawPath,
@@ -225,8 +262,11 @@ function normalizePathForCompare(path: string): string {
 }
 
 /**
- * Parse `git worktree list --porcelain` into structured entries. Returns an
- * empty array when the project is not a git work tree (never throws).
+ * Разбирает вывод `git worktree list --porcelain` в структурированные записи.
+ *
+ * Формат человекочитаемый и менялся между версиями git, поэтому строки нормализуются
+ * здесь, а не разбираются по месту. Если проект не является рабочим деревом git,
+ * возвращается пустой массив: исключений функция не бросает.
  */
 export function listWorktrees(projectRoot: string): WorktreeEntry[] {
   const { stdout, status } = runGit(projectRoot, ["worktree", "list", "--porcelain"], {
@@ -260,8 +300,8 @@ export function listWorktrees(projectRoot: string): WorktreeEntry[] {
     } else if (line === "detached") {
       current.detached = true;
     } else if (line.startsWith("prunable")) {
-      // git appends a reason, e.g. "prunable gitdir file points to
-      // non-existent location" — an exact match would never fire.
+      // git дописывает причину, например "prunable gitdir file points to non-existent
+      // location", поэтому сравнение строки целиком никогда бы не сработало.
       current.prunable = true;
     }
   }
@@ -274,10 +314,11 @@ function findWorktreeForBranch(entries: WorktreeEntry[], branchName: string): Wo
 }
 
 /**
- * True when the path is a usable git checkout (git can resolve HEAD there) and,
- * when `expectedBranch` is given, that branch is the one checked out.
- * A registered-but-broken worktree (folder deleted, `.git` link gone, detached
- * HEAD) returns false — adopting it would poison every later git operation.
+ * Пригоден ли путь как рабочая копия git: git умеет определить там HEAD и, если задана
+ * `expectedBranch`, выгружена именно эта ветка.
+ *
+ * Зарегистрированный, но сломанный worktree (каталог удалён, ссылка `.git` пропала, HEAD
+ * отделён) даёт false: его переиспользование сломало бы все последующие операции.
  */
 export function isWorktreeUsable(path: string, expectedBranch?: string | null): boolean {
   if (!path || !existsSync(path)) return false;
@@ -291,8 +332,10 @@ function isAdoptableWorktree(entry: WorktreeEntry, branchName: string): boolean 
 }
 
 /**
- * Drop stale worktree registrations (missing/broken working trees). Returns the
- * number of registrations git reported as pruned (0 when git printed nothing).
+ * Убирает устаревшие регистрации worktree (отсутствующие или сломанные рабочие копии).
+ *
+ * Возвращается число регистраций, которые git сообщил как удалённые; 0 означает, что git
+ * ничего не вывел. Без этой уборки список worktree постепенно засоряется.
  */
 export function pruneWorktrees(projectRoot: string): number {
   const { stdout, status } = runGit(projectRoot, ["worktree", "prune", "--verbose"], {
@@ -302,7 +345,13 @@ export function pruneWorktrees(projectRoot: string): number {
   return stdout.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/** Best-effort `git worktree remove --force`; false when git refused. */
+/**
+ * Принудительное удаление каталога worktree (`git worktree remove --force`).
+ *
+ * Флаг --force необходим: worktree может остаться с незакоммиченными изменениями, и без
+ * флага git откажется его убирать, накапливая мусор на диске. Возвращается false, если git
+ * отказал.
+ */
 export function removeWorktreeForce(projectRoot: string, worktreePath: string): boolean {
   const { status } = runGit(projectRoot, ["worktree", "remove", "--force", worktreePath], {
     ignoreExit: true,
@@ -310,6 +359,8 @@ export function removeWorktreeForce(projectRoot: string, worktreePath: string): 
   return status === 0;
 }
 
+// Единственная точка вызова git. Возвращаются код возврата и оба потока вывода: часть
+// функций проверяет код, часть разбирает stdout, и ни один вызов не должен терять stderr.
 function runGit(
   cwd: string,
   args: string[],
@@ -332,9 +383,9 @@ function runGit(
     const stdout = error.stdout ? error.stdout.toString().trim() : "";
     const stderr = error.stderr ? error.stderr.toString().trim() : String(err);
     const status = typeof error.status === "number" ? error.status : 1;
-    // Always surface the failing command at DEBUG, even for `ignoreExit: true`
-    // probes — a swallowed git error was invisible during the worktree
-    // incident, which made the failure impossible to diagnose from logs.
+    // Ошибка протоколируется на уровне debug всегда, даже когда она ожидаемая
+    // (ignoreExit): проглоченная ошибка git однажды сделала инцидент с worktree
+    // недиагностируемым по логам.
     log.debug(
       { cwd, args, status, stderr, ignoreExit: opts.ignoreExit ?? false },
       "git command failed",
@@ -343,6 +394,8 @@ function runGit(
   }
 }
 
+// Является ли каталог рабочим деревом git. Проверка идёт через git, поэтому корректно
+// работает и внутри worktree, где .git - это файл, а не каталог.
 export function isGitRepo(projectRoot: string): boolean {
   if (!existsSync(join(projectRoot, ".git"))) {
     const { status } = runGit(projectRoot, ["rev-parse", "--is-inside-work-tree"], {
@@ -353,6 +406,8 @@ export function isGitRepo(projectRoot: string): boolean {
   return true;
 }
 
+// Текущая ветка или null, если HEAD отделён (detached). null здесь - значимый
+// результат: вызывающий код обязан отличать "ветки нет" от ошибки git.
 export function getCurrentBranch(projectRoot: string): string | null {
   const { stdout, status } = runGit(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"], {
     ignoreExit: true,
@@ -361,6 +416,8 @@ export function getCurrentBranch(projectRoot: string): string | null {
   return stdout;
 }
 
+// SHA текущего коммита - база для проверки того, появились ли новые коммиты с момента
+// запуска задачи.
 export function getHeadCommitSha(projectRoot: string): string | null {
   const { stdout, status } = runGit(projectRoot, ["rev-parse", "--verify", "HEAD"], {
     ignoreExit: true,
@@ -368,6 +425,8 @@ export function getHeadCommitSha(projectRoot: string): string | null {
   return status === 0 && stdout ? stdout : null;
 }
 
+// Число коммитов между двумя точками. Нужно для решения о том, есть ли что публиковать:
+// пустая разница означает отсутствие работы.
 export function countCommitsBetween(
   projectRoot: string,
   baseSha: string,
@@ -378,6 +437,8 @@ export function countCommitsBetween(
   return Number.parseInt(stdout, 10);
 }
 
+// Проверка существования ветки: сначала локально, затем в удалённом репозитории. Порядок
+// важен - локальная проверка дешевле и не требует сети.
 export function branchExists(projectRoot: string, branchName: string): boolean {
   const { status } = runGit(
     projectRoot,
@@ -386,10 +447,10 @@ export function branchExists(projectRoot: string, branchName: string): boolean {
   );
   if (status === 0) return true;
 
-  // Empty-repo fallback: when a repo has zero commits ("No commits yet"),
-  // git show-ref returns non-zero for every branch because refs/heads/<name>
-  // doesn't exist as a file yet, even though HEAD points to the default
-  // branch name. Check the current HEAD reference as a second signal.
+  // Запасной случай для репозитория без коммитов ("No commits yet"): git show-ref
+  // возвращает ненулевой код для любой ветки, потому что файла refs/heads/<name> ещё нет,
+  // хотя HEAD уже указывает на имя ветки по умолчанию. Поэтому вторым признаком
+  // проверяется текущая ссылка HEAD.
   const currentBranch = getCurrentBranch(projectRoot);
   return currentBranch === branchName;
 }
@@ -418,22 +479,23 @@ function getOriginHeadBranch(projectRoot: string): string | null {
   return branchName || null;
 }
 
+// Признак чистоты рабочего дерева. Ложное "чисто" приводит к смешиванию чужих правок в
+// коммите, поэтому проверка обязательна перед переключением ветки и созданием worktree.
 export function workingTreeClean(projectRoot: string): boolean {
   const { stdout, status } = runGit(projectRoot, ["status", "--porcelain"], { ignoreExit: true });
   return status === 0 && stdout.length === 0;
 }
 
 /**
- * Best-effort `git pull --ff-only origin <current-branch>`.
+ * Обновление текущей ветки быстрой перемоткой (`git pull --ff-only origin <branch>`).
  *
- * Safe to call on any repo — returns immediately with a warning log when:
- * - The repo is on a detached HEAD
- * - No remote "origin" is configured
- * - There are no commits yet (empty repo)
- * - The fast-forward pull fails for any other reason (network, merge conflict)
+ * Безопасно вызывать на любом репозитории: функция сразу вернёт управление с
+ * предупреждением в логе, если репозиторий в состоянии detached HEAD, удалённый репозиторий
+ * origin не настроен, коммитов ещё нет либо перемотка не удалась по любой другой причине
+ * (сеть, конфликт слияния).
  *
- * Designed for use in project-sync workflows where the git state should be
- * refreshed before issue/PR synchronization. Never throws.
+ * Предназначена для сценариев синхронизации проекта, где состояние git нужно обновить
+ * перед синхронизацией issue и PR. Исключений не бросает.
  */
 export function pullDefaultBranch(projectRoot: string): void {
   const currentBranch = getCurrentBranch(projectRoot);
@@ -453,6 +515,8 @@ export function pullDefaultBranch(projectRoot: string): void {
   }
 }
 
+// Человекочитаемое описание того, что мешает работе: список изменённых файлов попадает в
+// сообщение об ошибке, чтобы причина была понятна без ручной диагностики.
 export function describeDirtyWorkingTree(projectRoot: string): string | null {
   const { stdout, status } = runGit(projectRoot, ["status", "--porcelain"], { ignoreExit: true });
   if (status !== 0 || stdout.length === 0) return null;
@@ -462,9 +526,10 @@ export function describeDirtyWorkingTree(projectRoot: string): string | null {
 }
 
 /**
- * Repo-relative files changed since `sinceRef` (committed AND uncommitted).
- * With no ref, lists the current dirty working tree. Used to validate that an
- * implementer run stayed inside its declared change scope.
+ * Файлы, изменённые относительно `sinceRef` (и закоммиченные, и незакоммиченные), с путями
+ * относительно репозитория. Без ссылки возвращается текущее содержимое грязного рабочего
+ * дерева. Используется для проверки, что исполнитель не вышел за объявленные границы
+ * изменений.
  */
 export function listChangedFiles(projectRoot: string, sinceRef?: string | null): string[] {
   const ref = sinceRef?.trim();
@@ -494,10 +559,11 @@ export function listChangedFiles(projectRoot: string, sinceRef?: string | null):
 }
 
 /**
- * Repo-relative file paths committed in a specific commit.
- * Uses `git diff-tree --no-commit-id -r --name-only` which works on any object
- * (commit, merge commit, etc.) without needing a worktree.
- * Returns an empty array when the SHA does not exist or is not a commit.
+ * Пути файлов, закоммиченных в указанном коммите.
+ *
+ * Используется `git diff-tree --no-commit-id -r --name-only`: команда работает с любым
+ * объектом (обычный или слитый коммит) и не требует рабочей копии. Если SHA не существует
+ * или не является коммитом, возвращается пустой массив.
  */
 export function listCommitFiles(projectRoot: string, commitSha: string): string[] {
   if (!commitSha) return [];
@@ -514,6 +580,8 @@ export function listCommitFiles(projectRoot: string, commitSha: string): string[
     .sort();
 }
 
+// Проверки-утверждения: бросают BranchIsolationError вместо возврата флага. Применяются
+// там, где продолжать работу с нарушенным состоянием опасно.
 export function assertWorkingTreeClean(projectRoot: string, branchName: string | null): void {
   const dirty = describeDirtyWorkingTree(projectRoot);
   if (dirty) {
@@ -526,6 +594,8 @@ export function assertWorkingTreeClean(projectRoot: string, branchName: string |
   }
 }
 
+// Текущая ветка должна совпадать с ожидаемой. Защита от ситуации, когда задачу запустили
+// в чужом worktree или ветку переключили извне.
 export function assertCurrentBranch(projectRoot: string, expected: string): void {
   const current = getCurrentBranch(projectRoot);
   if (current !== expected) {
@@ -539,12 +609,12 @@ export function assertCurrentBranch(projectRoot: string, expected: string): void
 }
 
 /**
- * Validate a string as a usable git branch name via `git check-ref-format
- * --branch`. Rejects empty prefixes ("" → "/slug"), double slashes,
- * Git-special refspecs like `@{-1}`, and everything else git won't let you
- * `checkout -b`. Normalising at this layer turns surprising `checkout_failed`
- * / `create_failed` errors mid-flow into a deterministic `invalid_branch_name`
- * blocker before any state changes.
+ * Проверяет, что строка пригодна как имя ветки git, через `git check-ref-format --branch`.
+ *
+ * Отклоняются пустые префиксы ("" → "/slug"), двойные слэши, особые для git ссылки вида
+ * `@{-1}` и всё остальное, что git не даст выгрузить через `checkout -b`. Нормализация на
+ * этом слое превращает неожиданные ошибки `checkout_failed` или `create_failed` посреди
+ * процесса в детерминированный блокер `invalid_branch_name` ещё до любых изменений.
  */
 export function validateBranchName(projectRoot: string, branchName: string): void {
   if (!branchName || branchName.trim().length === 0) {
@@ -576,19 +646,27 @@ export function validateBranchName(projectRoot: string, branchName: string): voi
   }
 }
 
+// Настройки git из конфигурации проекта с умолчаниями. Отдельная функция нужна, чтобы
+// все проверки ниже работали с одним и тем же разбором конфигурации.
 function resolveGitConfig(projectRoot: string): AifProjectGit {
   return getProjectConfig(projectRoot).git;
 }
 
+// Наличие config.yaml определяет, можно ли доверять настройкам git из проекта: без файла
+// берутся умолчания, а не частично заполненная конфигурация.
 function hasProjectConfigFile(projectRoot: string): boolean {
   return existsSync(join(projectRoot, ".ai-factory", "config.yaml"));
 }
 
+// Базовая ветка и источник, откуда она взята: конфигурация, origin/HEAD или умолчание git.
+// Источник важен для диагностики, когда выбранная база оказалась неожиданной.
 interface ResolvedBaseBranch {
   branchName: string;
   createFromRemote: boolean;
 }
 
+// Попытка определить базовую ветку по origin/HEAD. Это самый надёжный источник: он
+// отражает то, что удалённый репозиторий реально считает основной веткой.
 function resolveOriginHeadBaseBranch(projectRoot: string): ResolvedBaseBranch | null {
   const originHeadBranch = getOriginHeadBranch(projectRoot);
   if (!originHeadBranch) return null;
@@ -601,6 +679,8 @@ function resolveOriginHeadBaseBranch(projectRoot: string): ResolvedBaseBranch | 
   return null;
 }
 
+// Резервный вариант: ветка по умолчанию из настроек git. Нужен, когда origin/HEAD не
+// выставлен - частый случай у только что склонированных репозиториев.
 function resolveGitDefaultBaseBranch(
   projectRoot: string,
   fallbackBase: string,
@@ -626,7 +706,7 @@ function resolveGitDefaultBaseBranch(
     );
     return { branchName: "master", createFromRemote: false };
   }
-  // Final fallback: read HEAD directly for empty repos (zero commits).
+  // Последний запасной вариант: для репозитория без коммитов читаем HEAD напрямую.
   const currentBranch = getCurrentBranch(projectRoot);
   if (currentBranch) {
     log.warn(
@@ -638,6 +718,7 @@ function resolveGitDefaultBaseBranch(
   return { branchName: fallbackBase, createFromRemote: false };
 }
 
+// Итоговый выбор базовой ветки с учётом приоритета источников.
 function resolveBaseBranch(
   projectRoot: string,
   configuredBase: string,
@@ -673,8 +754,8 @@ function resolveBaseBranch(
     );
     return { branchName: "master", createFromRemote: false };
   }
-  // Final fallback: when the repo has zero commits ("No commits yet") neither
-  // show-ref nor origin/HEAD can name the current branch. Read HEAD directly.
+  // Последний запасной вариант: при нуле коммитов ("No commits yet") ни show-ref, ни
+  // origin/HEAD не могут назвать текущую ветку, поэтому HEAD читается напрямую.
   const currentBranch = getCurrentBranch(projectRoot);
   if (currentBranch) {
     log.warn(
@@ -686,6 +767,9 @@ function resolveBaseBranch(
   return { branchName: configuredBase, createFromRemote: false };
 }
 
+// Обработка результата обновления базовой ветки. При strict_base_update неудача обновления
+// становится жёсткой ошибкой: если проект требует начинать ветку от актуальной базы,
+// молчаливое продолжение привело бы к конфликтам в PR/MR.
 function handleBaseBranchRefreshResult(input: {
   projectRoot: string;
   branchName: string;
@@ -717,6 +801,8 @@ function handleBaseBranchRefreshResult(input: {
   );
 }
 
+// Обновление базовой ветки перед созданием worktree. Вынесено отдельно, чтобы политика
+// строгости была применима и к сценарию общей ветки.
 function refreshBaseBranchForWorktree(input: {
   projectRoot: string;
   branchName: string;
@@ -740,21 +826,29 @@ function refreshBaseBranchForWorktree(input: {
   });
 }
 
+// Два режима изоляции: общая ветка проекта или отдельный worktree на каждую задачу. Выбор
+// фиксируется конфигурацией, и от него зависит весь дальнейший ход подготовки.
 export function projectUsesSharedBranchIsolation(projectRoot: string): boolean {
   const config = resolveGitConfig(projectRoot);
   return config.enabled && config.create_branches && isGitRepo(projectRoot);
 }
 
+// Поддерживает ли проект worktree. Проверка отдельная, потому что режим зависит и от
+// конфигурации, и от того, является ли каталог рабочим деревом git.
 export function projectSupportsTaskWorktrees(projectRoot: string): boolean {
   return projectUsesSharedBranchIsolation(projectRoot);
 }
 
+// Копирование с проверкой существования: часть служебных файлов проекта может
+// отсутствовать, и это не ошибка.
 function copyPathIfExists(source: string, destination: string): void {
   if (!existsSync(source)) return;
   mkdirSync(dirname(destination), { recursive: true });
   cpSync(source, destination, { recursive: true, force: true });
 }
 
+// Переносятся только последние патчи: полная копия каталога была бы избыточной, а
+// актуальные изменения нужны агенту в новой рабочей копии.
 function copyLatestPatchFiles(
   projectRoot: string,
   worktreePath: string,
@@ -780,6 +874,8 @@ function copyLatestPatchFiles(
   }
 }
 
+// Исключение пути worktree из индекса целевого проекта. Без этого новый каталог попал бы
+// в git add -A и уехал в коммит.
 function excludeWorktreePath(worktreePath: string, relativePath: string): void {
   const normalized = relativePath.replaceAll("\\", "/").replace(/^\/+/, "").replace(/\/+$/, "");
   if (!normalized) return;
@@ -808,6 +904,8 @@ function excludeWorktreePath(worktreePath: string, relativePath: string): void {
   appendFileSync(excludePath, `${prefix}# AIF copied planning context\n${pattern}\n`);
 }
 
+// Копирование контекста проекта в новый worktree: служебные файлы и патчи, без которых
+// агент не увидит настройки проекта. Копирование ограничено по путям.
 function copyProjectContextToWorktree(projectRoot: string, worktreePath: string): void {
   const cfg = getProjectConfig(projectRoot);
   const contextFiles = [
@@ -842,9 +940,15 @@ function copyProjectContextToWorktree(projectRoot: string, worktreePath: string)
   excludeWorktreePath(worktreePath, cfg.paths.patches);
 }
 
+// Создание worktree повторяется: возможны гонки с параллельными задачами и остатки
+// прошлых каталогов. Несколько попыток дешевле, чем отказ задачи.
 const WORKTREE_CREATE_MAX_ATTEMPTS = 3;
+// Ограничение на размер stderr в сообщении об ошибке.
 const STDERR_LOG_MAX = 2_000;
 
+// Главная точка подготовки: создаёт ветку и worktree под задачу либо сообщает, почему
+// работа пропущена. Возвращается действие и причина, а не флаг: интерфейсу и журналу нужно
+// объяснить, почему изоляция не была настроена.
 export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWorktreeResult {
   const { projectRoot, taskId, title, explicitBranchName, explicitWorktreePath, projectId } = input;
   const config = resolveGitConfig(projectRoot);
@@ -878,17 +982,16 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     ? resolve(explicitWorktreePath.trim())
     : buildTaskWorktreePath({ projectRoot, branchName, projectId });
 
-  // Adopt-don't-fail: when the branch is ALREADY checked out in a HEALTHY
-  // worktree, reuse that checkout instead of attempting `git worktree add` on a
-  // path that git will refuse (a branch can only be checked out in one
-  // worktree). This is what converts the retained-worktree incident into a
-  // no-op resume.
+  // Логика "переиспользовать, а не падать": если ветка УЖЕ выгружена в ЗДОРОВОМ worktree,
+  // используется эта копия вместо попытки `git worktree add` по пути, который git отклонит
+  // (ветка может быть выгружена только в одном worktree). Именно это превращает инцидент
+  // с сохранённым worktree в безобидное продолжение работы.
   //
-  // A registration alone is NOT proof of usability: git keeps listing worktrees
-  // whose folder was deleted or whose `.git` link is gone (usually flagged
-  // `prunable`). Adopting such a folder poisons every later stage with
-  // `branch_drift` / "not a git repository", so unhealthy registrations are
-  // pruned and provisioning falls through to a fresh checkout.
+  // Сама регистрация НЕ доказывает работоспособность: git продолжает показывать worktree,
+  // у которых удалён каталог или пропала ссылка `.git` (обычно с пометкой `prunable`).
+  // Переиспользование такого каталога сломало бы все последующие этапы ошибками
+  // `branch_drift` или "not a git repository", поэтому нездоровые регистрации удаляются, а
+  // подготовка переходит к созданию новой копии.
   const existingEntries = listWorktrees(projectRoot);
   const occupant = findWorktreeForBranch(existingEntries, branchName);
   if (occupant && isAdoptableWorktree(occupant, branchName)) {
@@ -908,7 +1011,7 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
   }
 
   if (occupant) {
-    // Free the branch before attempting a fresh `worktree add`.
+    // Ветку нужно освободить перед попыткой новой `worktree add`.
     const prunedRegistrations = pruneWorktrees(projectRoot);
     log.warn(
       {
@@ -973,10 +1076,10 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     });
   }
 
-  // Bounded retry driven by FRESH structured state rather than error text:
-  // after every failed attempt we re-read `git worktree list` and the branch
-  // refs, and adopt whatever appeared in the meantime (parallel provisioning,
-  // partially-created worktree, ref written by a concurrent fetch).
+  // Ограниченный повтор, управляемый СВЕЖИМ структурированным состоянием, а не текстом
+  // ошибки: после каждой неудачной попытки заново читаются `git worktree list` и ссылки
+  // веток, и принимается то, что появилось за это время (параллельная подготовка,
+  // частично созданный worktree, ссылка от конкурентного fetch).
   let lastStderr = "";
   let lastStatus = 1;
   let lastArgs: string[] = [];
@@ -1038,10 +1141,14 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
   );
 }
 
+// Вывод git в сообщении об ошибке обрезается: полный stderr бывает объёмным, а в логе и в
+// ответе нужен только фрагмент, достаточный для понимания причины.
 function truncateStderr(value: string): string {
   return value.length > STDERR_LOG_MAX ? `${value.slice(0, STDERR_LOG_MAX)}…[truncated]` : value;
 }
 
+// Второй сценарий подготовки: работа в общей ветке проекта без отдельного worktree.
+// Используется, когда включён режим общей изоляции.
 export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeatureBranchResult {
   const { projectRoot, title, explicitBranchName, taskId, switchOnly } = input;
   const config = resolveGitConfig(projectRoot);
@@ -1097,9 +1204,8 @@ export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeat
     );
   }
 
-  // Step 1: ensure HEAD is on the base branch. We need it both as the
-  // create-from-target for `git checkout -b` and as the target of the pull
-  // policy below.
+  // Шаг 1: перевести HEAD на базовую ветку. Она нужна и как источник для
+  // `git checkout -b`, и как цель политики обновления ниже.
   const resolvedBaseBranch = resolveBaseBranch(
     projectRoot,
     config.base_branch,
@@ -1158,16 +1264,16 @@ export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeat
     }
   }
 
-  // Step 2: refresh the base branch via `git pull --ff-only origin <base>`.
-  // Run UNCONDITIONALLY (regardless of whether we just switched into base or
-  // were already on it) so `git.strict_base_update=true` cannot be bypassed
-  // by a HEAD that already happens to be on a stale local base.
+  // Шаг 2: обновить базовую ветку через `git pull --ff-only origin <base>`.
+  // Выполняется БЕЗУСЛОВНО, независимо от того, переключились мы только что или уже были
+  // на базовой ветке: иначе `git.strict_base_update=true` обходился бы через HEAD, который
+  // уже стоит на устаревшей локальной базе.
   //
-  // Policy: by default treat pull failure as best-effort (warn + continue
-  // from local base). Projects that REQUIRE a fresh base before branching
-  // opt into strict mode via `git.strict_base_update: true` — pull failure
-  // becomes a hard BranchIsolationError("base_update_failed") classified as
-  // blocked_external by the coordinator.
+  // Политика: по умолчанию неудача обновления считается необязательной (предупреждение и
+  // продолжение от локальной базы). Проекты, которым нужна свежая база перед созданием
+  // ветки, включают строгий режим через `git.strict_base_update: true` - тогда неудача
+  // становится жёсткой BranchIsolationError("base_update_failed"), которую координатор
+  // классифицирует как blocked_external.
   const pullResult = runGit(projectRoot, ["pull", "--ff-only", "origin", baseBranch], {
     ignoreExit: true,
   });
@@ -1196,29 +1302,29 @@ export function ensureFeatureBranch(input: EnsureFeatureBranchInput): EnsureFeat
   return { action: "created", branchName };
 }
 
-/**
- * Restore HEAD to a branch a previous stage already persisted on the task.
- * Unlike `ensureFeatureBranch`, this treats `task.branchName` as a
- * source-of-truth contract: once planner stored it, every subsequent stage
- * MUST land on that branch or fail loud. Config flipping to `git.enabled=false`
- * or `git.create_branches=false` after a task was branched does not retroactively
- * release the stage to run on whatever HEAD happens to be.
- *
- * Failures throw `BranchIsolationError` with a kind the coordinator classifies
- * as `blocked_external`:
- *  - `git_disabled_with_persisted_branch` — config toggled off between stages
- *  - `not_a_repo_with_persisted_branch`  — repo was deleted / moved
- *  - `invalid_branch_name`               — persisted value is not a ref git accepts
- *  - `branch_missing`                    — branch was deleted between stages
- *  - `dirty_worktree`                    — switch would clobber uncommitted changes
- *  - `checkout_failed`                   — git refused the switch
- */
 export interface RestorePersistedBranchInput {
   projectRoot: string;
   taskId: string;
   persistedBranchName: string;
 }
 
+/**
+ * Возвращает HEAD на ветку, которую предыдущий этап уже сохранил в задаче.
+ *
+ * В отличие от `ensureFeatureBranch`, `task.branchName` здесь считается контрактом: если
+ * планировщик его сохранил, каждый следующий этап ОБЯЗАН оказаться на этой ветке или явно
+ * упасть. Переключение `git.enabled=false` или `git.create_branches=false` после того, как
+ * задача получила ветку, не освобождает этап от этого требования.
+ *
+ * При неудаче бросается `BranchIsolationError` с видом, который координатор
+ * классифицирует как `blocked_external`:
+ *  - `git_disabled_with_persisted_branch` - конфигурация выключена между этапами
+ *  - `not_a_repo_with_persisted_branch`   - репозиторий удалён или перемещён
+ *  - `invalid_branch_name`                - сохранённое значение не является допустимой ссылкой
+ *  - `branch_missing`                     - ветка удалена между этапами
+ *  - `dirty_worktree`                     - переключение затрёт незакоммиченные изменения
+ *  - `checkout_failed`                    - git отказал в переключении
+ */
 export function restorePersistedBranch(input: RestorePersistedBranchInput): void {
   const { projectRoot, taskId, persistedBranchName } = input;
   const config = resolveGitConfig(projectRoot);
@@ -1277,9 +1383,12 @@ export function restorePersistedBranch(input: RestorePersistedBranchInput): void
 }
 
 /**
- * Apply a bot git identity (user.name / user.email) as the global git config
- * so commits made by subagents are attributed to the bot account. No-op when
- * either value is missing. Failures are non-fatal — the caller logs them.
+ * Прописывает git-идентичность бота (user.name, user.email) в глобальную конфигурацию,
+ * чтобы коммиты субагентов были атрибутированы боту, а не пользователю, под учётной записью
+ * которого запущен процесс.
+ *
+ * Если хотя бы одно значение не задано, ничего не делается. Ошибки не фатальны: о них
+ * сообщает вызывающий код.
  */
 export function applyGitIdentity(input: {
   botName?: string | null;

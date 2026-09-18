@@ -84,7 +84,7 @@ describe("TaskListTable", () => {
     const c = makeTask({ id: "c", position: 300 });
     render(<TaskListTable tasks={[a, b, c]} isCompact={false} onTaskClick={vi.fn()} />);
 
-    // Move "c" (last) up — between a (100) and b (200) → 150
+    // Двигаем "c" (последнюю) вверх — между a (100) и b (200) → 150
     const ups = screen.getAllByLabelText("Move task up");
     fireEvent.click(ups[2]);
     expect(mutateReorder).toHaveBeenCalledWith({ id: "c", position: 150 });

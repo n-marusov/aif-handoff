@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeTransport } from "../types.js";
 
-// Mock the CLI probe so tests don't depend on `claude` being installed
+// Мок CLI-пробы, чтобы тесты не зависели от установленного `claude`
 vi.mock("../adapters/claude/cli.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../adapters/claude/cli.js")>();
   return {

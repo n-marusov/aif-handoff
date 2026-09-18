@@ -1,8 +1,8 @@
 import { readStorage, writeStorage } from "./storage.js";
 
 /**
- * Creates a simple external store backed by localStorage,
- * compatible with React's useSyncExternalStore.
+ * Создаёт простой внешний store на основе localStorage,
+ * совместимый с React useSyncExternalStore.
  */
 export function createExternalStore<T>(
   storageKey: string,

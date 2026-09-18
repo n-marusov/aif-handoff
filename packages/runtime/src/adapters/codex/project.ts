@@ -1,7 +1,11 @@
 /**
- * Codex project init — handled by ai-factory init --agents in projectInit.ts.
- * This is a no-op stub; the real work is done centrally.
+ * Заглушка инициализации проекта для адаптера Codex.
+ *
+ * Намеренно ничего не делает: вся работа по подготовке проекта (создание AGENTS.md и
+ * агентских определений) выполняется централизованно в projectInit.ts через
+ * `ai-factory init --agents`. Такой разделитель нужен, чтобы адаптер не дублировал
+ * логику инициализации и не расходился с ней.
  */
 export function initCodexProject(_projectRoot: string): void {
-  // Delegated to ai-factory init --agents codex in projectInit.ts
+  // Делегировано ai-factory init --agents codex в projectInit.ts
 }

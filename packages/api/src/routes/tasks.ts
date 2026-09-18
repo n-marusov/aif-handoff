@@ -1,3 +1,16 @@
+/**
+ * Task router домена задач: CRUD, lifecycle-события, handoff, комментарии,
+ * вложения и WS-broadcast.
+ *
+ * Правила файла:
+ * - переходы статусов идут через общий конечный автомат;
+ * - доступ к БД только через @aif/data;
+ * - handoff выполняется атомарно по ownershipRevision (CAS);
+ * - мутации синхронизируются с WebSocket, чтобы UI видел актуальное состояние.
+ *
+ * Потенциальное улучшение: выделить единый слой policy для авторизации
+ * route-мутаций и переиспользовать его между task-роутами.
+ */
 import { Hono, type Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
@@ -69,6 +82,7 @@ const QA_LOCK_DURATION_MS = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000
 
 export const tasksRouter = new Hono<ParticipantApiEnv>();
 
+// Legacy action-context при выключенном participants mode.
 const LEGACY_ACTION_CONTEXT: TaskActionContext = {
   participantsModeEnabled: false,
   actor: {
@@ -80,6 +94,8 @@ const LEGACY_ACTION_CONTEXT: TaskActionContext = {
   participantActive: true,
 };
 
+// Формирует TaskActionContext из сессии и текущего env-флага.
+// При отсутствии сессии возвращается anonymous-актор.
 function requestActionContext(c: Context<ParticipantApiEnv>): TaskActionContext {
   if (!getEnv().PARTICIPANTS_MODE_ENABLED) return LEGACY_ACTION_CONTEXT;
   const auth = getParticipantAuth(c);
@@ -108,6 +124,8 @@ function requestActionContext(c: Context<ParticipantApiEnv>): TaskActionContext 
   };
 }
 
+// Мутации разрешены admin или активному assignee.
+// Проверка ownership выполняется по актуальному состоянию БД.
 function canMutateTask(c: Context<ParticipantApiEnv>, taskId: string): boolean {
   const context = requestActionContext(c);
   if (!context.participantsModeEnabled || context.participantRole === "admin") return true;
@@ -128,6 +146,8 @@ function canMutateTask(c: Context<ParticipantApiEnv>, taskId: string): boolean {
   return assigned;
 }
 
+// Парсит ownership-фильтры списка задач и валидирует комбинации параметров.
+// assigneeId=me разрешается на уровне роута, где известен текущий актор.
 function parseTaskOwnershipFilters(
   c: Context<ParticipantApiEnv>,
   context: TaskActionContext,
@@ -165,13 +185,8 @@ function parseTaskOwnershipFilters(
 }
 
 /**
- * Fire-and-forget QA dispatch shared by the manual `run-qa` endpoint and the
- * auto-trigger on `approve_done`. The caller broadcasts `task:qa_started`
- * first; this helper GUARANTEES a terminating `task:qa_done` / `task:qa_failed`
- * even when the dynamic import or an unexpected throw escapes `runQaQuery`.
- * `runQaQuery` is contracted never to throw, but `import()` and `broadcast`
- * still can — without this outer guard a started run could hang the UI in
- * "running" forever (no terminal event, possible unhandled rejection).
+ * Fire-and-forget запуск QA с гарантией терминального WS-события.
+ * После task:qa_started всегда должен прийти task:qa_done или task:qa_failed.
  */
 function dispatchQaRun(
   projectId: string,
@@ -194,10 +209,8 @@ function dispatchQaRun(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.error({ taskId, projectId, error }, "QA dispatch failed before runner completed");
-      // Release the claimed "running" slot with a terminal status: tryStartQaRun
-      // only wins when qa_status != 'running', so without this a dispatch failure
-      // would block every future QA start for the task. Defensive wrap — a DB
-      // failure here must not prevent the task:qa_failed broadcast below.
+      // При сбое dispatch освобождаем QA running-slot,
+      // иначе последующие старты QA будут заблокированы.
       try {
         updateTask(taskId, { qaStatus: "error" });
         const failedTask = findTaskById(taskId);
@@ -221,15 +234,8 @@ function dispatchQaRun(
 }
 
 /**
- * Atomic QA start shared by the manual `run-qa` endpoint and the `approve_done`
- * auto-trigger. Claims the qaStatus:"running" slot via the DB-level
- * compare-and-set (`tryStartQaRun`), so concurrent manual + auto / double-POST
- * starts are mutually exclusive and never spawn two runtime runs. ONLY on a win
- * does it broadcast task:updated (running) + task:qa_started and dispatch the
- * fire-and-forget runner. Returns { started:false } when QA was already running
- * so the caller can respond 409 / skip. The status transition + the
- * task:qa_started broadcast happen here (synchronously), not deep inside the
- * async runner — that is what closes the check-then-set race.
+ * Атомарный старт QA (manual + auto trigger).
+ * CAS по qaStatus предотвращает двойной запуск конкурирующих запросов.
  */
 function startQaRun(
   projectId: string,
@@ -263,6 +269,8 @@ function startQaRun(
   return { started: true };
 }
 
+// Обогащает ответ по задаче связью с GitHub и эффективным runtime-профилем.
+// Для списков допускается передача заранее вычисленных значений runtime.
 function toTaskRouteResponse(
   task: TaskRow,
   systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task"),
@@ -289,7 +297,8 @@ function toTaskRouteResponse(
   };
 }
 
-// POST /tasks/:id/broadcast — emit WS update for a task (used by agent process)
+// Внутренний маршрут для рассылки WS-события из процесса агента.
+// Защищён общим внутренним токеном, а не сессией участника.
 tasksRouter.post(
   "/:id/broadcast",
   internalBroadcastAuth,
@@ -306,14 +315,9 @@ tasksRouter.post(
   },
 );
 
-// GET /tasks — list tasks.
-//   • With projectId: lightweight TaskListItem[] (board/list rendering).
-//   • Without projectId: full Task[] for ALL projects (legacy dashboard path,
-//     retained until consumers migrate to GET /projects/overview — see cleanup PR).
-//     The bare path maps rows through toTaskRouteResponse (same as GET /tasks/:id)
-//     so the legacy response shape — parsed attachments/tags/runtimeOptions,
-//     effectiveRuntime, normalized runtimeLimitSnapshot — is preserved exactly.
-//     TODO(remove-bare-task-list): drop this branch once #141 lands.
+// GET /tasks:
+// - при наличии projectId: облегченный TaskListItem[];
+// - без projectId: устаревший полный Task[] до миграции клиентов на /projects/overview.
 tasksRouter.get("/", (c) => {
   const projectId = c.req.query("projectId") || undefined;
   const actionContext = requestActionContext(c);
@@ -322,8 +326,7 @@ tasksRouter.get("/", (c) => {
     return c.json({ error: ownershipFilters.error, code: "invalid_task_filter" }, 400);
   }
 
-  // Legacy bare path: no projectId → return full Task[] across all projects.
-  // Kept alive for merge-safety until dashboard consumers migrate to /overview.
+  // Устаревшая ветка без projectId сохранена до завершения миграции клиентов панели.
   if (!projectId) {
     const allTasks = listTasks(undefined, ownershipFilters.filters);
     const systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task");
@@ -344,6 +347,7 @@ tasksRouter.get("/", (c) => {
     );
   }
 
+  // Быстрая валидация формата projectId до обращения к БД.
   if (!/^[0-9a-f-]{36}$/i.test(projectId)) {
     log.warn(
       { route: "GET /tasks", projectId },
@@ -357,11 +361,13 @@ tasksRouter.get("/", (c) => {
   return c.json(taskList);
 });
 
-// POST /tasks — create
+// Создание задачи: сначала авторизация и доменные инварианты,
+// затем дорогие операции (БД/файловая система).
 tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
   const body = c.req.valid("json");
   const actionContext = requestActionContext(c);
   const actor = actionContext.actor;
+  // Участник с ролью member не назначает human-задачу на других при создании.
   if (
     actionContext.participantsModeEnabled &&
     actionContext.participantRole === "member" &&
@@ -377,12 +383,14 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
       403,
     );
   }
+  // Задача, закреплённая за ИИ, не может содержать участников-исполнителей.
   if (body.executionOwner === "ai" && body.assigneeIds.length > 0) {
     return c.json(
       { error: "AI-owned tasks cannot have participant assignees", code: "invalid_ownership" },
       409,
     );
   }
+  // Каждый assignee должен существовать и быть активным.
   for (const participantId of body.assigneeIds) {
     const participant = findParticipantById(participantId);
     if (!participant?.active) {
@@ -392,6 +400,7 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
       );
     }
   }
+  // Runtime-профиль проверяется на принадлежность проекту перед созданием задачи.
   const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
     projectId: body.projectId,
     selections: { runtimeProfileId: body.runtimeProfileId },
@@ -404,22 +413,23 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     return c.json(runtimeValidation, 400);
   }
 
-  // Resolve planPath default from project config.yaml (if present)
+  // Дефолтный planPath берётся из project config, иначе используется fallback.
   const project = findProjectById(body.projectId);
   const defaultPlanPath = project
     ? getProjectConfig(project.rootPath).paths.plan
     : ".ai-factory/PLAN.md";
 
-  // Parallel-enabled projects enforce full mode and unique planPath
+  // Для parallel-enabled проекта принудительно используется plannerMode=full.
   if (project?.parallelEnabled) {
     body.plannerMode = "full";
   }
 
-  // Fill omitted flag values from mode-driven defaults (mirror of web UI behavior).
+  // Пропущенные planner-флаги заполняются mode-default значениями.
   const modeDefaults = defaultsForMode(body.plannerMode);
   const resolvedSkipReview = body.skipReview ?? modeDefaults.skipReview;
   const resolvedPlanDocs = body.planDocs ?? modeDefaults.planDocs;
   const resolvedPlanTests = body.planTests ?? modeDefaults.planTests;
+  // Флаги runPlanImprove/runPostVerify применяются только в skills-mode.
   const resolvedRunPlanImprove = body.useSubagents ? false : body.runPlanImprove;
   const resolvedRunPostVerify = body.useSubagents ? false : body.runPostVerify;
   if (
@@ -440,7 +450,8 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     );
   }
 
-  // Pre-create the task to get an ID, then persist attachments to storage
+  // Двухфазная схема вложений: сначала create task, затем persist файлов,
+  // затем update ссылок в задаче.
   const created = createTask({
     projectId: body.projectId,
     title: body.title,
@@ -470,11 +481,12 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     tags: body.tags,
     scheduledAt: body.scheduledAt ?? null,
   });
+  // null из createTask трактуется как нарушение ownership-инварианта (409).
   if (!created) {
     return c.json({ error: "Failed to create task ownership", code: "invalid_ownership" }, 409);
   }
 
-  // Persist attachments to project files and update the task with path-based metadata
+  // Вложения сохраняются в файловом хранилище проекта и привязываются путями.
   if (body.attachments.length > 0) {
     if (project) {
       const persisted = await persistAttachments(body.attachments, {
@@ -497,18 +509,21 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
     "Task created",
   );
 
+  // Рассылка выполняется после финального перечитывания строки,
+  // чтобы WS и HTTP-ответ не расходились по составу данных.
   broadcast({
     type: "task:created",
     payload: toTaskBroadcastPayload(final, actor),
   });
-  // Wake coordinator when a new task is created (may need immediate processing)
+  // Задача, закреплённая за ИИ, будит координатор для немедленной обработки.
   if (final.executionOwner === "ai") {
     broadcast({ type: "agent:wake", payload: { id: final.id } });
   }
   return c.json(toTaskRouteResponse(final, undefined, undefined, actionContext), 201);
 });
 
-// POST /tasks/:id/handoff — atomically change execution owner and assignments
+// Передача исполнения атомарно меняет владельца и состав исполнителей.
+// Для участника с ролью member разрешены только узкие сценарии самосервиса.
 tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
   const taskId = c.req.param("id");
   const body = c.req.valid("json");
@@ -519,6 +534,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
 
   const actionContext = requestActionContext(c);
   const actorId = actionContext.actor.id;
+  // Авторизация проверяется в маршруте; слой данных обеспечивает атомарность передачи.
   if (actionContext.participantsModeEnabled && actionContext.participantRole !== "admin") {
     const currentOwnership = getTaskOwnership(taskId);
     const assigned =
@@ -528,6 +544,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
           (assignee) => assignee.participantId === actorId && assignee.active,
         ),
       );
+    // Self-assign допустим только для unassigned human-owned задачи.
     const selfAssign =
       task.executionOwner === "human" &&
       (currentOwnership?.assignees.length ?? 0) === 0 &&
@@ -556,6 +573,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
     }
   }
 
+  // expected* поля реализуют CAS-предусловие handoff-операции.
   const result = handoffTaskExecution({
     taskId,
     executionOwner: body.executionOwner,
@@ -567,6 +585,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
     reason: body.reason,
     resumeAction: body.resumeAction,
   });
+  // Ошибки handoff маппятся в стабильные code для клиентской логики.
   if (!result.ok) {
     const code = {
       not_found: "task_not_found",
@@ -600,6 +619,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
     );
   }
 
+  // После handoff задача перечитывается для возврата актуальных вычисленных полей.
   const updated = findTaskById(taskId);
   if (!updated) {
     return c.json({ error: "Task not found after handoff", code: "task_not_found" }, 404);
@@ -611,6 +631,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
     actor: actionContext.actor,
     responsibleParticipants: result.ownership.assignees,
   };
+  // task:handoff и task:assignment_updated публикуются парой с одинаковым payload.
   broadcast({ type: "task:handoff", payload: ownershipPayload });
   broadcast({ type: "task:assignment_updated", payload: ownershipPayload });
   if (
@@ -637,6 +658,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
   });
 });
 
+// История исполнителей для аудита владения задачей.
 tasksRouter.get("/:id/executor-history", (c) => {
   const taskId = c.req.param("id");
   if (!findTaskById(taskId)) {
@@ -645,7 +667,7 @@ tasksRouter.get("/:id/executor-history", (c) => {
   return c.json(listTaskExecutorHistory(taskId));
 });
 
-// GET /tasks/:id — full detail
+// GET /tasks/:id возвращает нормализованный detail-response через toTaskRouteResponse.
 tasksRouter.get("/:id", (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
@@ -658,7 +680,7 @@ tasksRouter.get("/:id", (c) => {
   return c.json(toTaskRouteResponse(task, undefined, undefined, requestActionContext(c)));
 });
 
-// GET /tasks/:id/attachments/:filename — download a task attachment
+// Скачивание вложения задачи по имени файла.
 tasksRouter.get("/:id/attachments/:filename", async (c) => {
   const { id, filename } = c.req.param();
   const task = findTaskById(id);
@@ -667,7 +689,9 @@ tasksRouter.get("/:id/attachments/:filename", async (c) => {
   const project = findProjectById(task.projectId);
   if (!project) return c.json({ error: "Project not found" }, 404);
 
+  // Сравнение по decodeURIComponent(filename): в URL имя закодировано процентами.
   const attachments = parseAttachments(task.attachments);
+  // Ошибка чтения вложения превращается в 404 (файл может отсутствовать на диске).
   const attachment = attachments.find((a) => a.name === decodeURIComponent(filename));
   if (!attachment?.path) return c.json({ error: "Attachment not found" }, 404);
 
@@ -682,7 +706,7 @@ tasksRouter.get("/:id/attachments/:filename", async (c) => {
   }
 });
 
-// GET /tasks/:id/plan-file-status — check if canonical physical plan file already exists
+// Проверка статуса физического plan-файла задачи.
 tasksRouter.get("/:id/plan-file-status", (c) => {
   const { id } = c.req.param();
   const status = getTaskPlanFileStatus(id);
@@ -693,7 +717,7 @@ tasksRouter.get("/:id/plan-file-status", (c) => {
   return c.json(status);
 });
 
-// GET /tasks/:id/comments — list comments
+// Список комментариев через toCommentResponse (серверная нормализация автора/вложений).
 tasksRouter.get("/:id/comments", (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
@@ -701,11 +725,12 @@ tasksRouter.get("/:id/comments", (c) => {
     return c.json({ error: "Task not found" }, 404);
   }
 
+  // При несуществующей задаче возвращается 404, а не пустой список комментариев.
   const comments = listComments(id);
   return c.json(comments.map(toCommentResponse));
 });
 
-// GET /tasks/:id/comments/:commentId/attachments/:filename — download a comment attachment
+// Скачивание вложения комментария задачи.
 tasksRouter.get("/:id/comments/:commentId/attachments/:filename", async (c) => {
   const { id, commentId, filename } = c.req.param();
   const task = findTaskById(id);
@@ -719,6 +744,7 @@ tasksRouter.get("/:id/comments/:commentId/attachments/:filename", async (c) => {
   if (!comment) return c.json({ error: "Comment not found" }, 404);
 
   const attachments = parseAttachments(comment.attachments);
+  // Вложение ищется в пределах комментария текущей задачи.
   const attachment = attachments.find((a) => a.name === decodeURIComponent(filename));
   if (!attachment?.path) return c.json({ error: "Attachment not found" }, 404);
 
@@ -733,7 +759,7 @@ tasksRouter.get("/:id/comments/:commentId/attachments/:filename", async (c) => {
   }
 });
 
-// POST /tasks/:id/comments — create a human comment
+// Создание комментария: автор определяется по сессии, не по телу запроса.
 tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async (c) => {
   const { id } = c.req.param();
   const body = c.req.valid("json");
@@ -743,7 +769,10 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
     return c.json({ error: "Task not found" }, 404);
   }
 
-  // Create comment first to get its DB-assigned ID
+  // Файлы кладутся в каталог с реальным commentId, поэтому порядок такой:
+  // строка в БД, запись на диск, обновление строки. Сбой на диске оставит
+  // комментарий без вложений, а не с битой ссылкой.
+  // Сначала создаём комментарий, чтобы получить его id, назначенный БД
   const created = createComment({
     taskId: id,
     participantId: actionContext.actor.kind === "participant" ? actionContext.actor.id : null,
@@ -752,7 +781,7 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
   });
   if (!created) return c.json({ error: "Failed to create comment" }, 500);
 
-  // Persist attachments to project files using the real comment ID, then update
+  // Сохраняем вложения в файлы проекта по настоящему id комментария, затем обновляем
   let finalComment = created;
   if (body.attachments.length > 0) {
     const project = findProjectById(task.projectId);
@@ -767,6 +796,8 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
     }
   }
 
+  // Это же значение уходит в broadcast: HTTP-ответ и WS-событие обязаны
+  // совпадать по форме, иначе карточка и модалка покажут разное.
   const response = toCommentResponse(finalComment);
   broadcast({
     type: "task:comment_created",
@@ -790,7 +821,10 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
   return c.json(response, 201);
 });
 
-// PUT /tasks/:id — update fields
+// Обновление полей. Часть правил намеренно повторяет POST /tasks (заполнение
+// флагов от plannerMode, запрет fast-режима в параллельных проектах): набор
+// правил один, а точка входа может быть любой.
+// PUT /tasks/:id — обновить поля
 tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   const { id } = c.req.param();
   const body = c.req.valid("json");
@@ -802,6 +836,8 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
   }
 
+  // Профиль времени выполнения проверяется тем же сервисом, что и при создании:
+  // правка не должна обходить проектные ограничения на выбор runtime.
   const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
     projectId: existing.projectId,
     selections: { runtimeProfileId: body.runtimeProfileId },
@@ -814,7 +850,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     return c.json(runtimeValidation, 400);
   }
 
-  // Parallel-enabled projects enforce full mode
+  // Проекты с параллельным выполнением принудительно получают полный режим
   const project = findProjectById(existing.projectId);
   if (project?.parallelEnabled) {
     if (body.plannerMode === "fast") {
@@ -822,6 +858,8 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
+  // plan и attachments вынимаются из payload отдельно: это не колонки таблицы,
+  // а составные операции (файл плана на диске, файловая система вложений).
   const { plan, attachments: incomingAttachments, ...updatePayload } = body;
   const effectiveUseSubagents = updatePayload.useSubagents ?? existing.useSubagents;
   if (effectiveUseSubagents) {
@@ -829,7 +867,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     updatePayload.runPostVerify = false;
   }
 
-  // Mirror POST /tasks: when plannerMode changes, fill omitted flags from mode defaults.
+  // Зеркало POST /tasks: при смене plannerMode недостающие флаги берутся из значений режима.
   if (updatePayload.plannerMode !== undefined) {
     const modeDefaults = defaultsForMode(updatePayload.plannerMode);
     const filled = {
@@ -848,6 +886,8 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
+  // hasOwnProperty, а не проверка на undefined: null - валидное значение,
+  // означающее "очистить план", и его нельзя спутать с "поле не прислали".
   const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
   if (hasPlanUpdate) {
     try {
@@ -857,7 +897,10 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
-  // Persist new attachments to project files and clean up replaced ones
+  // Сохраняем новые вложения в файлы проекта и убираем заменённые
+  // undefined здесь значит "не трогать вложения", а пустой массив - "удалить все".
+  // Освобождение диска от замененных файлов идет до записи новых, чтобы
+  // перезапись одноименных вложений не удалила только что сохраненное.
   if (incomingAttachments !== undefined) {
     const project = findProjectById(existing.projectId);
     if (project) {
@@ -870,15 +913,21 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
+  // Единственная запись в таблицу: составные части (план, вложения) уже
+  // разложены выше, поэтому остаток payload - плоский набор колонок.
   const updated = updateTask(id, updatePayload);
   if (!updated) return c.json({ error: "Task not found after update" }, 500);
   log.debug({ taskId: id, fields: Object.keys(body) }, "Task updated");
 
+  // Событие после ответа от репозитория: обновлять карточку нужно у всех
+  // открытых окон, а не только у инициатора запроса.
   broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(updated) });
   return c.json(toTaskRouteResponse(updated, undefined, undefined, requestActionContext(c)));
 });
 
-// POST /tasks/:id/sync-plan — sync DB plan with physical plan file
+// Ручная синхронизация: файл плана - источник правды, а БД может отстать,
+// если план правили в редакторе или агентом в обход API. Роут перечитывает файл.
+// POST /tasks/:id/sync-plan — синхронизировать план в БД с физическим файлом плана
 tasksRouter.post("/:id/sync-plan", (c) => {
   const { id } = c.req.param();
   const existing = findTaskById(id);
@@ -888,6 +937,8 @@ tasksRouter.post("/:id/sync-plan", (c) => {
   if (!canMutateTask(c, id)) {
     return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
   }
+  // Различаем "нет задачи или проекта" и "нет файла плана": клиенту важно
+  // понять, надо ли создать план или чинить конфигурацию проекта.
   const result = syncTaskPlanFromFile(id);
   if (!result) {
     return c.json({ error: "Task or project not found" }, 404);
@@ -896,14 +947,20 @@ tasksRouter.post("/:id/sync-plan", (c) => {
     return c.json({ error: "Plan file not found" }, 404);
   }
 
+  // Синхронизация уже записала поля, поэтому payload пустой: нужна свежая
+  // строка для ответа и WS-события, а не повторная запись тех же значений.
   const updated = updateTask(id, {});
   if (!updated) return c.json({ error: "Task not found after sync" }, 500);
   log.debug({ taskId: id }, "Task plan synced from physical file");
 
+  // Здесь видят результат все окна, а не только тот, где нажали синхронизацию.
   broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(updated) });
   return c.json(toTaskRouteResponse(updated, undefined, undefined, requestActionContext(c)));
 });
 
+// Удаление задачи. Порядок шагов критичен: сначала снимок git-идентичности,
+// потом удаление строки, и только затем best-effort уборка worktree. После
+// deleteTask восстановить branchName/worktreePath уже неоткуда.
 // DELETE /tasks/:id
 tasksRouter.delete("/:id", async (c) => {
   const { id } = c.req.param();
@@ -912,8 +969,8 @@ tasksRouter.delete("/:id", async (c) => {
     return c.json({ error: "Task not found" }, 404);
   }
 
-  // Snapshot the git identity BEFORE the DB row disappears: cleanup needs the
-  // branch/worktree names plus the project root to remove the right folder.
+  // Снимок git-идентичности ДО исчезновения строки БД: уборке нужны имена
+  // ветки/worktree плюс корень проекта, чтобы удалить правильную папку.
   const project = findProjectById(existing.projectId);
   const worktreeSnapshot = {
     taskId: existing.id,
@@ -923,13 +980,20 @@ tasksRouter.delete("/:id", async (c) => {
     worktreePath: existing.worktreePath ?? null,
   };
 
+  // Строка удаляется в БД-транзакции, а файловые операции вынесены наружу:
+  // они не транзакционны и должны быть идемпотентными.
   deleteTask(id);
   log.debug({ taskId: id }, "Task deleted");
 
+  // Событие уходит сразу после удаления строки, до уборки worktree: клиенты не
+  // должны ждать медленную файловую операцию, чтобы убрать карточку с доски.
   broadcast({ type: "task:deleted", payload: { id } });
 
-  // Best-effort worktree cleanup: the delete has already succeeded and must not
-  // be failed by an unreachable agent. The reconciliation sweep is the backstop.
+  // Уборка worktree best-effort: удаление уже состоялось, и недоступный агент
+  // не должен превращать его в ошибку. Резервный вариант — сверочный проход.
+  // Чистим worktree только когда он был заведен (обе записи непустые): у задач
+  // без отдельного дерева чистить нечего, а пустой путь увел бы удаление в
+  // корень проекта.
   if (worktreeSnapshot.worktreePath && worktreeSnapshot.projectRoot) {
     try {
       const cleanupResult = await callAgentWorktreeCleanup({
@@ -953,7 +1017,12 @@ tasksRouter.delete("/:id", async (c) => {
   return c.json({ success: true });
 });
 
-// POST /tasks/:id/events — apply a human action through state machine
+// Главная точка жизненного цикла: сюда приходят действия пользователя
+// (start, approve, reject, move). Роут не меняет статус сам - он отдает событие
+// общему автомату (@aif/shared stateMachine) через handleTaskEvent.
+// Это единственный легальный путь смены статуса: прямая запись поля в обход
+// автомата запрещена, иначе распадется вся цепочка стадий и очередей.
+// POST /tasks/:id/events — применить действие человека через автомат состояний
 tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
   const { id } = c.req.param();
   const { event, deletePlanFile, commitOnApprove } = c.req.valid("json");
@@ -962,6 +1031,8 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
   if (!existing) {
     return c.json({ error: "Task not found" }, 404);
   }
+  // Исключения из автомата превращаем в 500 с логом: наружу не должны
+  // утекать детали реализации, но потерять след сбоя тоже нельзя.
   try {
     const handled = await handleTaskEvent({
       taskId: id,
@@ -982,6 +1053,8 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       );
     }
 
+    // Логируем именно переход (from -> to): по этим записям восстанавливают
+    // историю, если WS-события были потеряны.
     log.debug(
       { taskId: id, from: existing.status, to: handled.task.status, event },
       "Task state transition applied",
@@ -990,14 +1063,18 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       type: handled.broadcastType,
       payload: toTaskBroadcastPayload(handled.task),
     });
-    // Wake coordinator when task transitions may require agent processing
+    // Разбудить координатор, когда переход задачи может потребовать обработки агентом
+    // task:moved может вывести задачу на AI-стадию, поэтому координатор будится
+    // здесь: иначе задача ждала бы следующего тика опроса очереди.
     if (handled.broadcastType === "task:moved") {
       broadcast({ type: "agent:wake", payload: { id: handled.task.id } });
     }
 
-    // Fire-and-forget: run /aif-commit when approved with commit checkbox.
-    // Broadcast lifecycle over WS so the UI can show a spinner/toast and the
-    // approve modal does not close without feedback.
+    // Fire-and-forget: запустить /aif-commit при утверждении с чекбоксом коммита.
+    // Жизненный цикл рассылается по WS, чтобы UI показал спиннер/тост и модалка
+    // подтверждения не закрылась без обратной связи.
+    // Коммит запускается только по явному чекбоксу в модалке подтверждения:
+    // само по себе approve_done не трогает git.
     if (event === "approve_done" && commitOnApprove) {
       const taskId = handled.task.id;
       const projectId = handled.task.projectId;
@@ -1008,6 +1085,8 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       });
       void (async () => {
         const { runCommitQuery } = await import("../services/commitGeneration.js");
+        // Сервис возвращает результат-объект, а не бросает, чтобы обе ветки
+        // завершились терминальным WS-событием и спиннер в UI не завис.
         const result = await runCommitQuery({ projectId, taskId });
         if (result.ok) {
           log.info({ taskId, projectId }, "Approve-done commit flow succeeded");
@@ -1025,17 +1104,21 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       })();
     }
 
-    // Fire-and-forget: run /aif-qa when approved and autoQa is enabled on the task.
-    // approve_done moves the task done -> verified; QA runs asynchronously after.
-    // Gated behind AIF_QA_PIPELINE_ENABLED (off by default).
+    // Fire-and-forget: запустить /aif-qa при утверждении, если у задачи включён autoQa.
+    // approve_done переводит задачу done -> verified; QA идёт асинхронно после.
+    // Под флагом AIF_QA_PIPELINE_ENABLED (по умолчанию выключен).
+    // Флаг проверяется здесь, а не внутри startQaRun: нужно отличить в логах
+    // "фича выключена" от "прогон уже идет".
     if (event === "approve_done" && handled.task.autoQa && !getEnv().AIF_QA_PIPELINE_ENABLED) {
       log.debug(
         { taskId: handled.task.id },
         "Auto QA skipped — AIF_QA_PIPELINE_ENABLED is disabled",
       );
     } else if (event === "approve_done" && handled.task.autoQa) {
-      // Branchless (fast-mode) tasks are allowed: the runner resolves the branch
-      // via `git branch --show-current`, mirroring the aif-qa skill.
+      // Задачи без ветки (быстрый режим) допущены: раннер узнаёт ветку через
+      // `git branch --show-current`, повторяя поведение скилла aif-qa.
+      // Execution root: worktree задачи, если он есть, иначе корень проекта -
+      // QA должен видеть тот же код, что и остальные стадии пайплайна.
       const { id: taskId, projectId, worktreePath } = handled.task;
       const project = findProjectById(projectId);
       if (!project) {
@@ -1043,6 +1126,8 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       } else {
         const executionRoot = worktreePath ?? project.rootPath;
         log.info({ taskId }, "Auto QA triggered (autoQa=true)");
+        // Старт QA атомарен: при проигранной гонке (ручной запуск параллельно)
+        // получаем started=false и просто пишем предупреждение.
         const { started } = startQaRun(projectId, taskId, executionRoot);
         if (!started) {
           log.warn({ taskId }, "Auto QA skipped — QA already running");
@@ -1057,16 +1142,21 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
   }
 });
 
-// POST /tasks/:id/run-qa — manually trigger the aif-qa pipeline (fire-and-forget)
+// Ручной запуск QA. Отвечает 202 сразу, потому что прогон длится минуты;
+// результат приезжает по WS (task:qa_done / task:qa_failed).
+// POST /tasks/:id/run-qa — вручную запустить конвейер aif-qa (fire-and-forget)
 tasksRouter.post("/:id/run-qa", (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
   if (!task) {
     return c.json({ error: "Task not found" }, 404);
   }
+  // Ручной запуск - мутация: доступен админу или исполнителю задачи.
   if (!canMutateTask(c, id)) {
     return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
   }
+  // В отличие от авто-ветки, здесь выключенный пайплайн - явная ошибка
+  // пользователя (403 feature_disabled), а не тихий пропуск в лог.
   if (!getEnv().AIF_QA_PIPELINE_ENABLED) {
     log.warn({ taskId: id }, "QA cannot run — AIF_QA_PIPELINE_ENABLED is disabled");
     return c.json({ error: "QA pipeline is disabled", code: "feature_disabled" }, 403);
@@ -1077,10 +1167,12 @@ tasksRouter.post("/:id/run-qa", (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
+  // Тот же выбор корня, что и в авто-ветке: QA прогоняется по коду worktree,
+  // если задача изолирована в отдельном дереве.
   const executionRoot = task.worktreePath ?? project.rootPath;
   log.info({ taskId: id, branchName: task.branchName }, "run-qa requested for task");
-  // Atomic claim of the running slot — a second concurrent POST loses the
-  // compare-and-set and gets 409 instead of starting a duplicate runtime run.
+  // Атомарный захват слота «выполняется»: второй параллельный POST проигрывает
+  // compare-and-set и получает 409 вместо дублирующего запуска runtime.
   const startResult = startQaRun(task.projectId, id, executionRoot);
   const { started } = startResult;
   if (!started) {
@@ -1110,7 +1202,9 @@ tasksRouter.post("/:id/run-qa", (c) => {
   return c.json({ status: "accepted" }, 202);
 });
 
-// PATCH /tasks/:id/position — reorder within column
+// Изменение позиции карточки в колонке. Порядок не влияет на жизненный цикл,
+// поэтому роут не трогает статус и не участвует в правилах переходов.
+// PATCH /tasks/:id/position — перестановка в пределах колонки
 tasksRouter.patch("/:id/position", jsonValidator(reorderTaskSchema), async (c) => {
   const { id } = c.req.param();
   const { position } = c.req.valid("json");
@@ -1127,6 +1221,8 @@ tasksRouter.patch("/:id/position", jsonValidator(reorderTaskSchema), async (c) =
   if (!updated) return c.json({ error: "Task not found after reorder" }, 500);
   log.debug({ taskId: id, position }, "Task reordered");
 
+  // Событие обязательно: без него карточка останется на старой позиции
+  // у всех, кроме автора перетаскивания.
   broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(updated) });
   return c.json(toTaskRouteResponse(updated, undefined, undefined, requestActionContext(c)));
 });

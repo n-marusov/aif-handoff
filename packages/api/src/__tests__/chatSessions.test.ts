@@ -622,12 +622,12 @@ describe("chat session API", () => {
     });
 
     it("deduplicates a mixed text+question turn on reload of a linked DB session", async () => {
-      // Regression for PR#77 review item #2 — Claude replay splits a mixed
-      // assistant turn into a `session-message` (intro text) and a separate
-      // `tool:question`. POST now persists the same split shape (two rows),
-      // so mergeRuntimeAndDbMessages matches each runtime event to its DB row
-      // by exact trimmed-content equality instead of appending a stale
-      // combined row as a third duplicate.
+      // Регрессия по пункту #2 ревью PR#77 — Claude-replay делит смешанный ход
+      // ассистента на `session-message` (вступительный текст) и отдельный
+      // `tool:question`. POST теперь сохраняет то же разбиение (две строки),
+      // поэтому mergeRuntimeAndDbMessages сопоставляет каждое событие runtime с
+      // его строкой БД по точному равенству trimmed-контента, а не добавляет
+      // устаревшую объединённую строку третьим дубликатом.
       mockFindChatSessionById.mockReturnValue({
         ...SESSION_ROW,
         runtimeSessionId: "runtime-linked",
@@ -708,9 +708,9 @@ describe("chat session API", () => {
     });
 
     it("assigns a stable id to tool:question events based on toolUseId across repeated fetches", async () => {
-      // Regression for PR#77 review item #3 — without this, eventId() falls
-      // back to crypto.randomUUID() on every fetch, churning the UI's message
-      // keys and causing visible list re-ordering/flicker on reload.
+      // Регрессия по пункту #3 ревью PR#77 — без этого eventId() при каждой
+      // выборке скатывается в crypto.randomUUID(), перемешивая ключи сообщений UI
+      // и вызывая видимую перестановку/мерцание списка при перезагрузке.
       mockListSessionEvents.mockResolvedValue([
         {
           type: "tool:question",

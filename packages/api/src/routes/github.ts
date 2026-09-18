@@ -49,11 +49,11 @@ const REVIEW_MARKER = "<!-- aif-github-review -->";
 
 export const githubRouter = new Hono<ParticipantApiEnv>();
 
-// Gate only GitHub-specific paths (/:id/github + /:id/github/*). The router is
-// mounted at /projects alongside the GitLab router; a bare use("*") here would
-// intercept GitLab requests first and block them whenever GIT_PROVIDER is not
-// github. Two patterns are required: Hono's `github*` wildcard does not match
-// the bare `/github` path, only its sub-paths.
+// Гейт только для GitHub-путей (/:id/github + /:id/github/*). Роутер смонтирован
+// на /projects рядом с GitLab-роутером; голый use("*") здесь перехватывал бы
+// GitLab-запросы первыми и блокировал их, когда GIT_PROVIDER не равен
+// github. Нужны два паттерна: wildcard `github*` в Hono не совпадает с путём
+// `/github` без подпути, а только с его подпутями.
 githubRouter.use("/:id/github", async (c, next) => {
   if (getEnv().GIT_PROVIDER !== "github" || !getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
     log.debug(
@@ -145,9 +145,9 @@ githubRouter.put("/:id/github", jsonValidator(githubConnectSchema), async (c) =>
       eligibility: body.eligibility,
       enabled: body.enabled,
     });
-    // Best-effort git-prepare on connect: the agent clones/adopts the remote
-    // default branch and initializes AI Factory files. Failures are logged (not
-    // fatal) — the next Sync now re-runs prepare strictly.
+    // Git-prepare при подключении best-effort: агент клонирует/подхватывает
+    // удалённую ветку по умолчанию и инициализирует файлы AI Factory. Сбои только
+    // логируются (не фатальны) — следующая Синхронизация повторит prepare строго.
     const prepare = await callAgentGitPrepare(projectId, { provider: "github", strict: false });
     if (!prepare.ok) {
       log.warn(
@@ -174,10 +174,10 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
   if (!connection.enabled)
     return c.json({ imported: 0, updated: 0, skipped: 0, issues: listGitHubIssues(projectId) });
 
-  // First sync (or reconnect) also runs strict git-prepare: add origin, fetch and
-  // check out the default branch, and init AI Factory files. On failure, surface
-  // the error immediately (the task stays blocked) instead of importing issues
-  // into a repository that was never cloned.
+  // Первая синхронизация (или переподключение) тоже запускает строгий
+  // git-prepare: добавить origin, получить и переключиться на ветку по умолчанию
+  // и инициализировать файлы AI Factory. При сбое ошибка показывается сразу
+  // (задача остаётся заблокированной), а не импортирует issues в неклонированный репозиторий.
   if (!connection.gitPreparedAt) {
     const prepare = await callAgentGitPrepare(projectId, { provider: "github", strict: true });
     if (!prepare.ok) {
@@ -195,15 +195,15 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
     }
   }
 
-  // Best-effort git pull before issue sync so the local repo reflects the
-  // remote default branch. Failure is non-blocking (logs at debug level).
+  // Git pull перед синхронизацией issues best-effort, чтобы локальный репозиторий
+  // отражал удалённую ветку по умолчанию. Сбой не блокирует (лог на уровне debug).
   const project = findProjectById(projectId);
   if (project?.rootPath) {
     pullDefaultBranch(project.rootPath);
   }
 
-  // Best-effort submodule sync: populate submodules if .gitmodules exists.
-  // Non-blocking — failure is logged but import continues.
+  // Синхронизация подмодулей best-effort: заполнить подмодули, если есть .gitmodules.
+  // Не блокирует — сбой логируется, но импорт продолжается.
   callAgentSubmoduleSync(projectId).catch(() => {});
 
   try {
@@ -271,9 +271,9 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           closingPull ?? (await client.getPullRequest(connection.owner, connection.name, prNumber));
         const reviews = await client.listReviews(connection.owner, connection.name, prNumber);
         const review = latestReviewState(reviews);
-        // Fallback: when the PR author cannot officially approve (GitHub
-        // restriction), a COMMENTED review body containing "/approve" acts
-        // as a lightweight approval signal.
+        // Резервный путь: когда автор PR не может официально его одобрить
+        // (ограничение GitHub), тело ревью COMMENTED с "/approve" служит
+        // легковесным сигналом одобрения.
         const approveComment = reviews
           .filter((r) => r.state === "COMMENTED" && r.body?.includes("/approve"))
           .sort((left, right) =>
@@ -295,10 +295,10 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           prState,
           prChecksStatus: checks,
           reviewState: effectiveReviewState,
-          // lastReviewId is deliberately NOT set here — the plan review
-          // approval check below must succeed before we record the review
-          // ID, otherwise a transient failure in markTaskPlanApproved
-          // would permanently prevent retry on the next sync cycle.
+          // lastReviewId намеренно НЕ устанавливается здесь — проверка
+          // одобрения ревью плана ниже должна пройти успешно, прежде чем мы
+          // сохраним ID ревью, иначе преходящий сбой в markTaskPlanApproved
+          // навсегда заблокировал бы повтор в следующем цикле синхронизации.
         });
         let task = findTaskById(result.taskId);
         const discoveredPullNeedsDone =
@@ -320,7 +320,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
             {},
             { kind: "system", id: "github-sync", displayNameSnapshot: "GitHub Sync" },
           );
-          // Lifecycle close-out: drop the worktree, keep the branch.
+          // Закрытие жизненного цикла: удалить worktree, сохранить ветку.
           await requestWorktreeCleanupAfterMerge(
             snapshotTaskWorktree(
               verifiedTask,
@@ -337,8 +337,8 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           effectiveReviewId !== (existing?.lastReviewId ?? null) &&
           task.status === "done"
         ) {
-          // A confirmed review (official APPROVED or a COMMENTED review
-          // containing "/approve") on an open PR finalizes a done task.
+          // Подтверждённое ревью (официальное APPROVED или ревью COMMENTED
+          // с "/approve") на открытом PR завершает задачу в статусе done.
           const transitioned = transitionTaskStatus({
             taskId: task.id,
             status: "accepted",
@@ -352,8 +352,8 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
             reason: "GitHub review approved",
           });
           if (transitioned.ok) {
-            // Record the review ID only after a successful transition so a
-            // transient failure does not block retry on the next sync cycle.
+            // Записываем ID ревью только после успешного перехода, чтобы
+            // преходящий сбой не блокировал повтор в следующем цикле синхронизации.
             updateGitHubPullRequestLastReviewId({
               projectId,
               issueNumber: issue.number,
@@ -409,10 +409,10 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
           effectiveReviewId !== null &&
           effectiveReviewId !== (existing?.lastReviewId ?? null)
         ) {
-          // Plan-review gate: an approved plan PR/MR is the only event allowed
-          // to move the task into implementing; a changes-requested review
-          // sends it back to planning for replanning on the same branch/PR.
-          // A COMMENTED review containing "/approve" is treated as approval.
+          // Plan-review gate: одобренный PR/MR плана — единственное событие,
+          // которое переводит задачу в implementing; ревью с changes-requested
+          // возвращает её в planning для перепланирования на той же ветке/PR.
+          // Ревью COMMENTED с "/approve" трактуется как одобрение.
           if (effectiveReviewState === "approved") {
             const approved = markTaskPlanApproved({
               taskId: task.id,
@@ -423,8 +423,8 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
               },
             });
             if (approved.ok) {
-              // Record the review ID only after a successful transition
-              // so a transient failure does not block retry on the next sync.
+              // Записываем ID ревью только после успешного перехода,
+              // чтобы преходящий сбой не блокировал повтор на следующей синхронизации.
               updateGitHubPullRequestLastReviewId({
                 projectId,
                 issueNumber: issue.number,
@@ -635,10 +635,10 @@ githubRouter.post(
 );
 
 /**
- * Publish (or update) the Change Plan PR for an issue-linked task. The task is
- * left in plan_review until a human approves the PR. Body carries the plan
- * review marker and deliberately omits `Closes #...` — the issue must stay
- * open until the final implementation PR is published.
+ * Публикация (или обновление) PR плана изменений для задачи, связанной с issue.
+ * Задача остаётся в plan_review, пока человек не одобрит PR. Тело содержит
+ * маркер ревью плана и намеренно без `Closes #...` — issue должен оставаться
+ * открытым, пока не будет опубликован итоговый PR реализации.
  */
 githubRouter.post(
   "/:id/github/tasks/:taskId/publish-plan",

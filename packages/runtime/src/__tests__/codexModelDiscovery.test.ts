@@ -32,9 +32,9 @@ describe("codex app-server model discovery env", () => {
       providerId: "openai",
       profileId: "profile-1",
       options: {},
-      // Explicit API-key opt-in: ambient OPENAI_API_KEY is otherwise blocked so
-      // OAuth-backed discovery is not hijacked. This test asserts OPENAI_BASE_URL
-      // is stripped regardless of the key being present.
+      // Явное включение API-key: внешний OPENAI_API_KEY иначе блокируется, чтобы
+      // OAuth-discovery не перехватывался. Этот тест утверждает, что OPENAI_BASE_URL
+      // вырезается независимо от наличия ключа.
       apiKeyEnvVar: "OPENAI_API_KEY",
     });
 

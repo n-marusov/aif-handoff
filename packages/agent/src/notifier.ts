@@ -1,3 +1,19 @@
+/**
+ * Доставка уведомлений о событиях задачи и проекта во внешний API.
+ *
+ * Зачем отдельный модуль: стадии обработки задачи не должны знать о WebSocket,
+ * Telegram и заголовках внутренней авторизации. Все исходящие уведомления собраны
+ * здесь, чтобы политика best-effort соблюдалась единообразно.
+ *
+ * Инварианты и подводные камни:
+ * - Транспорт всегда best-effort: недоступный API не должен валить стадию. Поэтому
+ *   в postTaskBroadcast стоит catch, а ошибка уходит только в лог.
+ * - Уведомления в Telegram намеренно отфильтрованы (только task:moved с реальной
+ *   сменой статуса). Без фильтра лента превращается в шум, и люди отключают
+ *   уведомления целиком.
+ * - Заголовки собираются на каждый запрос, а не кешируются: токен читается из env
+ *   динамически, чтобы работали тесты и переопределение конфигурации.
+ */
 import { findProjectByTaskId, findTaskById, parseTaskCurrentTool } from "@aif/data";
 import { logger, getEnv, sendTelegramNotification, type TaskCurrentTool } from "@aif/shared";
 
@@ -24,12 +40,14 @@ export function internalApiHeaders(): Record<string, string> {
     headers.Authorization = `Bearer ${token}`;
     headers["X-Internal-Broadcast-Token"] = token;
   } else if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "development") {
+    // В разработке без токена маршрут может проверять источник по IP, поэтому
+    // подставляем локальный адрес явно, чтобы запрос не отсеялся раньше времени.
     headers["X-Real-IP"] = "127.0.0.1";
   }
   return headers;
 }
 
-/** Best-effort project-scoped WS broadcast via the API. */
+/** Project-scoped WS-вещание через API, best-effort. */
 export async function notifyProjectBroadcast(
   projectId: string,
   type: ProjectBroadcastType,
@@ -37,6 +55,8 @@ export async function notifyProjectBroadcast(
 ): Promise<void> {
   const baseUrl = getEnv().API_BASE_URL;
   const url = `${baseUrl}/projects/${projectId}/broadcast`;
+  // Проектные трансляции уходят по одному адресу с разным type: ручка одна, а
+  // клиенты фильтруют события по типу.
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -64,6 +84,8 @@ export async function notifyProjectRuntimeLimitBroadcast(
   const baseUrl = getEnv().API_BASE_URL;
   const type: RuntimeLimitBroadcastType = "project:runtime_limit_updated";
   const url = `${baseUrl}/projects/${projectId}/broadcast`;
+  // Возвращаем boolean в отличие от остальных вещателей: вызывающему нужно знать,
+  // доставлено ли событие, чтобы решить, повторять ли попытку позже.
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -111,6 +133,8 @@ async function postTaskBroadcast(
       body: JSON.stringify(body),
     });
 
+    // Успех тоже логируем: по этим строчкам восстанавливают порядок событий
+    // в UI, когда клиент жалуется на «застрявшую» карточку.
     if (res.ok) {
       log.info({ taskId, type: body.type, ...context }, "Task broadcast sent");
     } else {
@@ -120,7 +144,7 @@ async function postTaskBroadcast(
       );
     }
   } catch (err) {
-    // Broadcast is best-effort. Agent processing must not fail because API is unavailable.
+    // Broadcast — best-effort. Обработка задачи агентом не должна падать из-за недоступного API.
     log.warn({ taskId, type: body.type, err, url }, "Task broadcast request failed");
   }
 }
@@ -132,11 +156,13 @@ export async function notifyTaskBroadcast(
 ): Promise<void> {
   await postTaskBroadcast(taskId, { type }, { toStatus: info.toStatus });
 
-  // Best-effort Telegram notification — fire and forget.
-  // Skip Telegram for activity-only broadcasts (too noisy).
-  // Skip for scheduled-fire events (the follow-up task:moved carries richer info).
-  // Skip when status didn't actually change (e.g. implementing → implementing).
+  // Telegram-уведомление — best-effort, fire-and-forget.
+  // Пропускаем activity-only трансляции (слишком шумно).
+  // Пропускаем события расписания (последующий task:moved несёт больше данных).
+  // Пропускаем, если статус реально не менялся (например, implementing → implementing).
   if (type === "task:activity" || type === "task:scheduled_fired") return;
+  // Условие читается наоборот к названию: шлём только когда статус действительно
+  // изменился. Повторное событие с тем же статусом не несёт информации.
   if (type === "task:moved" && (!info.fromStatus || info.fromStatus !== info.toStatus)) {
     void sendTelegramNotification({
       taskId,
@@ -150,6 +176,8 @@ export async function notifyTaskBroadcast(
 }
 
 export async function notifyTaskHeartbeat(taskId: string, lastHeartbeatAt: string): Promise<void> {
+  // Отдельный тип события вместо task:updated: клиент использует heartbeat, чтобы
+  // показать «жизнь» процесса, не перерисовывая карточку целиком.
   await postTaskBroadcast(
     taskId,
     { type: "task:heartbeat", payload: { taskId, lastHeartbeatAt } },
@@ -169,6 +197,8 @@ export async function notifyTaskUsageBroadcast(
   projectId: string,
   usage: TaskUsageNotification,
 ): Promise<void> {
+  // Событие расхода живёт на уровне задачи, поэтому идёт через task-канал, хотя
+  // агрегируется потом по проекту.
   await postTaskBroadcast(
     taskId,
     { type: "task:usage_updated", payload: { taskId, projectId, usage } },
@@ -187,6 +217,8 @@ export async function notifyTaskProgress(
   progress: Omit<TaskActivityProgress, "taskId">,
 ): Promise<void> {
   const payload: TaskActivityProgress = { taskId, ...progress };
+  // payload и context намеренно почти дублируются: payload уходит клиентам,
+  // context - только в лог, чтобы не раздувать логи полным объектом прогресса.
   await postTaskBroadcast(
     taskId,
     { type: "task:activity", payload },
@@ -194,8 +226,10 @@ export async function notifyTaskProgress(
   );
 }
 
-/** Read the task's current activity state and broadcast it as task:activity. */
+/** Читает текущее состояние активности задачи и рассылает его как task:activity. */
 export function broadcastTaskActivityProgress(taskId: string): void {
+  // Синхронная обёртка: читает текущее состояние из БД и отправляет асинхронно,
+  // не заставляя вызывающих стадий ждать сеть.
   const task = findTaskById(taskId);
   void notifyTaskProgress(taskId, {
     lastActivityAt: task?.lastActivityAt ?? null,

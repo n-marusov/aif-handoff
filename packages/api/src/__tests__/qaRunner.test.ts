@@ -17,7 +17,7 @@ vi.mock("@aif/data", () => ({
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));
 
-// Keep broadcast / payload conversion as no-ops so the runner can be tested in isolation.
+// Держим broadcast / конвертацию payload заглушками (no-op), чтобы раннер тестировался изолированно.
 vi.mock("../ws.js", () => ({
   broadcast: vi.fn(),
 }));
@@ -74,7 +74,7 @@ describe("runQaQuery", () => {
     mockGetProjectConfig.mockReset();
     root = mkdtempSync(join(tmpdir(), "qa-runner-test-"));
     mockGetProjectConfig.mockReturnValue({ paths: { qa: ".ai-factory/qa/" } });
-    // findTaskById returns the same baseline task on every call (running/done/error reads).
+    // findTaskById отдаёт одну и ту же базовую задачу при каждом вызове (чтения running/done/error).
     mockFindTaskById.mockReturnValue({ id: "t1", branchName: BRANCH, qaStatus: "idle" });
     mockRunApiRuntimeOneShot.mockResolvedValue({ result: { outputText: "ok" }, context: {} });
   });
@@ -105,8 +105,8 @@ describe("runQaQuery", () => {
 
   it("falls back to the current git branch when task has no branchName", async () => {
     mockFindTaskById.mockReturnValue({ id: "t1", branchName: null, qaStatus: "idle" });
-    // executionRoot is a plain tmpdir (no git work tree), so the skill-mirrored
-    // `git branch --show-current` fallback resolves to "" → the "branch" slug.
+    // executionRoot — обычный tmpdir (без рабочего дерева git), поэтому резервный путь
+    // `git branch --show-current`, зеркалящий скилл, разрешается в "" → slug "branch".
     const slug = computeQaBranchSlug("", root);
     writeArtifacts(join(root, ".ai-factory/qa", slug));
     const res = await runQaQuery({ projectId: "p1", taskId: "t1", executionRoot: root });
@@ -126,9 +126,9 @@ describe("runQaQuery", () => {
   });
 
   it("does NOT set qaStatus running — the caller claims that slot atomically", async () => {
-    // The running transition moved to routes/tasks startQaRun (tryStartQaRun) so
-    // concurrent starts are serialized at the DB. The worker only finalizes the
-    // run, so it must never write qaStatus:"running" itself.
+    // Переход running переехал в routes/tasks startQaRun (tryStartQaRun), чтобы
+    // конкурентные старты сериализовались на уровне БД. Воркер лишь завершает
+    // прогон, поэтому сам никогда не должен писать qaStatus:"running".
     const slug = computeQaBranchSlug(BRANCH, root);
     writeArtifacts(join(root, ".ai-factory/qa", slug));
     await runQaQuery({ projectId: "p1", taskId: "t1", executionRoot: root });
@@ -163,14 +163,14 @@ describe("runQaQuery", () => {
     const dir = join(root, ".ai-factory/qa", slug);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "change-summary.md"), "# only summary");
-    // test-plan.md and test-cases.md intentionally missing
+    // test-plan.md и test-cases.md намеренно отсутствуют
     const res = await runQaQuery({ projectId: "p1", taskId: "t1", executionRoot: root });
     expect(res.ok).toBe(false);
-    // Actionable error names every missing file and only those.
+    // Конкретная ошибка называет каждый отсутствующий файл и только их.
     expect(res.error).toContain("test-plan.md");
     expect(res.error).toContain("test-cases.md");
     expect(res.error).not.toContain("change-summary.md");
-    // Persists the error status and never claims "done".
+    // Сохраняет статус ошибки и никогда не заявляет "done".
     expect(mockUpdateTask).toHaveBeenCalledWith("t1", { qaStatus: "error" });
     expect(mockUpdateTask.mock.calls.some((c) => c[1]?.qaStatus === "done")).toBe(false);
   });
@@ -184,16 +184,16 @@ describe("runQaQuery", () => {
   });
 
   it("never throws when slug resolution fails on a stale executionRoot", async () => {
-    // A non-existent root makes computeQaBranchSlug's `git hash-object`
-    // (execFileSync with a missing cwd) throw synchronously — that throw used to
-    // escape before the try block (e.g. a deleted worktree). It must now be
-    // caught, persisted as qaStatus:"error", and returned as ok:false.
-    const staleRoot = join(root, "deleted-worktree"); // never created → cwd missing
+    // Несуществующий корень заставляет `git hash-object` в computeQaBranchSlug
+    // (execFileSync с отсутствующим cwd) бросать синхронно — раньше этот бросок
+    // вылетал до try-блока (например, удалённый worktree). Теперь он должен
+    // ловиться, сохраняться как qaStatus:"error" и возвращаться как ok:false.
+    const staleRoot = join(root, "deleted-worktree"); // никогда не создаётся → cwd отсутствует
     const res = await runQaQuery({ projectId: "p1", taskId: "t1", executionRoot: staleRoot });
     expect(res.ok).toBe(false);
     expect(res.error).toBeTruthy();
     expect(mockUpdateTask).toHaveBeenCalledWith("t1", { qaStatus: "error" });
-    // Resolution failed first, so the runtime is never invoked.
+    // Разрешение упало первым, поэтому runtime никогда не вызывается.
     expect(mockRunApiRuntimeOneShot).not.toHaveBeenCalled();
   });
 });

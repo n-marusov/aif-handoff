@@ -9,8 +9,8 @@ vi.mock("@aif/data", () => ({
   findProjectByTaskId: findProjectByTaskIdMock,
 }));
 
-// Mock getEnv before importing the module under test.
-// Also mock sendTelegramNotification as a no-op since the top-level mock has no tokens.
+// Мокируем getEnv до импорта тестируемого модуля.
+// Также мокируем sendTelegramNotification как no-op: у верхнего мока нет токенов.
 vi.mock("@aif/shared", async () => {
   const actual = await vi.importActual<typeof import("@aif/shared")>("@aif/shared");
   return {
@@ -20,7 +20,7 @@ vi.mock("@aif/shared", async () => {
       TELEGRAM_BOT_TOKEN: undefined,
       TELEGRAM_USER_ID: undefined,
     }),
-    // No-op: tokens are not configured in this mock scope
+    // No-op: токены не настроены в этой области мока
     sendTelegramNotification: sendTelegramNotificationMock,
   };
 });
@@ -128,7 +128,7 @@ describe("broadcastTaskChange with Telegram", () => {
       return {
         ...actual,
         getEnv: () => tgEnv,
-        // Re-bind so sendTelegramNotification sees the mocked env tokens
+        // Перепривязываем, чтобы sendTelegramNotification видел токены из мокированного окружения
         sendTelegramNotification: async (options: {
           taskId: string;
           projectName?: string;
@@ -173,10 +173,10 @@ describe("broadcastTaskChange with Telegram", () => {
       toStatus: "plan_ready",
     });
 
-    // Wait for fire-and-forget Telegram call
+    // Ждём fire-and-forget вызов Telegram
     await new Promise((r) => setTimeout(r, 50));
 
-    // First call is broadcast, second is Telegram
+    // Первый вызов — broadcast, второй — Telegram
     expect(calls.length).toBe(2);
     expect(calls[0].url).toBe("http://localhost:3009/tasks/task-abc/broadcast");
     expect(calls[1].url).toContain("api.telegram.org/bottest-bot-token/sendMessage");
@@ -242,7 +242,7 @@ describe("broadcastTaskChange with Telegram", () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    // Only broadcast call, no Telegram
+    // Только вызов broadcast, без Telegram
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch.mock.calls[0][0]).toContain("/broadcast");
   });
@@ -272,7 +272,7 @@ describe("broadcastTaskChange with Telegram", () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    // Only broadcast call, no Telegram
+    // Только вызов broadcast, без Telegram
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -280,7 +280,7 @@ describe("broadcastTaskChange with Telegram", () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", mockFetch);
 
-    // Uses the top-level mock (no tokens)
+    // Используется верхний мок (без токенов)
     await broadcastTaskChange("task-abc", "task:moved", {
       fromStatus: "planning",
       toStatus: "plan_ready",
@@ -288,7 +288,7 @@ describe("broadcastTaskChange with Telegram", () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    // Only broadcast, no Telegram
+    // Только broadcast, без Telegram
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

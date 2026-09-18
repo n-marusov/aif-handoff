@@ -11,8 +11,8 @@ vi.mock("@/hooks/useRuntimeProfiles", () => ({
   useRuntimeModels: () => mockRuntimeModels,
 }));
 
-// CodexLoginCard depends on React Query; the form tests don't provide a
-// QueryClient, so we stub the card to an empty render.
+// CodexLoginCard зависит от React Query; тесты формы не предоставляют
+// QueryClient, поэтому глушим карточку пустым рендером.
 vi.mock("@/components/settings/CodexLoginCard", () => ({
   CodexLoginCard: () => null,
 }));

@@ -207,7 +207,7 @@ describe("runPlanReviewPublisher", () => {
     const { rootPath } = createGitTestRoot("plan-review-dirty-");
     seedTask(rootPath, "task", { withGithub: true });
     writePlan(rootPath);
-    // Dirty product file outside the plan (README.md exists from the git root).
+    // Грязный продуктовый файл вне плана (README.md существует от git-корня).
     writeFileSync(join(rootPath, "README.md"), "# dirty product change\n", { flag: "a" });
 
     await expect(runPlanReviewPublisher("task", rootPath)).rejects.toThrow();

@@ -2,21 +2,21 @@ import { describe, it, expect } from "vitest";
 import type { TaskListItem } from "@aif/shared/browser";
 
 /**
- * Parity guard for the TaskListItem projection.
+ * Страж паритетности проекции TaskListItem.
  *
- * TaskListItem is a lightweight projection of Task that powers the board/list
- * rendering (Board, TaskCard, TaskListTable). If a field that those components
- * consume is later dropped from TaskListItem, the board silently breaks at
- * runtime even though TypeScript stays quiet (the consumer reads `undefined`).
+ * TaskListItem — облегчённая проекция Task для рендера доски/списка (Board,
+ * TaskCard, TaskListTable). Если поле, потребляемое этими компонентами, позже
+ * исчезнет из TaskListItem, доска молча сломается в рантайме, хотя TypeScript
+ * будет молчать (потребитель читает `undefined`).
  *
- * This test pins the set of fields the board needs and asserts they are all
- * present on TaskListItem. Adding a board-consumed field without extending
- * TaskListItem fails this test explicitly.
+ * Этот тест закрепляет набор полей, нужный доске, и проверяет их наличие на
+ * TaskListItem. Новое поле, потребляемое доской, без расширения TaskListItem
+ * явно валит этот тест.
  */
 
-// The fields the board/card/list-table read off a task on `main`. Sourced from
-// TaskCard.tsx + Board.tsx + TaskListTable.tsx usage. Keep in sync when the
-// board starts consuming a new field.
+// Поля, которые доска/карточка/таблица читают из задачи на `main`. Источник —
+// использование в TaskCard.tsx + Board.tsx + TaskListTable.tsx. Синхронизируй,
+// когда доска начнёт потреблять новое поле.
 const BOARD_CONSUMED_FIELDS = [
   "id",
   "projectId",
@@ -40,7 +40,7 @@ const BOARD_CONSUMED_FIELDS = [
   "scheduledAt",
   "roadmapAlias",
   "hasPlan",
-  // Runtime-budget plaque for blocked_external (feature-gated by usageLimits).
+  // Плашка runtime-бюджета для blocked_external (гейтится флагом usageLimits).
   "runtimeLimitSnapshot",
   "runtimeLimitUpdatedAt",
   "updatedAt",
@@ -49,7 +49,7 @@ const BOARD_CONSUMED_FIELDS = [
 
 describe("TaskListItem parity with board consumers", () => {
   it("every field the board consumes is present on TaskListItem", () => {
-    // Fixture with all fields set so keys() is exhaustive.
+    // Фикстура со всеми полями, чтобы keys() был исчерпывающим.
     const fixture: TaskListItem = {
       id: "t1",
       projectId: "p1",

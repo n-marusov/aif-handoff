@@ -36,7 +36,7 @@ describe("getProjectConfig", () => {
     );
     const config = getProjectConfig(projectRoot);
     expect(config.paths.qa).toBe("custom/qa-out/");
-    // Non-overridden paths keep defaults
+    // Не переопределённые пути сохраняют значения по умолчанию
     expect(config.paths.plan).toBe(".ai-factory/PLAN.md");
   });
 
@@ -49,7 +49,7 @@ describe("getProjectConfig", () => {
     expect(config.paths.plan).toBe("custom/PLAN.md");
     expect(config.paths.fix_plan).toBe("custom/FIX.md");
     expect(config.paths.roadmap).toBe("custom/ROADMAP.md");
-    // Non-overridden paths keep defaults
+    // Не переопределённые пути сохраняют значения по умолчанию
     expect(config.paths.plans).toBe(".ai-factory/plans/");
   });
 
@@ -61,7 +61,7 @@ describe("getProjectConfig", () => {
     const config = getProjectConfig(projectRoot);
     expect(config.workflow.plan_id_format).toBe("uuid");
     expect(config.workflow.verify_mode).toBe("strict");
-    // Non-overridden keeps defaults
+    // Не переопределённые поля сохраняют значения по умолчанию
     expect(config.workflow.auto_create_dirs).toBe(true);
   });
 
@@ -72,14 +72,14 @@ describe("getProjectConfig", () => {
     );
     const first = getProjectConfig(projectRoot);
     const second = getProjectConfig(projectRoot);
-    expect(first).toBe(second); // same object reference = cache hit
+    expect(first).toBe(second); // тот же объект по ссылке = попадание в кэш
     expect(first.paths.plan).toBe("cached/PLAN.md");
   });
 
   it("handles empty config.yaml gracefully", () => {
     writeFileSync(join(projectRoot, ".ai-factory", "config.yaml"), "");
     const config = getProjectConfig(projectRoot);
-    // All defaults
+    // Всё по умолчанию
     expect(config.paths.plan).toBe(".ai-factory/PLAN.md");
     expect(config.workflow.plan_id_format).toBe("slug");
   });
@@ -87,7 +87,7 @@ describe("getProjectConfig", () => {
   it("handles partial config with only some sections", () => {
     writeFileSync(join(projectRoot, ".ai-factory", "config.yaml"), "language:\n  ui: ru\n");
     const config = getProjectConfig(projectRoot);
-    // paths and workflow untouched
+    // paths и workflow не затронуты
     expect(config.paths.plan).toBe(".ai-factory/PLAN.md");
     expect(config.workflow.verify_mode).toBe("normal");
   });
@@ -108,7 +108,7 @@ describe("getProjectConfig", () => {
     );
     const config = getProjectConfig(projectRoot);
     expect(config.git.skip_push_after_commit).toBe(true);
-    // Other git defaults preserved
+    // Остальные значения git по умолчанию сохранены
     expect(config.git.enabled).toBe(true);
     expect(config.git.base_branch).toBe("main");
   });
@@ -193,7 +193,7 @@ describe("getProjectConfig", () => {
       'language:\n  artifacts: "not a tag"\n  ui: "русский"\n',
     );
     const config = getProjectConfig(projectRoot);
-    // Garbage values must not reach the directive builder verbatim.
+    // Мусорные значения не должны попадать в построитель директив без изменений.
     expect(config.language.artifacts).toBe("en");
     expect(config.language.ui).toBe("en");
   });
@@ -221,7 +221,7 @@ describe("getProjectConfig", () => {
     const first = getProjectConfig(projectRoot);
     expect(first.paths.plan).toBe("v1/PLAN.md");
 
-    // Update the file and clear cache
+    // Обновляем файл и сбрасываем кэш
     writeFileSync(join(projectRoot, ".ai-factory", "config.yaml"), "paths:\n  plan: v2/PLAN.md\n");
     clearProjectConfigCache(projectRoot);
     const second = getProjectConfig(projectRoot);

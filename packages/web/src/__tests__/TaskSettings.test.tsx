@@ -129,9 +129,9 @@ describe("TaskSettings", () => {
     render(<TaskSettings task={mockTask} onSave={onSave} />);
     fireEvent.click(screen.getByText("Settings"));
 
-    // Toggle autoMode off
+    // Выключаем autoMode
     fireEvent.click(screen.getByLabelText("Auto mode"));
-    // Toggle skipReview on
+    // Включаем skipReview
     fireEvent.click(screen.getByLabelText("Skip review"));
 
     fireEvent.click(screen.getByText("Save"));
@@ -146,10 +146,10 @@ describe("TaskSettings", () => {
     render(<TaskSettings task={mockTask} onSave={onSave} />);
     fireEvent.click(screen.getByText("Settings"));
 
-    // Switching to Fast auto-flips flags to fast-mode defaults
+    // Переключение на Fast автоматически выставляет флаги в дефолты fast-режима
     // (skipReview=true, planDocs=false, planTests=false).
     fireEvent.click(screen.getByLabelText("Fast"));
-    // Re-enable docs and tests manually.
+    // Вручную заново включаем docs и tests.
     fireEvent.click(screen.getByLabelText("Docs"));
     fireEvent.click(screen.getByLabelText("Tests"));
     fireEvent.change(screen.getByPlaceholderText(".ai-factory/PLAN.md"), {
@@ -177,7 +177,7 @@ describe("TaskSettings", () => {
     };
     render(<TaskSettings task={savedTask} onSave={onSave} />);
     fireEvent.click(screen.getByText("Settings"));
-    // No Save button — nothing changed on mount.
+    // Кнопки Save нет — при монтировании ничего не изменилось.
     expect(screen.queryByText("Save")).toBeNull();
   });
 
@@ -223,12 +223,12 @@ describe("TaskSettings", () => {
     render(<TaskSettings task={mockTask} onSave={onSave} />);
     fireEvent.click(screen.getByText("Settings"));
 
-    // Make a change
+    // Вносим изменение
     fireEvent.click(screen.getByLabelText("Auto mode"));
-    // Close
+    // Закрытие
     fireEvent.click(screen.getByText("Close"));
 
-    // Should show collapsed button again
+    // Свёрнутая кнопка должна показаться снова
     expect(screen.getByText("Settings")).toBeDefined();
     expect(screen.queryByText("Auto mode")).toBeNull();
   });
@@ -273,7 +273,7 @@ describe("TaskSettings", () => {
     render(<TaskSettings task={taskWithRuntime} onSave={onSave} />);
     fireEvent.click(screen.getByText("Settings"));
 
-    // Panel should already be open
+    // Панель должна быть уже открыта
     expect(screen.getByText("Runtime profile")).toBeDefined();
   });
 
@@ -359,7 +359,7 @@ describe("TaskSettings", () => {
       expect(onSave).toHaveBeenCalledTimes(1);
       const payload = onSave.mock.calls[0][0];
       expect(typeof payload.scheduledAt).toBe("string");
-      // Local → UTC ISO conversion produces a Z-string
+      // Конвертация Local → UTC ISO даёт строку с Z
       expect(payload.scheduledAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
       expect(new Date(payload.scheduledAt).getTime()).toBe(new Date(futureLocal).getTime());
     });
@@ -381,7 +381,7 @@ describe("TaskSettings", () => {
       const high = { ...mockTask, priority: 3 };
       render(<TaskSettings task={high} onSave={onSave} />);
       fireEvent.click(screen.getByText("Settings"));
-      // Custom Select shows the selected option's label inside a <span>
+      // Кастомный Select показывает метку выбранной опции внутри <span>
       expect(screen.getAllByText("High").length).toBeGreaterThan(0);
     });
 
@@ -389,9 +389,9 @@ describe("TaskSettings", () => {
       render(<TaskSettings task={mockTask} onSave={onSave} />);
       fireEvent.click(screen.getByText("Settings"));
 
-      // Open the Select (the trigger button shows the current label)
+      // Открываем Select (кнопка-триггер показывает текущую метку)
       fireEvent.click(screen.getByText("None"));
-      // Click the "Urgent" option
+      // Кликаем опцию "Urgent"
       fireEvent.click(screen.getByText("Urgent"));
       fireEvent.click(screen.getByText("Save"));
 

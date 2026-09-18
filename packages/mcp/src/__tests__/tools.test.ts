@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb } from "@aif/shared/server";
 import { projects } from "@aif/shared";
 
-// Set up test DB before importing tools
+// Готовим тестовую БД до импорта инструментов
 const testDb = { current: createTestDb() };
 vi.mock("@aif/shared/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared/server")>();
@@ -12,7 +12,7 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   };
 });
 
-// Mock env to avoid shared env validation
+// Мокируем env, чтобы избежать валидации общего окружения
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {
@@ -216,7 +216,7 @@ describe("MCP tools", () => {
     });
   });
 
-  // ── syncStatus conflict resolver ──────────────────────────
+  // ── разрешение конфликтов syncStatus ─────────────────────
 
   describe("conflictResolver", () => {
     it("source wins when newer", () => {
@@ -236,7 +236,7 @@ describe("MCP tools", () => {
         targetTimestamp: "2026-01-02T00:00:00.000Z",
         field: "status",
       });
-      // Older-but-valid source should lose — no fallback applied
+      // Более старый, но валидный источник должен проиграть — резерв не применён
       expect(result.applied).toBe(false);
       expect(result.conflict).toBe(true);
       expect(result.winner).toBe("target");
@@ -248,7 +248,7 @@ describe("MCP tools", () => {
         targetTimestamp: "2026-01-02T00:00:00.000Z",
         field: "status",
       });
-      // NaN fallback: replaced with Date.now(), which is newer
+      // Резерв для NaN: заменено на Date.now(), которое свежее
       expect(result.applied).toBe(true);
       expect(result.conflict).toBe(false);
       expect(result.winner).toBe("source");
@@ -260,7 +260,7 @@ describe("MCP tools", () => {
         targetTimestamp: "2026-01-02T00:00:00.000Z",
         field: "status",
       });
-      // Epoch-zero fallback: replaced with Date.now(), which is newer
+      // Резерв для нулевой эпохи: заменено на Date.now(), которое свежее
       expect(result.applied).toBe(true);
       expect(result.conflict).toBe(false);
       expect(result.winner).toBe("source");
@@ -277,14 +277,14 @@ describe("MCP tools", () => {
     });
   });
 
-  // ── syncStatus flow ───────────────────────────────────────
+  // ── поток syncStatus ─────────────────────────────────────
 
   describe("syncStatus flow", () => {
     it("applies status change when source is newer", () => {
       const task = seedTask();
       expect(task!.status).toBe("backlog");
 
-      // Set updatedAt to old time
+      // Выставляем updatedAt на старое время
       setTaskFields(task!.id, { updatedAt: "2026-01-01T00:00:00.000Z" });
 
       const resolution = resolveConflict({
@@ -315,7 +315,7 @@ describe("MCP tools", () => {
 
       updateTaskStatus(task!.id, "planning");
       touchLastSyncedAt(task!.id);
-      // Simulate what syncStatus does with paused flag
+      // Имитируем поведение syncStatus с флагом paused
       setTaskFields(task!.id, { paused: true });
 
       const updated = findTaskById(task!.id);
@@ -348,13 +348,13 @@ describe("MCP tools", () => {
         targetTimestamp: "2026-01-02T00:00:00.000Z",
         field: "status",
       });
-      // Older-but-valid source loses — no fallback applied
+      // Более старый, но валидный источник проигрывает — резерв не применён
       expect(resolution.conflict).toBe(true);
       expect(resolution.applied).toBe(false);
     });
   });
 
-  // ── pushPlan flow ─────────────────────────────────────────
+  // ── поток pushPlan ───────────────────────────────────────
 
   describe("pushPlan flow", () => {
     it("updates task plan field", () => {
@@ -450,7 +450,7 @@ describe("MCP tools", () => {
     });
   });
 
-  // ── getTask field selection ───────────────────────────────
+  // ── getTask: выбор полей ─────────────────────────────────
 
   describe("getTask field selection", () => {
     it("returns only requested fields plus id", () => {
@@ -536,11 +536,11 @@ describe("MCP tools", () => {
     });
   });
 
-  // ── Integration: full create → search → update → sync flow ─
+  // ── Интеграция: полный поток create → search → update → sync ─
 
   describe("integration flow", () => {
     it("create → search → update → sync status", () => {
-      // 1. Create
+      // 1. Создание
       const task = createTask({
         projectId: "proj-1",
         title: "Integration Test Task",
@@ -549,12 +549,12 @@ describe("MCP tools", () => {
       });
       expect(task).toBeDefined();
 
-      // 2. Search
+      // 2. Поиск
       const searchResults = searchTasks("Integration");
       expect(searchResults).toHaveLength(1);
       expect(searchResults[0].id).toBe(task!.id);
 
-      // 3. Update
+      // 3. Обновление
       setTaskFields(task!.id, {
         plan: "## Plan\nDo things",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -562,7 +562,7 @@ describe("MCP tools", () => {
       const withPlan = findTaskById(task!.id);
       expect(withPlan!.plan).toContain("Plan");
 
-      // 4. Sync status (source newer)
+      // 4. Синхронизация статуса (источник новее)
       const resolution = resolveConflict({
         sourceTimestamp: "2026-01-02T00:00:00.000Z",
         targetTimestamp: withPlan!.updatedAt,

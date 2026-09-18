@@ -100,7 +100,7 @@ export function register(server: McpServer, context: ToolContext): void {
         "DEBUG [mcp:tool:*] handoff_create_task called with runtime metadata",
       );
 
-      // Validate project exists
+      // Проверяет, что проект существует
       const project = findProjectById(args.projectId);
       if (!project) {
         log.error({ projectId: args.projectId }, "Project not found for task creation");

@@ -1,5 +1,5 @@
-// stdioEnv MUST be imported first — it forces logs to stderr before the
-// @aif/shared logger initialises, keeping stdout clean for stdio JSON-RPC.
+// stdioEnv обязан импортироваться первым — он направляет логи в stderr до
+// инициализации логгера @aif/shared, оставляя stdout чистым для stdio JSON-RPC.
 import "./stdioEnv.js";
 import { createServer } from "node:http";
 import { logger } from "@aif/shared";
@@ -29,9 +29,9 @@ async function startHttp(env: McpEnv) {
     );
   });
 
-  // Graceful shutdown so the port is freed on Ctrl+C / tsx-watch reload.
-  // Exit synchronously — tsx watch + turbo race on Ctrl+C and complain
-  // about "Previous process hasn't exited yet" when close is async.
+  // Корректное завершение, чтобы порт освобождался при Ctrl+C / перезагрузке tsx-watch.
+  // Выходим синхронно — tsx watch + turbo конфликтуют при Ctrl+C и ругаются
+  // «Previous process hasn't exited yet», если закрытие асинхронное.
   let shuttingDown = false;
   const onShutdown = (signal: string) => {
     if (shuttingDown) return;
@@ -70,6 +70,6 @@ main().catch((error) => {
   process.exit(1);
 });
 
-// Public surface for consumers of the @aif/mcp package.
+// Публичная поверхность для потребителей пакета @aif/mcp.
 export { loadMcpEnv, RateLimiter, toMcpError, rateLimitError, validationError } from "./server.js";
 export type { ToolContext, ToolRegistrar } from "./server.js";

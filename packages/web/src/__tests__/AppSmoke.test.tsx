@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { AuthSessionState } from "@aif/shared/browser";
 
-// Stub network-dependent hooks so the component tree renders without real API calls.
+// Заглушаем сетевые хуки, чтобы дерево компонентов рендерилось без реальных API-запросов.
 
 vi.mock("@/hooks/useWebSocket", () => ({
   useWebSocket: vi.fn(),

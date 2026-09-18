@@ -1,3 +1,19 @@
+/**
+ * Планировщик задачи: собирает промпт планирования, готовит execution root
+ * (worktree или общий чекаут с feature-веткой) и разбирает артефакт плана.
+ *
+ * Почему модуль устроен именно так:
+ *  - Планирование - единственный этап, который мутирует git-состояние проекта
+ *    (создание или восстановление ветки, worktree), поэтому вся git-работа идёт
+ *    под per-project локом и завершается проверкой assertCurrentBranch.
+ *  - Источник истины по ветке - task.branchName в БД, а не текущий HEAD: любой
+ *    повторный запуск обязан вернуться на сохранённую ветку или упасть явно.
+ *  - Артефакт плана читается с диска, а не берётся из ответа агента: агент может
+ *    напечатать путь, но не содержимое, и диск - единственный надёжный источник.
+ *  - Три режима запуска (fix, skills-mode, native subagents) различаются только
+ *    способом вызова; разбор результата и persist общие, чтобы они не разъезжались.
+ */
+
 import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -23,13 +39,22 @@ import { withProjectGitLock } from "../gitOperationLock.js";
 import { resolveIssueBranchName, type IssueProvider } from "../gitConventions.js";
 import { logActivity } from "../hooks.js";
 
+// Имя логгера совпадает с именем модуля: по нему фильтруются логи этапа планирования.
 const log = logger("planner");
+// Имя должно совпадать с agent definition в репозитории: при расхождении рантайм
+// не найдёт определение и откатится на fallback slash-команду.
 const AGENT_NAME = "plan-coordinator";
+// Fix-задачи планируются не агентом, а скиллом aif-fix в режиме --plan-first.
 const FIX_SKILL_NAME = "aif-fix";
 
-/** How the planner provisions the execution root for a task. */
+// Способ получить рабочую копию: изолированный worktree, общий чекаут с
+// feature-веткой или последовательный fix-поток без создания ветки.
+
+/** Как планировщик подготавливает execution root для задачи. */
 export type WorktreeProvisionMode = "worktree" | "in_tree" | "serial_fix";
 
+// Входные данные вынесены в отдельный DTO: решение проверяется юнит-тестами без
+// реального git и без чтения env.
 export interface ShouldProvisionWorktreeInput {
   hasVcsIssue: boolean;
   flagEnabled: boolean;
@@ -38,27 +63,37 @@ export interface ShouldProvisionWorktreeInput {
 }
 
 /**
- * Decide whether a task is provisioned into an isolated task worktree.
+ * Решает, подготавливается ли задача в изолированном рабочем дереве задачи.
  *
- * The rollout flag (`AIF_TASK_WORKTREES_ENABLED`) gates BOTH issue-linked and
- * parallel projects: while it is off, even VCS-issue tasks stay in-tree on a
- * shared checkout with a deterministic issue branch, so the flag is a real
- * kill-switch. Issue tasks do not additionally require `parallelEnabled` —
- * their isolation is required for correctness (PR/MR publication), not only
- * for throughput.
+ * Rollout-флаг (`AIF_TASK_WORKTREES_ENABLED`) гейтит ОБА случая: задачи с
+ * issue и параллельные проекты: пока он выключен, даже задачи VCS-issue остаются
+ * в общем чекауте с детерминированной issue-веткой, поэтому флаг — настоящий
+ * kill-switch. Задачам с issue дополнительно не нужен `parallelEnabled` —
+ * их изоляция обязательна для корректности (публикация PR/MR), а не только
+ * для производительности.
  */
 export function shouldProvisionWorktree(input: ShouldProvisionWorktreeInput): boolean {
+  // Kill-switch проверяется первым: проект без поддержки worktree не должен
+  // ломаться из-за включённого флага, поэтому остальные условия не важны.
   if (!input.flagEnabled || !input.supportsTaskWorktrees) return false;
+  // Задача с внешним issue изолируется всегда, не дожидаясь параллельного режима:
+  // её изоляция нужна для корректности публикации PR/MR, а не для скорости.
   if (input.hasVcsIssue) return true;
   return input.parallelEnabled;
 }
 
+// Ответ агента - свободный текст, и путь к плану в нём не гарантирован. Это
+// единственное место, где путь вылавливается эвристикой: порядок шаблонов задаёт
+// приоритет, поэтому более специфичный вариант "plan written to" идёт первым.
 function extractPlanPathFromResult(resultText: string): string | null {
+  // Второй шаблон нужен для скиллов, которые сообщают "saved to".
   const patterns = [/plan written to\s+([^\n]+)/i, /saved to\s+([^\n]+)/i];
 
   for (const pattern of patterns) {
     const match = resultText.match(pattern);
     if (!match) continue;
+    // Захват идёт до конца строки, поэтому в путь попадает markdown-обёртка;
+    // нормализация нужна до того, как результат вернётся вызывающему.
     const normalized = normalizeExtractedPlanPath(match[1]);
     if (normalized) return normalized;
   }
@@ -66,21 +101,32 @@ function extractPlanPathFromResult(resultText: string): string | null {
   return null;
 }
 
+// Захваченный хвост строки обычно содержит markdown-обёртку и знаки препинания;
+// без очистки resolve() получил бы путь, которого нет на диске.
 function normalizeExtractedPlanPath(pathText: string): string | null {
   const normalized = pathText
     .trim()
     .replace(/^[@`"'(\[]+/, "")
     .replace(/[)\].,`"']+$/, "")
     .trim();
+  // Пустая строка означает, что шаблон поймал только обёртку: это не путь, и
+  // вызывающий должен попробовать следующий шаблон.
   return normalized.length > 0 ? normalized : null;
 }
 
+// Дефолтный путь берётся из конфига проекта, а не из константы: у разных
+// проектов своя раскладка docs. Строка из одних @ или пробелов равнозначна
+// отсутствию пути.
 function normalizePlanPath(path: string | null | undefined, projectRoot: string): string {
   const defaultPlan = getProjectConfig(projectRoot).paths.plan;
   if (!path) return defaultPlan;
+  // Ведущая @ - синтаксис ссылки на файл в промпте; в самом пути она лишняя.
   return path.trim().replace(/^@+/, "") || defaultPlan;
 }
 
+// Различие между явным путём из задачи и дефолтным критично на следующем шаге:
+// при явном пути generic-фоллбэки запрещены, иначе план может быть прочитан из
+// чужого файла, лежащего в том же дереве.
 function isExplicitTaskPlanPath(
   customPlanPath: string | null | undefined,
   normalizedPlanPath: string,
@@ -89,6 +135,9 @@ function isExplicitTaskPlanPath(
   return Boolean(customPlanPath?.trim()) && normalizedPlanPath !== defaultPlanPath;
 }
 
+// Единая точка чтения артефакта плана с диска. Кандидаты упорядочены по доверию:
+// сначала канонический путь задачи, затем путь, названный агентом, затем
+// фоллбэки скиллов. Возвращается первый существующий непустой файл.
 function readPlanFromDisk(
   projectRoot: string,
   resultText: string,
@@ -98,19 +147,24 @@ function readPlanFromDisk(
 ): string | null {
   const cfg = getProjectConfig(projectRoot);
   const normalizedPlanPath = normalizePlanPath(customPlanPath, projectRoot);
+  // Для fix-задач канонический путь - fix_plan из конфига, а не путь задачи.
   const canonicalPlanPath = resolve(projectRoot, isFix ? cfg.paths.fix_plan : normalizedPlanPath);
+  // Эта ветка решает, допустимы ли вообще generic-фоллбэки, поэтому
+  // вычисляется заранее, до наполнения списка кандидатов.
   const explicitTaskPlanPath =
     !isFix && isExplicitTaskPlanPath(customPlanPath, normalizedPlanPath, cfg.paths.plan);
   const candidatePaths: string[] = [canonicalPlanPath];
   const pathFromResult = extractPlanPathFromResult(resultText);
   if (pathFromResult) {
+    // Абсолютный путь используется как есть, относительный трактуется от
+    // execution root: агент пишет его относительно своей рабочей копии.
     const resolved = pathFromResult.startsWith("/")
       ? pathFromResult
       : resolve(projectRoot, pathFromResult);
     candidatePaths.push(resolved);
   }
 
-  // Skill runs may write fallback paths even when the default @path is requested.
+  // Runы скилла могут писать запасные пути, даже когда запрошен дефолтный @path.
   if (isFix) {
     candidatePaths.push(resolve(projectRoot, "FIX_PLAN.md"));
   } else if (!explicitTaskPlanPath) {
@@ -129,11 +183,15 @@ function readPlanFromDisk(
     );
   }
 
+  // Один и тот же файл может попасть в список дважды (например, дефолтный путь
+  // совпал с путём из ответа); Set исключает повторное чтение.
   const seen = new Set<string>();
   for (const candidatePath of candidatePaths) {
     if (seen.has(candidatePath)) continue;
     seen.add(candidatePath);
     if (!existsSync(candidatePath)) continue;
+    // Файл, не изменённый во время текущего запуска, - это план прошлого прогона;
+    // принять его за результат значит молча вернуть устаревший план.
     if (minModifiedMs != null && statSync(candidatePath).mtimeMs < minModifiedMs) {
       log.warn(
         { planPath: candidatePath, minModifiedMs },
@@ -141,6 +199,8 @@ function readPlanFromDisk(
       );
       continue;
     }
+    // Пустой файл равнозначен отсутствующему: он не должен перетирать план,
+    // уже сохранённый в БД, поэтому проверка контента идёт до возврата.
     const content = readFileSync(candidatePath, "utf8").trim();
     if (content.length > 0) return content;
   }
@@ -148,6 +208,9 @@ function readPlanFromDisk(
   return null;
 }
 
+// Служебная строка вида "plan written to ..." - это транспортная метка, а не
+// часть плана, и в БД она попадать не должна. Если после очистки не осталось
+// ничего, возвращается исходный текст: лучше шумный результат, чем пустой.
 function normalizePlannerResult(resultText: string): string {
   const cleaned = resultText
     .replace(/^plan written to .*$/im, "")
@@ -157,6 +220,8 @@ function normalizePlannerResult(resultText: string): string {
   return cleaned.length > 0 ? cleaned : resultText.trim();
 }
 
+// Очистка устаревшего артефакта перед первым планированием: файл на диске мог
+// остаться от предыдущей жизни задачи на той же ветке и был бы принят за результат.
 function clearPlanFileBeforeFreshPlanning(input: {
   taskId: string;
   executionRoot: string;
@@ -165,10 +230,15 @@ function clearPlanFileBeforeFreshPlanning(input: {
   hasPlanReviewFeedback: boolean;
   isFix: boolean;
 }): void {
+  // Три случая, когда файл на диске - намеренный вход, а не мусор: fix-режим
+  // (работает со своим fix_plan), ревью-фидбек (нужен старый план как база правок)
+  // и уже сохранённый план в БД (репланнинг не должен стартовать с нуля).
   if (input.isFix || input.hasPlanReviewFeedback || input.hasPersistedPlan) return;
 
   const cfg = getProjectConfig(input.executionRoot);
   const canonicalPath = resolve(input.executionRoot, input.planPath);
+  // Generic-фоллбэки чистятся вместе с каноническим путём: скилл мог записать
+  // план именно туда, и тогда он будет найден при чтении с диска.
   const genericFallbackPaths = [
     resolve(input.executionRoot, cfg.paths.plan),
     resolve(input.executionRoot, "PLAN.md"),
@@ -192,6 +262,8 @@ function clearPlanFileBeforeFreshPlanning(input: {
         },
         "[FIX] Failed to delete pre-existing plan file before fresh planning",
       );
+      // Неудачное удаление блокирует этап вручную: продолжать с чужим планом на
+      // диске опаснее, чем остановиться и дать оператору разобраться.
       throw new StageManualBlockError(
         `Unable to prepare a fresh plan file for task ${input.taskId}. Inspect ${planFileOnDisk} and retry.`,
       );
@@ -199,6 +271,9 @@ function clearPlanFileBeforeFreshPlanning(input: {
   }
 }
 
+// В промпт попадает только последний комментарий: планировщику нужен актуальный
+// фидбек, а не накопленная история обсуждения, которая раздувает промпт и
+// провоцирует агента пересказывать уже учтённые замечания.
 function formatCommentsForPrompt(
   comments: Array<{
     author: "human" | "agent";
@@ -207,15 +282,21 @@ function formatCommentsForPrompt(
     createdAt: string;
   }>,
 ): string {
+  // Явная заглушка вместо пустого блока: агент должен видеть, что комментариев
+  // нет, а не догадываться об этом по отсутствию секции.
   if (comments.length === 0) return "No user comments were provided.";
 
   const latest = comments.slice(-1);
   return latest
     .map((comment, index) => {
       const formatted = formatAttachmentsForPrompt(comment.attachments);
+      // Форматтер вложений возвращает фразу-заглушку для пустого списка; внутри
+      // блока вложений она читается как мусор, поэтому подменяется на none.
       const attachmentLines =
         formatted === "No task attachments were provided." ? "    none" : formatted;
 
+      // Нумерованный заголовок с датой и автором нужен, чтобы агент мог сослаться
+      // на источник правки и не смешивал людей с агентами.
       return [
         `${index + 1}. [${comment.createdAt}] ${comment.author}`,
         `   message: ${comment.message}`,
@@ -226,34 +307,48 @@ function formatCommentsForPrompt(
     .join("\n\n");
 }
 
+// Контекст задачи передаётся как JSON-строка в аргументе команды: так кавычки и
+// переводы строк из описания задачи не ломают разбор slash-команды.
 function buildFixCommandText(taskContext: string): string {
   return `/aif-fix --plan-first ${JSON.stringify(taskContext)}`;
 }
 
+// Точка входа этапа планирования. Побочные эффекты: создание или восстановление
+// ветки либо worktree, запись branchName/worktreePath в БД и persist плана.
+// Функция ничего не возвращает - координатор читает готовый план из БД.
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
   const task = findTaskById(taskId);
+  // Сортировка по времени, а не по id: промпт использует последний комментарий,
+  // и порядок не должен зависеть от того, как БД вернула строки.
   const comments = listTaskComments(taskId).sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
 
   if (!task) {
+    // Задача могла быть удалена между постановкой в очередь и запуском: это
+    // фатальная ошибка этапа, а не повод для автоматического повтора.
     log.error({ taskId }, "Task not found for planning");
     throw new Error(`Task ${taskId} not found`);
   }
 
+  // Три режима исполнения разводятся двумя флагами: fix всегда идёт через скилл,
+  // задача без субагентов - через slash-команду aif-plan, остальные - через агента.
   const useSubagents = task.useSubagents;
   const executionName = task.isFix ? FIX_SKILL_NAME : useSubagents ? AGENT_NAME : "aif-plan";
   log.info({ taskId, title: task.title, isFix: task.isFix }, "Starting planning flow");
   const project = findProjectById(task.projectId);
+  // Бюджет - настройка проекта; null означает отсутствие ограничения.
   const plannerBudget = project?.plannerMaxBudgetUsd ?? null;
+  // Если задача уже привязана к worktree, план пишется туда, а не в корень проекта;
+  // корень остаётся запасным вариантом для in-tree прогонов.
   let executionRoot = task.worktreePath ?? projectRoot;
 
   const taskAttachmentsForPrompt = formatAttachmentsForPrompt(task.attachments);
   const commentsForPrompt = formatCommentsForPrompt(comments);
 
-  // VCS plan-review feedback (GitHub review body / GitLab MR notes) is a
-  // first-class replanning input: when the published plan PR/MR was rejected,
-  // the planner must revise the same plan addressing the reviewer's comments.
+  // Обратная связь VCS plan-review (тело review GitHub / заметки MR GitLab) —
+  // полноправный вход перепланирования: если опубликованный PR/MR плана отклонён,
+  // planner обязан пересмотреть тот же план с учётом комментариев ревьюера.
   const planReviewFeedback = task.planReviewFeedback?.trim();
   if (planReviewFeedback) {
     log.debug(
@@ -265,29 +360,38 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     ? `\nVCS plan review feedback (address every point in the revised plan):\n${planReviewFeedback}`
     : "";
 
+  // Значения уходят в промпт строками: скилл aif-plan ожидает текстовые true/false
+  // и имя режима, а не булевы значения.
   const plannerMode = task.plannerMode || "full";
+  // Нормализация идёт от текущего executionRoot: worktree для задачи может быть
+  // выделен позже, поэтому здесь получается относительный путь, а resolve
+  // выполняется уже от финального корня.
   const planPath = normalizePlanPath(task.planPath, executionRoot);
   const planDocs = task.planDocs ? "true" : "false";
   const planTests = task.planTests ? "true" : "false";
 
-  // Deterministic branch handling. Two contracts, applied in order:
+  // Детерминированная работа с веткой. Два контракта, применяются по порядку:
   //
-  //  1. RESTORE for ANY bound non-fix task — runs regardless of plannerMode
-  //     (full or fast). `task.branchName` is the source-of-truth: once a
-  //     prior run persisted it, every subsequent stage MUST land on it or
-  //     fail loud. A replan triggered with mode=fast (manual replanning,
-  //     comment-driven re-run) used to skip the restore entirely and let
-  //     the planner write to whatever HEAD happened to be.
+  //  1. ВОССТАНОВЛЕНИЕ для ЛЮБОЙ привязанной не-fix задачи — работает независимо от
+  //     plannerMode (full или fast). `task.branchName` — источник истины: как только
+  //     прошлый прогон его сохранил, каждая последующая стадия ОБЯЗАНА оказаться на
+  //     этой ветке или упасть громко. Перепланирование с mode=fast (ручное,
+  //     по комментарию) раньше полностью пропускало восстановление и давало
+  //     planner писать туда, где оказался HEAD.
   //
-  //  2. CREATE only in full mode for unbound non-fix tasks. Fast mode stays
-  //     on the current branch by design (see aif-handoff#83) — first-time
-  //     branch provisioning is a full-mode-only concern.
+  //  2. СОЗДАНИЕ только в full-режиме для непривязанных не-fix задач. Fast-режим
+  //     остаётся на текущей ветке по замыслу (см. aif-handoff#83) — первичная
+  //     подготовка ветки касается только full-режима.
   //
-  // Failures throw BranchIsolationError (dirty worktree, missing base branch,
-  // checkout failure, branch_missing, etc). The coordinator classifies it as
-  // blocked_external with retryAfter=null so an operator can inspect the work
-  // tree instead of the stage silently reverting into a bad state.
+  // Сбои бросают BranchIsolationError (грязное рабочее дерево, отсутствующая
+  // base-ветка, сбой checkout, branch_missing и т.п.). Координатор классифицирует
+  // его как blocked_external с retryAfter=null, чтобы оператор осмотрел рабочее
+  // дерево, вместо молчаливого возврата стадии в плохое состояние.
+  // preparedBranch - не просто имя ветки, а контракт: пока он не null, финальная
+  // проверка assertCurrentBranch обязательна, иначе план привяжется к чужому HEAD.
   let preparedBranch: string | null = task.branchName ?? null;
+  // Restore разделён на две ветки, потому что для worktree и для общего чекаута
+  // отличается только текст активности, а не сама git-операция.
   if (!task.isFix && task.worktreePath) {
     if (task.branchName) {
       restorePersistedBranch({
@@ -307,15 +411,21 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     preparedBranch = task.branchName;
     logActivity(taskId, "Agent", `Restored feature branch: ${task.branchName}`);
   } else if (!task.isFix && plannerMode === "full") {
+    // Провайдер берётся из env, а не из настроек проекта: вся интеграция с VCS в
+    // агенте идёт через один env-переключатель.
     const env = getEnv();
     const provider: IssueProvider = env.GIT_PROVIDER === "gitlab" ? "gitlab" : "github";
-    // Only the GitHub issue link is wired into the planner today; GitLab tasks
-    // follow the same code path once their issue lookup lands.
+    // Сегодня в planner подключена только связь с GitHub-issue; GitLab-задачи
+    // пойдут тем же путём, как только появится поиск их issue.
+    // При выключенном флаге задача ведёт себя как обычная: без issue нет ни
+    // детерминированной ветки, ни обязательной изоляции.
     const githubIssue =
       provider === "github" && env.AIF_GITHUB_ISSUE_PR_ENABLED
         ? findGitHubIssueByTaskId(taskId)
         : null;
     const issueNumber = githubIssue?.issueNumber ?? null;
+    // Наличие issue меняет требования к изоляции: для него нужна детерминированная
+    // ветка, пригодная для публикации PR/MR.
     const hasVcsIssue = issueNumber !== null;
     const useWorktree = shouldProvisionWorktree({
       hasVcsIssue,
@@ -323,9 +433,13 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
       parallelEnabled: Boolean(project?.parallelEnabled),
       supportsTaskWorktrees: projectSupportsTaskWorktrees(projectRoot),
     });
+    // Имя ветки для issue детерминировано: повторный запуск по тому же issue обязан
+    // попасть в ту же ветку, иначе PR/MR потеряет связь с задачей.
     const issueBranchName = hasVcsIssue
       ? resolveIssueBranchName({ projectRoot, provider, issueNumber }).branchName
       : null;
+    // Режим вычисляется один раз и используется и в логе, и в имени операции под
+    // git-локом, чтобы они не разошлись.
     const mode: WorktreeProvisionMode = useWorktree ? "worktree" : "in_tree";
     log.info(
       {
@@ -338,9 +452,11 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
       "Planner provisioning decision",
     );
 
-    // Repo-mutating git provisioning is serialized per project root so
-    // parallel scheduling cannot race git's own ref locks.
+    // Подготовка, мутирующая репозиторий, сериализуется по корню проекта, чтобы
+    // параллельное планирование не конфликтовало с ref-локами самого git.
     await withProjectGitLock({ projectRoot, operation: `planner-${mode}` }, () => {
+      // Внутри callback нельзя делать длительную работу: лок удерживается на всё
+      // время git-операций проекта и блокирует параллельные задачи.
       if (useWorktree) {
         const worktreeResult = ensureTaskWorktree({
           projectRoot,
@@ -349,6 +465,8 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
           projectId: task.projectId,
           explicitBranchName: issueBranchName,
         });
+        // skipped означает, что подходящее дерево уже было: это нормальный исход,
+        // а не ошибка, поэтому БД обновляется только при реальном результате.
         if (
           worktreeResult.action !== "skipped" &&
           worktreeResult.branchName &&
@@ -367,6 +485,8 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
             `Task worktree ${worktreeResult.action}: ${worktreeResult.worktreePath} (${worktreeResult.branchName})`,
           );
         } else if (worktreeResult.reason) {
+          // Причина без результата означает, что изоляцию обеспечить не удалось;
+          // без неё задачи с issue публиковать некуда, поэтому ручная блокировка.
           throw new StageManualBlockError(
             `This task requires an isolated Git worktree: ${worktreeResult.reason}`,
           );
@@ -374,6 +494,8 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
         return;
       }
 
+      // Ветка в общем чекауте: worktreePath у задачи остаётся пустым, и все
+      // последующие этапы работают в корне проекта.
       const branchResult = ensureFeatureBranch({
         projectRoot: executionRoot,
         taskId,
@@ -392,6 +514,8 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
           `Feature branch ${branchResult.action}: ${branchResult.branchName}`,
         );
       } else if (branchResult.reason) {
+        // Для issue-задач отсутствие ветки - блокировка (публиковать PR/MR некуда),
+        // для обычных - всего лишь отладочный лог: ветку создаст другой этап.
         if (hasVcsIssue) {
           throw new StageManualBlockError(
             `Issue #${issueNumber} requires a feature branch: ${branchResult.reason}`,
@@ -402,14 +526,16 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     });
   }
 
-  // A fresh Handoff task must not treat an existing plan artifact in the
-  // prepared branch/worktree as context. VCS issue tasks use deterministic
-  // branch names and plan paths (`github-issue-N.md` / `gitlab-issue-N.md`),
-  // so deleting and recreating a task for the same external issue can check out
-  // a branch that still contains an old plan file. If we leave that file in
-  // place, `/aif-plan` and the post-run disk read can pick it up and downstream
-  // implementer logic may no-op against the old checklist. Replanning and tasks
-  // that already have a persisted DB plan intentionally keep their artifact.
+  // Свежая задача Handoff не должна считать существующий артефакт плана в
+  // подготовленной ветке/worktree контекстом. Задачи VCS-issue используют
+  // детерминированные имена веток и пути планов (`github-issue-N.md` /
+  // `gitlab-issue-N.md`), поэтому удаление и пересоздание задачи для того же
+  // внешнего issue может чекаутить ветку со старым файлом плана. Оставим его —
+  // и `/aif-plan`, и чтение с диска после прогона подхватят его, а исполнителю
+  // хватит старого чек-листа для no-op. Перепланирование и задачи с уже
+  // сохранённым планом в БД намеренно сохраняют свой артефакт.
+  // Предикат дублирует решение внутри clearPlanFileBeforeFreshPlanning, но нужен
+  // ещё и ниже - для mtime-гейта при чтении плана с диска.
   const shouldRequireFreshPlanFile = !task.isFix && !planReviewFeedback && !task.plan?.trim();
 
   clearPlanFileBeforeFreshPlanning({
@@ -421,28 +547,42 @@ export async function runPlanner(taskId: string, projectRoot: string): Promise<v
     isFix: task.isFix,
   });
 
+  // Контекст собирается один раз и переиспользуется всеми тремя режимами, включая
+  // fix-команду, чтобы варианты промпта не расходились по составу входа.
   const taskContext = `Title: ${task.title}
 Description: ${task.description}
 Task attachments:
 ${taskAttachmentsForPrompt}
 User comments and replanning feedback:
 ${commentsForPrompt}${planReviewFeedbackSection}`;
+  // prompt и workflowSpec заполняются в каждой ветке: рантайм должен получить ровно
+  // один согласованный spec, а не набор взаимоисключающих флагов.
   let prompt: string;
   let workflowSpec: ReturnType<typeof createRuntimeWorkflowSpec>;
-  // HANDOFF_BRANCH_PREPARED=1 tells the aif-plan / plan-polisher skill that
-  // Handoff already owns branch creation for this run. The skill MUST NOT
-  // execute its own `git checkout -b`; it should validate that the current
-  // branch matches HANDOFF_BRANCH_NAME and report a blocker if not. See
+  // HANDOFF_BRANCH_PREPARED=1 сообщает скиллу aif-plan / plan-polisher, что
+  // создание ветки для этого прогона уже на Handoff. Скилл НЕ должен выполнять
+  // собственный `git checkout -b`; вместо этого он проверяет, что текущая
+  // ветка совпадает с HANDOFF_BRANCH_NAME, и иначе сообщает о блокере. См.
   // ai-factory#96.
   const handoffBranchLines = preparedBranch
     ? `\nHANDOFF_BRANCH_PREPARED: 1\nHANDOFF_BRANCH_NAME: ${preparedBranch}`
     : "";
+  // HANDOFF_MODE переводит скилл в автономный режим: без него скилл начнёт задавать
+  // интерактивные вопросы, на которые в очереди никто не ответит.
   const handoffContext = `HANDOFF_MODE: 1\nHANDOFF_TASK_ID: ${taskId}${handoffBranchLines}`;
+  // Тот же текст уходит и в systemPromptAppend: агент должен видеть ограничение по
+  // каталогу, даже если потеряет его в теле промпта.
   const scopeConstraint = `IMPORTANT: Your working directory is ${executionRoot}\nAll files must be created and modified inside this directory. Do NOT navigate to parent directories or other projects.`;
+  // Строка команды собирается заранее: она служит и fallback для рантайма, и
+  // metadata-контрактом для скилла, поэтому не должна собираться заново на месте.
   const plannerSlashCommand = `/aif-plan ${plannerMode} @${planPath} docs:${planDocs} tests:${planTests}`;
+  // Для не-fix задач остаётся undefined: иначе рантайм подставил бы fix-команду в
+  // обычный запуск планирования.
   const fixSlashCommand = task.isFix ? buildFixCommandText(taskContext) : undefined;
 
   if (task.isFix) {
+    // Fix-ветка: обязательных capabilities нет, потому что команда скилла
+    // исполняется рантаймом без agent definition.
     prompt = `${handoffContext}\n${scopeConstraint}\n\n${fixSlashCommand}`;
     workflowSpec = createRuntimeWorkflowSpec({
       workflowKind: "planner",
@@ -454,6 +594,8 @@ ${commentsForPrompt}${planReviewFeedbackSection}`;
       systemPromptAppend: scopeConstraint,
     });
   } else if (useSubagents) {
+    // Единственная ветка, требующая supportsAgentDefinitions: если рантайм её не
+    // заявляет, сработает fallback на plannerSlashCommand.
     prompt = `Plan the implementation for the following task.
 
 ${handoffContext}
@@ -514,7 +656,11 @@ Always write the final plan to @${planPath}.`;
     });
   }
 
+  // Отметка времени ставится только для прогона, который обязан создать свежий файл:
+  // для остальных mtime-гейт не применяется и старый план допустим.
   const planRunStartedAtMs = shouldRequireFreshPlanFile ? Date.now() : undefined;
+  // Бюджет берётся из настроек проекта, а agent передаётся только в native-режиме:
+  // в остальных рантайм сам решает, как исполнить промпт.
   const { resultText: rawResult } = await executeSubagentQuery({
     taskId,
     projectRoot: executionRoot,
@@ -528,15 +674,19 @@ Always write the final plan to @${planPath}.`;
     fallbackSlashCommand: task.isFix ? undefined : plannerSlashCommand,
   });
 
-  // Detect skill-level branch drift: if the planner subagent (or its
-  // nested plan-polisher) silently created or switched to a different
-  // branch than the one we prepared, the plan we're about to persist
-  // belongs to the wrong HEAD. Surface as BranchIsolationError so the
-  // coordinator blocks the task instead of committing the drift.
+  // Дрейф ветки на уровне скилла: если сабагент planner (или его вложенный
+  // plan-polisher) молча создал или переключил ветку, отличную от подготовленной,
+  // план, который мы собираемся сохранить, относится к чужому HEAD.
+  // Показываем это как BranchIsolationError, чтобы координатор заблокировал
+  // задачу вместо коммита дрейфа.
   if (preparedBranch) {
+    // assertCurrentBranch бросает BranchIsolationError; это ожидаемый путь
+    // блокировки, а не внутренняя ошибка, поэтому пробрасывается наружу.
     assertCurrentBranch(executionRoot, preparedBranch);
   }
 
+  // Диск имеет приоритет над текстом ответа: агент мог вернуть пересказ, а файл
+  // содержит канонический план. Нормализованный ответ - только резервный вариант.
   const diskPlan = readPlanFromDisk(
     executionRoot,
     rawResult,
@@ -546,6 +696,8 @@ Always write the final plan to @${planPath}.`;
   );
   const resultText = diskPlan ?? normalizePlannerResult(rawResult);
 
+  // Persist идёт в тот же executionRoot: для worktree-задач план сохраняется вместе
+  // с веткой, к которой он относится.
   persistTaskPlanForTask({
     taskId,
     planText: resultText,

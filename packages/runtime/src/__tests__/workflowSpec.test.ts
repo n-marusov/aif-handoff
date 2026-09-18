@@ -468,7 +468,7 @@ describe("API slash-command prompt policy", () => {
     });
 
     expect(resolved.usedApiSkillExpansion).toBe(true);
-    // Prompt stays clean — skill content moved to systemPromptAppend
+    // Промпт остаётся чистым — содержимое скилла переехало в systemPromptAppend
     expect(resolved.prompt).not.toContain("API transport workflow");
     expect(resolved.prompt).not.toContain("Planning is read-only");
     expect(resolved.prompt).not.toContain("Requested workflow command");
@@ -496,7 +496,7 @@ describe("API slash-command prompt policy", () => {
     });
 
     expect(resolved.usedApiSkillExpansion).toBe(true);
-    // Original prompt is preserved — skill content is in systemPromptAppend
+    // Исходный промпт сохранён — содержимое скилла в systemPromptAppend
     expect(resolved.prompt).toBe("Plan this task");
     expect(resolved.systemPromptAppend).toContain("do not create, modify, or delete project files");
     expect(messages).toContain(

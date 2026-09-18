@@ -1,18 +1,29 @@
+// Непрозрачный маркер доверия для привилегированных операций рантайма.
+//
+// Только код, способный импортировать этот символ, может создать действительный маркер.
+// Обычное boolean-поле в метаданных подделал бы любой вызывающий, а Symbol невозможно
+// угадать и он не сериализуется в JSON - значит, не может прийти извне.
+//
+// Symbol.for даёт один и тот же символ во всех копиях модуля, поэтому проверка работает
+// и при дублировании пакета в дереве зависимостей.
+
 /**
- * Opaque trust token used to authorize privileged runtime operations
- * (e.g. bypassing Claude permission checks).
+ * Непрозрачный токен доверия для авторизации привилегированных операций
+ * runtime (например, обход проверок разрешений Claude).
  *
- * Only code that can import this symbol can produce a valid token.
- * A plain boolean in metadata could be spoofed by any caller constructing
- * the metadata object; a Symbol cannot be guessed or serialized over JSON.
+ * Валидный токен умеет создать только код, импортирующий этот символ.
+ * Обычный boolean в метаданных подделывает любой, кто конструирует объект
+ * метаданных; Symbol нельзя угадать и нельзя сериализовать через JSON.
  */
 export const RUNTIME_TRUST_TOKEN: unique symbol = Symbol.for("aif.runtime.trust");
 
 export type RuntimeTrustToken = typeof RUNTIME_TRUST_TOKEN;
 
 /**
- * Check whether the given value is the valid trust token.
+ * Проверяет, является ли данное значение валидным токеном доверия.
  */
+// Проверка сравнением по ссылке - единственная допустимая форма: любое другое сравнение
+// (по строке, по имени) поддаётся подделке.
 export function isValidTrustToken(value: unknown): value is RuntimeTrustToken {
   return value === RUNTIME_TRUST_TOKEN;
 }

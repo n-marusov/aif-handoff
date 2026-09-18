@@ -1,5 +1,5 @@
 /**
- * Safe localStorage wrapper with SSR guard.
+ * Безопасная обёртка localStorage с SSR-защитой.
  */
 
 export function readStorage(key: string): string | null {

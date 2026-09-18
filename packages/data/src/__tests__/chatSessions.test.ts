@@ -88,7 +88,7 @@ describe("chat sessions data layer", () => {
     it("returns sessions for project ordered by updatedAt DESC", () => {
       const s1 = createChatSession({ projectId: "proj-1", title: "First" });
       const s2 = createChatSession({ projectId: "proj-1", title: "Second" });
-      // Touch s1 to make it more recent
+      // Обновляем s1, чтобы он стал свежее
       updateChatSessionTimestamp(s1!.id);
 
       const sessions = listChatSessions("proj-1");

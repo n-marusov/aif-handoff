@@ -23,8 +23,8 @@ vi.mock("node:fs", async () => {
     ...actual,
     createReadStream: (path: string, options?: { start?: number; end?: number }) => {
       createReadStreamMock(path, options);
-      // Reuse readFile mock so each test only configures one source of
-      // session-file content; stream reads just yield the full payload.
+      // Переиспользуем мок readFile, чтобы каждый тест настраивал только один
+      // источник содержимого файла; потоковое чтение отдаёт весь payload.
       const stream = Readable.from(
         (async function* () {
           const data = await readFileMock(path, "utf-8");
@@ -595,8 +595,8 @@ describe("Codex SDK session store parsing", () => {
     });
 
     const sessionReads = readCalls.filter((path) => path !== authFile);
-    // 50 matching meta reads + 50 limit-snapshot reads. The old path read all
-    // 120 metas before applying the snapshot scan cap.
+    // 50 чтений meta по подходящим файлам + 50 чтений лимит-снимков. Старый путь
+    // читал все 120 meta до применения потолка скана снимков.
     expect(sessionReads.length).toBeLessThanOrEqual(100);
     expect(sessionReads.length).toBeLessThan(120);
   });

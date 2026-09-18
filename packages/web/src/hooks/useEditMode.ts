@@ -4,17 +4,17 @@ interface UseEditModeReturn<T> {
   isEditing: boolean;
   draft: T;
   setDraft: (value: T) => void;
-  /** Enter edit mode, initializing draft from the provided value. */
+  /** Войти в режим редактирования и инициализировать черновик переданным значением. */
   startEditing: (value: T) => void;
-  /** Save draft and exit edit mode. Returns the draft value. */
+  /** Сохранить черновик и выйти из режима редактирования. Возвращает значение черновика. */
   save: () => T;
-  /** Discard draft and exit edit mode. */
+  /** Отменить черновик и выйти из режима редактирования. */
   cancel: () => void;
 }
 
 /**
- * Manages isEditing + draft state for inline editing patterns.
- * @param initialDraft - fallback value for draft when not editing
+ * Управляет состоянием isEditing и draft для встроенного редактирования.
+ * @param initialDraft — резервное значение черновика вне режима редактирования
  */
 export function useEditMode<T>(initialDraft: T): UseEditModeReturn<T> {
   const [isEditing, setIsEditing] = useState(false);

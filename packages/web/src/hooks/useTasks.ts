@@ -182,8 +182,8 @@ export function useRunQa(taskId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => api.runQa(taskId),
-    // WS delivers task:updated; explicit invalidation as a fallback for the
-    // manual POST path (auto-trigger relies on the WS handler instead).
+    // Обычно task:updated приходит через WS.
+    // Явный сброс кеша оставлен как резерв для ручного POST-пути.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["task", taskId] }),
   });
 }

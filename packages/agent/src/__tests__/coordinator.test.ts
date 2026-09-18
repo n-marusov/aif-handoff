@@ -17,13 +17,13 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createGitTestRoot } from "./gitTestUtils.js";
 
-// Flag defaults to false (opt-in). Coordinator tests assert on persisted
-// limitSnapshot, which requires the gate to be open.
+// Флаг по умолчанию false (включается явно). Тесты Координатора проверяют
+// сохраняемый limitSnapshot, для чего гейт должен быть открыт.
 process.env.AIF_USAGE_LIMITS_ENABLED = "true";
 process.env.AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED = "true";
 resetEnvCache();
 
-// Set up test db
+// Настраиваем тестовую БД
 const testDb = { current: createTestDb() };
 const blockTaskForRuntimeGateIfEligibleMock = vi.fn();
 const claimCoordinatorTaskIfEligibleMock = vi.fn();
@@ -68,7 +68,7 @@ vi.mock("../subagentQuery.js", async (importOriginal) => {
   };
 });
 
-// Mock subagent runners
+// Мок-раннеры сабагентов
 vi.mock("../subagents/planner.js", () => ({
   runPlanner: vi.fn().mockResolvedValue(undefined),
 }));
@@ -197,7 +197,7 @@ describe("coordinator", () => {
 
     await pollAndProcess();
 
-    // Pipeline processes all three stages in one poll cycle
+    // Конвейер проходит все три стадии за один цикл опроса
     expect(runPlanner).toHaveBeenCalledWith("task-1", "/tmp/test");
     expect(runImprover).not.toHaveBeenCalled();
     expect(runPlanChecker).toHaveBeenCalledWith("task-1", "/tmp/test");
@@ -480,8 +480,8 @@ describe("coordinator", () => {
 
     await pollAndProcess();
 
-    // The plan-review flag is off by default, so the plan-publisher stage must
-    // not claim this task — the legacy plan_review -> implementer path applies.
+    // Флаг plan-review по умолчанию выключен, поэтому стадия plan-publisher не
+    // должна забирать эту задачу — применяется старый путь plan_review -> implementer.
     expect(runImplementer).toHaveBeenCalledWith("task-vcs", "/tmp/test");
     const task = db.select().from(tasks).where(eq(tasks.id, "task-vcs")).get();
     expect(task!.status).toBe("done");
@@ -519,8 +519,8 @@ describe("coordinator", () => {
 
       await pollAndProcess();
 
-      // The plan-publisher stage defers (no persisted branch) but the
-      // implementer must not claim the task while it waits for VCS approval.
+      // Стадия plan-publisher откладывает задачу (нет сохранённой ветки), но
+      // исполнитель не должен забирать её, пока ожидается одобрение в VCS.
       expect(runImplementer).not.toHaveBeenCalledWith("task-vcs-plan-review", "/tmp/test");
       const task = db.select().from(tasks).where(eq(tasks.id, "task-vcs-plan-review")).get();
       expect(task!.status).toBe("plan_review");
@@ -888,7 +888,7 @@ describe("coordinator", () => {
       })
       .run();
 
-    // handleAutoReviewGate returns null for non-autoMode tasks
+    // handleAutoReviewGate возвращает null для задач без autoMode
     vi.mocked(handleAutoReviewGate).mockResolvedValueOnce(null);
 
     await pollAndProcess();
@@ -910,7 +910,7 @@ describe("coordinator", () => {
       })
       .run();
 
-    // handleAutoReviewGate returns "accepted" (default mock)
+    // handleAutoReviewGate возвращает "accepted" (мок по умолчанию)
     await pollAndProcess();
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-review-auto-log")).get();
@@ -1566,7 +1566,7 @@ describe("coordinator", () => {
       })
       .run();
 
-    // --- Cycle 1: reviewer completes, gate requests rework ---
+    // --- Цикл 1: ревьюер завершает, гейт запрашивает доработку ---
     vi.mocked(handleAutoReviewGate).mockResolvedValueOnce({
       status: "rework_requested",
       currentIteration: 1,
@@ -1592,7 +1592,7 @@ describe("coordinator", () => {
     expect(task!.reworkRequested).toBe(true);
     expect(task!.reviewIterationCount).toBe(1);
 
-    // --- Cycle 2: implementer completes, task moves to review (count must survive) ---
+    // --- Цикл 2: исполнитель завершает, задача переходит на review (счётчик должен сохраниться) ---
     vi.clearAllMocks();
     vi.mocked(handleAutoReviewGate).mockResolvedValueOnce({
       status: "rework_requested",
@@ -1615,12 +1615,12 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     task = db.select().from(tasks).where(eq(tasks.id, "task-rework-iter")).get();
-    // After implementer→review→gate rework: count should be 2 now
+    // После доработки исполнитель→review→гейт: счётчик теперь должен быть 2
     expect(task!.status).toBe("implementing");
     expect(task!.reworkRequested).toBe(true);
     expect(task!.reviewIterationCount).toBe(2);
 
-    // --- Cycle 3: implementer completes, reviewer runs, gate hits max iterations ---
+    // --- Цикл 3: исполнитель завершает, ревьюер запускается, гейт достигает макс. итераций ---
     vi.clearAllMocks();
     vi.mocked(handleAutoReviewGate).mockResolvedValueOnce({
       status: "manual_review_required",
@@ -1704,7 +1704,7 @@ describe("coordinator", () => {
       })
       .run();
 
-    // Cycle 1: reviewer → gate requests rework
+    // Цикл 1: ревьюер → гейт запрашивает доработку
     vi.mocked(handleAutoReviewGate).mockResolvedValueOnce({
       status: "rework_requested",
       currentIteration: 1,
@@ -1729,7 +1729,7 @@ describe("coordinator", () => {
     expect(task!.status).toBe("implementing");
     expect(task!.reworkRequested).toBe(true);
 
-    // Cycle 2: capture reworkRequested inside implementer execution
+    // Цикл 2: считываем reworkRequested во время работы исполнителя
     let reworkDuringExec: boolean | undefined;
     vi.mocked(runImplementer).mockImplementationOnce(async (taskId) => {
       const t = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
@@ -1751,10 +1751,10 @@ describe("coordinator", () => {
     });
     await pollAndProcess();
 
-    // Implementer must see reworkRequested=true during execution
+    // Исполнитель должен видеть reworkRequested=true во время работы
     expect(reworkDuringExec).toBe(true);
 
-    // After full cycle (implementer→review→accepted→done), reworkRequested is reset
+    // После полного цикла (исполнитель→review→accepted→done) reworkRequested сбрасывается
     task = db.select().from(tasks).where(eq(tasks.id, "task-rework-flag")).get();
     expect(task!.status).toBe("done");
     expect(task!.reworkRequested).toBe(false);
@@ -1780,7 +1780,7 @@ describe("coordinator", () => {
       })
       .run();
 
-    // Track status changes during planner execution
+    // Отслеживаем изменения статуса во время выполнения runPlanner
     let statusDuringExec: string | undefined;
     vi.mocked(runPlanner).mockImplementationOnce(async () => {
       const t = db.select().from(tasks).where(eq(tasks.id, "task-6")).get();
@@ -1792,7 +1792,7 @@ describe("coordinator", () => {
     expect(statusDuringExec).toBe("planning");
   });
 
-  // ── Parallel mode per-project tests ───────────────────────
+  // ── Тесты проектов в параллельном режиме ───────────────────
 
   it("should process multiple tasks concurrently for parallel-enabled project", async () => {
     const db = testDb.current;
@@ -1813,7 +1813,7 @@ describe("coordinator", () => {
 
     await pollAndProcess();
 
-    // Both tasks should have been picked up by planner
+    // planner должен был подхватить обе задачи
     expect(runPlanner).toHaveBeenCalledWith("p-task-1", "/tmp/parallel");
     expect(runPlanner).toHaveBeenCalledWith("p-task-2", "/tmp/parallel");
   });
@@ -1897,7 +1897,7 @@ describe("coordinator", () => {
 
   it("should process only 1 task at a time for non-parallel project", async () => {
     const db = testDb.current;
-    // test-project is non-parallel (default)
+    // test-project не параллельный (по умолчанию)
     db.insert(tasks)
       .values({ id: "s-task-1", projectId: "test-project", title: "S1", status: "planning" })
       .run();
@@ -1907,11 +1907,11 @@ describe("coordinator", () => {
 
     await pollAndProcess();
 
-    // Only the first task should complete the full pipeline (serial)
+    // Только первая задача должна пройти полный конвейер (последовательно)
     const t1 = db.select().from(tasks).where(eq(tasks.id, "s-task-1")).get();
     const t2 = db.select().from(tasks).where(eq(tasks.id, "s-task-2")).get();
     expect(t1!.status).toBe("done");
-    // Second task either untouched or partially progressed but not both done
+    // Вторая задача либо не тронута, либо продвинута частично — но не обе done
     expect(t2!.status).not.toBe("done");
   });
 
@@ -1921,7 +1921,7 @@ describe("coordinator", () => {
       .values({ id: "par-proj", name: "Par", rootPath: "/tmp/par", parallelEnabled: true })
       .run();
 
-    // Verify project was created with parallel enabled
+    // Проверяем: проект создан с включённым параллельным режимом
     const proj = db.select().from(projects).where(eq(projects.id, "par-proj")).get();
     expect(proj!.parallelEnabled).toBe(true);
   });
@@ -1932,7 +1932,7 @@ describe("coordinator", () => {
       .values({ id: "cap-proj", name: "Cap", rootPath: "/tmp/cap", parallelEnabled: true })
       .run();
 
-    // Create 5 tasks in planning — per-project cap is 3, so at most 3 should be picked
+    // Создаём 5 задач в planning — лимит на проект 3, поэтому возьмётся не больше 3
     for (let i = 1; i <= 5; i++) {
       db.insert(tasks)
         .values({ id: `cap-task-${i}`, projectId: "cap-proj", title: `C${i}`, status: "planning" })
@@ -1941,10 +1941,10 @@ describe("coordinator", () => {
 
     await pollAndProcess();
 
-    // Semaphore should have released all slots after allSettled
+    // Семафор должен освободить все слоты после allSettled
     expect(getStageSemaphore().totalActive()).toBe(0);
 
-    // At most the per-project cap (3) planner calls should have been made
+    // Вызовов planner не больше лимита на проект (3)
     const plannerCalls = (runPlanner as any).mock.calls.length;
     expect(plannerCalls).toBeLessThanOrEqual(3);
     expect(plannerCalls).toBeGreaterThanOrEqual(1);

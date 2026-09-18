@@ -23,7 +23,7 @@ function reorderBacklog(
 ): void {
   const current = tasks[idx];
   if (!current) return;
-  // Backlog is sorted ascending by position. Move up = smaller position.
+  // Backlog отсортирован по возрастанию position. Вверх = меньшая позиция.
   if (dir === "up") {
     if (idx === 0) return;
     const above = tasks[idx - 1];

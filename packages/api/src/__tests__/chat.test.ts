@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import { RuntimeExecutionError, type RuntimeAdapter, type RuntimeRunInput } from "@aif/runtime";
 import { resetEnvCache } from "@aif/shared";
 
-// Flag defaults to false (opt-in). These tests assert on runtime limit
-// snapshots being emitted to chat responses, which needs the gate open.
+// Флаг по умолчанию false (opt-in). Эти тесты проверяют, что снапшоты
+// лимитов runtime попадают в ответы чата, а для этого гейт должен быть открыт.
 process.env.AIF_USAGE_LIMITS_ENABLED = "true";
 resetEnvCache();
 
@@ -979,7 +979,7 @@ describe("chat API", () => {
         (err as Error & { name: string }).name = "AbortError";
         throw err;
       }
-      // Simulate adapter honoring the AbortController by throwing AbortError
+      // Симулируем адаптер, уважающий AbortController, бросанием AbortError
       await new Promise<void>((_resolve, reject) => {
         capturedController?.signal.addEventListener("abort", () => {
           const err = new Error("The operation was aborted");
@@ -1255,8 +1255,8 @@ describe("chat API", () => {
           interactive: true,
         },
       });
-      // Future-proofing: any interactive tool (regardless of provider-specific
-      // name) must be suppressed via the `interactive` flag, not a name match.
+      // На будущее: любой интерактивный инструмент (независимо от специфичного
+      // для провайдера имени) должен подавляться по флагу `interactive`, а не по совпадению имени.
       onEvent?.({
         type: "tool:use",
         data: { name: "SomeOtherAdapterQuestion", input: {}, interactive: true },
@@ -1279,7 +1279,7 @@ describe("chat API", () => {
     const combined = tokenCalls.map((call) => String(call[1].payload.token)).join("");
     expect(combined).not.toContain("🔧 Read");
     expect(combined).toContain("🔧 Bash");
-    // Interactive tools must NOT be surfaced via tool:use — they render via tool:question.
+    // Интерактивные инструменты НЕ должны показываться через tool:use — они рендерятся через tool:question.
     expect(combined).not.toContain("ignored via tool:use");
     expect(combined).not.toContain("🔧 AskUserQuestion");
     expect(combined).not.toContain("🔧 SomeOtherAdapterQuestion");
@@ -1388,7 +1388,7 @@ describe("chat API", () => {
           ],
         },
       });
-      // Question-only turn — no assistant text from the runtime.
+      // Ход только с вопросом — текста от ассистента runtime не выдавал.
       return { outputText: "", sessionId: "runtime-session-1" };
     });
 
@@ -1529,7 +1529,7 @@ describe("chat API", () => {
     expect(res.status).toBe(200);
     const tokenCalls = mockSendToClient.mock.calls.filter((call) => call[1]?.type === "chat:token");
     const combined = tokenCalls.map((call) => String(call[1].payload.token)).join("");
-    // No toolUseId → both emissions render. Ensure at least one rendering happened.
+    // Нет toolUseId → оба объявления рендерятся. Убеждаемся, что хотя бы один рендер состоялся.
     expect(combined).toContain("No id question?");
     const occurrences = tokenCalls.filter((call) =>
       String(call[1].payload.token).includes("No id question?"),
@@ -1538,7 +1538,7 @@ describe("chat API", () => {
   });
 
   it("includes AskUserQuestion hint in systemPromptAppend only for runtimes that support interactive questions", async () => {
-    // Default fixture: Claude-like adapter with supportsInteractiveQuestions not set → absent.
+    // Фикстура по умолчанию: Claude-подобный адаптер, supportsInteractiveQuestions не задан → подсказки нет.
     const adapterWithoutFlag: RuntimeAdapter = {
       ...runtimeAdapter,
       descriptor: {
@@ -1580,7 +1580,7 @@ describe("chat API", () => {
     const runInput = mockAdapterRun.mock.calls[0]?.[0] as RuntimeRunInput;
     expect(runInput.execution?.systemPromptAppend).not.toContain("AskUserQuestion");
 
-    // Claude-like adapter (flag=true) → hint must appear.
+    // Claude-подобный адаптер (flag=true) → подсказка обязана появиться.
     mockAdapterRun.mockClear();
     const adapterWithFlag: RuntimeAdapter = {
       ...runtimeAdapter,
@@ -1625,10 +1625,10 @@ describe("chat API", () => {
   });
 
   it("prepends assistant outputText when a mixed text+AskUserQuestion turn streamed only the question (Claude CLI path)", async () => {
-    // Simulates Claude CLI in partial-messages mode: text assistant-block is
-    // accumulated into result.outputText but not re-emitted as stream:text,
-    // while the tool_use block fires tool:question. UI + DB must still see
-    // the intro text before the question block.
+    // Симулирует Claude CLI в режиме partial-messages: текстовый блок ассистента
+    // накапливается в result.outputText, но не перевыдаётся как stream:text,
+    // тогда как блок tool_use порождает tool:question. UI + БД всё равно должны
+    // увидеть вступительный текст перед блоком вопроса.
     mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
       const onEvent = input.execution?.onEvent as
         | ((event: Record<string, unknown>) => void)
@@ -1658,13 +1658,13 @@ describe("chat API", () => {
     const body = await res.json();
     expect(body.assistantMessage).toContain("Let me check the options.");
     expect(body.assistantMessage).toContain("Pick a mode");
-    // Intro text must appear before the question block in the HTTP response.
+    // Вступительный текст должен идти перед блоком вопроса в HTTP-ответе.
     expect(body.assistantMessage.indexOf("Let me check the options.")).toBeLessThan(
       body.assistantMessage.indexOf("Pick a mode"),
     );
-    // DB persist splits the assistant turn into two rows — intro text first,
-    // rendered question block second — so it mirrors Claude replay's split
-    // and mergeRuntimeAndDbMessages can dedupe on reload.
+    // Сохранение в БД делит ход ассистента на две строки — сначала вступительный
+    // текст, затем отрендеренный блок вопроса — повторяя разбиение Claude-replay,
+    // чтобы mergeRuntimeAndDbMessages дедуплицировал при перезагрузке.
     const persistedAssistantCalls = mockCreateChatMessage.mock.calls.filter(
       (call) => (call[0] as { role: string }).role === "assistant",
     );
@@ -1679,10 +1679,10 @@ describe("chat API", () => {
   });
 
   it("flushes tool:question tokens AFTER intro text so live chat:token order matches persisted order", async () => {
-    // Regression for PR#77 review item #1 — the rendered question block must
-    // not race ahead of the intro text on the live websocket. Intro may arrive
-    // via `result.outputText` (Claude CLI mixed turn) or as `stream:text`
-    // deltas, but either way the question must come last in the token stream.
+    // Регрессия по пункту #1 ревью PR#77 — отрендеренный блок вопроса не должен
+    // обгонять вступительный текст в живом websocket. Вступление может прийти
+    // через `result.outputText` (смешанный ход Claude CLI) или `stream:text`
+    // дельтами, но в любом случае вопрос идёт последним в потоке токенов.
     mockAdapterRun.mockImplementation(async (input: RuntimeRunInput) => {
       const onEvent = input.execution?.onEvent as
         | ((event: Record<string, unknown>) => void)

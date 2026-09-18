@@ -121,7 +121,7 @@ function AppContent({
     writeStorage(STORAGE_KEYS.VIEW_MODE, viewMode);
   }, [viewMode]);
 
-  // Validate restored state after projects load.
+  // После загрузки проектов валидируем восстановленный selectedProjectId.
   useEffect(() => {
     if (!projects || !selectedProjectId) return;
 
@@ -145,7 +145,7 @@ function AppContent({
     return () => window.clearTimeout(clearTimer);
   }, [projects, selectedProjectId]);
 
-  // Handle browser back/forward
+  // Синхронизация выбора проекта/задачи с историей браузера (back/forward).
   useEffect(() => {
     const onPopState = () => {
       const match = window.location.pathname.match(PROJECT_ROUTE_PATTERN);

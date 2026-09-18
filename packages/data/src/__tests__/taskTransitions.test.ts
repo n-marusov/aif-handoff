@@ -282,7 +282,7 @@ describe("plan review gate transitions", () => {
 
   it("approves a plan from plan_review", () => {
     const taskId = createReadyAiTask("Approve from review");
-    // markTaskPlanApproved expects plan_review status, which createReadyAiTask now sets.
+    // markTaskPlanApproved ожидает статус plan_review, который createReadyAiTask теперь и выставляет.
     expect(markTaskPlanApproved({ taskId, actor: agentActor })).toMatchObject({
       ok: true,
       fromStatus: "plan_review",

@@ -1,14 +1,28 @@
+/**
+ * Валидация корневого пути проекта перед файловыми операциями и вызовами оболочки.
+ *
+ * Корень проекта подставляется в команды оболочки и в файловые вызовы, а приходит из
+ * данных, которые задаёт пользователь. Поэтому здесь отсекаются: пустой путь,
+ * относительный путь, нулевой байт, метасимволы оболочки и системные каталоги.
+ * Возвращается текст ошибки, а не исключение: вызывающий сам решает, как его показать.
+ */
+
 import { resolve, isAbsolute } from "node:path";
 
+// Метасимволы оболочки в пути позволяют выйти за пределы простого пути: разделитель
+// команд, конвейер, обратные кавычки и подстановки превратили бы путь в лишнюю команду.
 const SHELL_META_CHARS = /[;&|`$(){}!<>]/;
 
+// Приведение к виду, пригодному для сравнения: разделители Windows переводятся в
+// прямые слэши (иначе c:\windows не совпадёт с c:/windows), хвостовые слэши
+// срезаются, регистр игнорируется. Без этого список запретов обходится тривиально.
 function normalizeForPolicy(input: string): string {
   return input.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
 }
 
 /**
- * Validate that a project root path is safe for use with file system and shell operations.
- * Returns null if valid, or an error message if invalid.
+ * Проверяет, безопасен ли корневой путь проекта для файловых операций и вызовов
+ * оболочки. Возвращает null, если путь допустим, либо текст ошибки.
  */
 export function validateProjectRootPath(rootPath: string): string | null {
   if (!rootPath || rootPath.trim().length === 0) {
@@ -21,6 +35,8 @@ export function validateProjectRootPath(rootPath: string): string | null {
 
   const resolved = resolve(rootPath);
 
+  // Нулевой байт обрезает строку на уровне системных вызовов, поэтому позволял бы
+  // замаскировать реальный путь под безобидный префикс.
   if (resolved.includes("\0")) {
     return "rootPath must not contain null bytes";
   }
@@ -29,7 +45,9 @@ export function validateProjectRootPath(rootPath: string): string | null {
     return "rootPath must not contain shell metacharacters";
   }
 
-  // Prevent access to system-critical directories
+  // Сравниваем и нормализованный resolved, и нормализованный исходный ввод:
+  // первый ловит приведённые формы пути, второй — попытку обхода проверки
+  // через альтернативную запись.
   const normalizedResolved = normalizeForPolicy(resolved);
   const normalizedInput = normalizeForPolicy(rootPath);
   const blocked = [

@@ -108,7 +108,7 @@ describe("Claude runtime error classification", () => {
     expect(classified.message).toContain("No conversation found with session ID");
   });
 
-  // HTTP status classification
+  // Классификация по HTTP status
   it("classifies by HTTP status 429 as rate_limit", () => {
     const classified = classifyClaudeRuntimeError(new Error("response body"), 429);
     expect(classified.adapterCode).toBe("CLAUDE_USAGE_LIMIT");

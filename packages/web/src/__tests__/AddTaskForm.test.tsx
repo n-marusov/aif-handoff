@@ -285,7 +285,7 @@ describe("AddTaskForm", () => {
   });
 
   it("keeps default plan path when project defaults fail", () => {
-    // mockDefaultsData.data is already undefined (simulates failed/no data)
+    // mockDefaultsData.data уже undefined (имитирует сбой/отсутствие данных)
 
     render(<AddTaskForm projectId="p-1" />);
 
@@ -311,7 +311,7 @@ describe("AddTaskForm", () => {
       options.onError?.(new Error("server error"));
     });
 
-    // Form should still be open after error
+    // Форма должна остаться открытой после ошибки
     expect(screen.getByPlaceholderText("Task title")).toBeDefined();
     consoleSpy.mockRestore();
   });
@@ -322,7 +322,7 @@ describe("AddTaskForm", () => {
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
 
-    // Panel is open — select and model inputs are visible
+    // Панель открыта — видны select и поле модели
     expect(screen.getByText("Runtime profile")).toBeDefined();
     expect(screen.getByPlaceholderText("runtime default")).toBeDefined();
 
@@ -481,16 +481,16 @@ describe("AddTaskForm", () => {
 
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
-    // Toggle through both planner modes to cover both onChange branches
+    // Переключаем оба режима планировщика, чтобы покрыть обе ветки onChange
     fireEvent.click(screen.getByLabelText("Full"));
     fireEvent.click(screen.getByLabelText("Fast"));
-    // Re-enable docs/tests after fast-mode reset flipped them off
+    // Заново включаем docs/tests после того, как сброс fast-режима их выключил
     fireEvent.click(screen.getByLabelText("Docs"));
     fireEvent.click(screen.getByLabelText("Tests"));
     fireEvent.change(screen.getByPlaceholderText(".ai-factory/PLAN.md"), {
       target: { value: ".ai-factory/custom-plan.md" },
     });
-    // Fast mode seeded skipReview=true; toggling once disables it (explicit user intent).
+    // Fast-режим засеял skipReview=true; одиночный переключатель отключает его (явное намерение пользователя).
     const checkboxes = screen.getAllByRole("checkbox");
     const skipReviewCheckbox = checkboxes.find((cb) =>
       cb.closest("label")?.textContent?.includes("Skip review"),
@@ -557,12 +557,12 @@ describe("AddTaskForm", () => {
       expect.any(Object),
     );
 
-    // Simulate onSuccess: form resets to fast-mode defaults.
+    // Симулируем onSuccess: форма сбрасывается к дефолтам fast-режима.
     const options = mutateCreateTask.mock.calls[0][1] as { onSuccess?: () => void };
     act(() => {
       options.onSuccess?.();
     });
-    // Reopen the form and submit — should now send fast-mode defaults.
+    // Снова открываем форму и отправляем — теперь должны уйти дефолты fast-режима.
     fireEvent.click(screen.getByText("Add task"));
     fireEvent.change(screen.getByPlaceholderText("Task title"), {
       target: { value: "After reset" },
@@ -645,7 +645,7 @@ describe("AddTaskForm", () => {
     it("creates with the chosen priority value", () => {
       render(<AddTaskForm projectId="p-1" />);
       fireEvent.click(screen.getByText("Add task"));
-      // Open the priority Select trigger (label "None") and pick "High"
+      // Открываем триггер Select приоритета (метка "None") и выбираем "High"
       fireEvent.click(screen.getByText("None"));
       fireEvent.click(screen.getByText("High"));
       fireEvent.change(screen.getByPlaceholderText("Task title"), {
@@ -664,12 +664,12 @@ describe("AddTaskForm", () => {
       fireEvent.click(screen.getByText("Add task"));
       fireEvent.click(screen.getByText("None"));
       fireEvent.click(screen.getByText("Critical"));
-      // Dismiss with the X button
+      // Закрытие кнопкой X
       const xButtons = screen.getAllByRole("button");
       const xClose = xButtons.find((b) => b.querySelector("svg.lucide-x"));
       expect(xClose).toBeDefined();
       fireEvent.click(xClose!);
-      // Reopen — priority must be back to None
+      // Повторное открытие — приоритет снова должен быть None
       fireEvent.click(screen.getByText("Add task"));
       expect(screen.getByText("None")).toBeDefined();
       expect(screen.queryByText("Critical")).toBeNull();

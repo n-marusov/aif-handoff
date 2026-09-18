@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parsePlanAnnotations, insertPlanAnnotation } from "../sync.js";
 import type { SyncDirection, ConflictResolution, SyncEvent, PlanAnnotation } from "../sync.js";
 
-// ── Test Helpers ────────────────────────────────────────────
+// ── Тестовые помощники ────────────────────────────────────────
 
 const UUID_A = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 const UUID_B = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
@@ -62,9 +62,9 @@ describe("parsePlanAnnotations", () => {
       "<!-- handoff:task:not-a-uuid -->",
       "<!-- handoff:task:12345 -->",
       "<!-- handoff:task: -->",
-      "<!-- handoff:task:a1b2c3d4-e5f6-7890-abcd -->", // too short
-      "<!-- handoff:task:a1b2c3d4-e5f6-7890-abcd-ef1234567890-extra -->", // extra segment
-      "<!-- handoff:wrong:a1b2c3d4-e5f6-7890-abcd-ef1234567890 -->", // wrong prefix
+      "<!-- handoff:task:a1b2c3d4-e5f6-7890-abcd -->", // слишком короткий
+      "<!-- handoff:task:a1b2c3d4-e5f6-7890-abcd-ef1234567890-extra -->", // лишний сегмент
+      "<!-- handoff:wrong:a1b2c3d4-e5f6-7890-abcd-ef1234567890 -->", // неверный префикс
     ].join("\n");
     expect(parsePlanAnnotations(malformed)).toEqual([]);
   });
@@ -76,11 +76,11 @@ describe("parsePlanAnnotations", () => {
 
     const result = parsePlanAnnotations(md);
     expect(result).toHaveLength(3);
-    // Verify sorted by line
+    // Проверяем сортировку по номерам строк
     expect(result[0].line).toBe(1);
     expect(result[1].line).toBe(3);
     expect(result[2].line).toBe(5);
-    // Verify taskIds are in order of appearance (by line)
+    // Проверяем порядок taskId по появлению (по строкам)
     expect(result[0].taskId).toBe(UUID_C);
     expect(result[1].taskId).toBe(UUID_A);
     expect(result[2].taskId).toBe(UUID_B);
@@ -91,7 +91,7 @@ describe("parsePlanAnnotations", () => {
     const md = `<!-- handoff:task:${upperUuid} -->`;
     const result = parsePlanAnnotations(md);
     expect(result).toHaveLength(1);
-    // The regex captures the UUID as-is (uppercase), since [0-9a-f] with 'i' flag
+    // Регулярное выражение захватывает UUID как есть (в верхнем регистре), так как [0-9a-f] с флагом 'i'
     expect(result[0].taskId.toLowerCase()).toBe(UUID_A.toLowerCase());
   });
 
@@ -160,14 +160,14 @@ describe("insertPlanAnnotation", () => {
     const annotations = parsePlanAnnotations(result);
     const matching = annotations.filter((a) => a.taskId === UUID_A);
     expect(matching).toHaveLength(1);
-    // It should now be after the Tasks heading, not at line 2
+    // Теперь аннотация должна быть после заголовка Tasks, а не на строке 2
     const lines = result.split("\n");
     const tasksIdx = lines.indexOf("## Tasks");
     expect(lines[tasksIdx + 1]).toBe(annotation(UUID_A));
   });
 
   it("result has only one annotation for the taskId after deduplication", () => {
-    // Put the same annotation in twice manually
+    // Вручную помещаем одну и ту же аннотацию дважды
     const md = `${annotation(UUID_A)}\n# Plan\n${annotation(UUID_A)}\nContent`;
     const result = insertPlanAnnotation(md, UUID_A);
     const annotations = parsePlanAnnotations(result);
@@ -187,13 +187,13 @@ describe("insertPlanAnnotation", () => {
     ].join("\n");
 
     const result = insertPlanAnnotation(md, UUID_A, "Overview");
-    // UUID_B and UUID_C should still be present
+    // UUID_B и UUID_C должны по-прежнему присутствовать
     const annotations = parsePlanAnnotations(result);
     const taskIds = annotations.map((a) => a.taskId);
     expect(taskIds).toContain(UUID_A);
     expect(taskIds).toContain(UUID_B);
     expect(taskIds).toContain(UUID_C);
-    // Original content should be preserved
+    // Исходное содержимое должно сохраниться
     expect(result).toContain("Some content here");
     expect(result).toContain("- Task list");
   });
@@ -214,11 +214,11 @@ describe("insertPlanAnnotation", () => {
   });
 });
 
-// ── Type Validation ─────────────────────────────────────────
+// ── Валидация типов ─────────────────────────────────────────
 
 describe("type validation", () => {
   it("SyncDirection is a union of 'aif_to_handoff' | 'handoff_to_aif'", () => {
-    // Compile-time type assertions: if these assignments compile, the type is correct
+    // Проверки типов на этапе компиляции: если эти присваивания компилируются, тип верен
     const d1: SyncDirection = "aif_to_handoff";
     const d2: SyncDirection = "handoff_to_aif";
     expect(d1).toBe("aif_to_handoff");
@@ -244,7 +244,7 @@ describe("type validation", () => {
     expect(cr.targetTimestamp).toBe("2026-03-31T12:00:01.000Z");
     expect(cr.field).toBe("status");
 
-    // winner can also be "target" or null
+    // winner тоже может быть "target" или null
     const cr2: ConflictResolution = { ...cr, winner: "target" };
     expect(cr2.winner).toBe("target");
     const cr3: ConflictResolution = { ...cr, winner: null };
@@ -263,7 +263,7 @@ describe("type validation", () => {
     expect(event.direction).toBe("aif_to_handoff");
     expect(event.timestamp).toBe("2026-03-31T12:00:00.000Z");
 
-    // With optional fields
+    // С необязательными полями
     const eventWithChanges: SyncEvent = {
       ...event,
       type: "sync:task_updated",
@@ -295,7 +295,7 @@ describe("type validation", () => {
       "sync:plan_pushed",
     ];
     expect(types).toHaveLength(4);
-    // Each should be a valid SyncEvent type
+    // Каждый должен быть допустимым типом SyncEvent
     for (const t of types) {
       const event: SyncEvent = {
         type: t,

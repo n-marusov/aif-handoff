@@ -38,8 +38,8 @@ describe("Collapsible", () => {
     );
     const svg = container.querySelector("svg");
     expect(svg).toBeTruthy();
-    // ChevronRight has a specific path; ChevronDown has a different one.
-    // We check via the aria-expanded attribute on the button instead.
+    // У ChevronRight своя path; у ChevronDown — другая.
+    // Поэтому проверяем через атрибут aria-expanded на кнопке.
     const button = screen.getByRole("button");
     expect(button).toHaveAttribute("aria-expanded", "false");
   });

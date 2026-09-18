@@ -128,8 +128,8 @@ describe("startServer WebSocket integration", () => {
         if (webSocket.readyState === WebSocket.OPEN) {
           webSocket.close();
         }
-        // Terminate any bridge-side client before awaiting server.close() so
-        // the lifecycle assertion cannot be delayed by an upgraded socket.
+        // Завершаем клиентов на стороне моста до ожидания server.close(), чтобы
+        // проверка жизненного цикла не задерживалась из-за upgraded-сокета.
         closeAllWebSocketClients();
         await new Promise<void>((resolve, reject) => {
           server.close((error) => {

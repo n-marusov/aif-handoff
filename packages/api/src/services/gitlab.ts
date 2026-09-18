@@ -1,8 +1,30 @@
+/**
+ * GitLab REST-клиент слоя API.
+ *
+ * Зачем отдельный сервис: у агента нет ни одного провайдерского токена,
+ * поэтому все сетевые обращения к GitLab выполняются здесь, на стороне API,
+ * где токен проекта доступен из хранилища. Агент лишь дергает эти эндпоинты.
+ *
+ * Инварианты, которые держит файл:
+ * - отказ HTTP всегда несёт структурированный контекст (`httpStatus`,
+ *   `adapterCode`); ветвление по тексту message запрещено, поэтому
+ *   коды вычисляет classifyHttpError;
+ * - проект адресуется URL-encoded путем `namespace%2Fname`, а не числовым id:
+ *   так sync/publish не делают лишний запрос разрешения после connect;
+ * - ответы GitLab нетипизированы и частично nullable, поэтому поля сужаются
+ *   проверками, а не приведением через `as T`.
+ */
 import { createHash } from "node:crypto";
 import { logger, type GitLabEligibility, type GitLabIssueSnapshot } from "@aif/shared";
 
 const log = logger("gitlab-api");
 
+/**
+ * Единая ошибка GitLab-клиента. Структурные поля вынесены наружу намеренно:
+ * выше по стеку решения принимаются по `httpStatus` и `adapterCode`, а
+ * `message` служит только для логов и диагностики. `retryAt` заполняется
+ * исключительно при rate limit и хранит абсолютное время в ISO.
+ */
 export class GitLabApiError extends Error {
   constructor(
     message: string,
@@ -21,6 +43,10 @@ export class GitLabApiError extends Error {
   }
 }
 
+/**
+ * Ответ GET /projects/:id. Берем минимум полей: connect-валидации нужны
+ * только признак существования проекта, его web-адрес и ветка по умолчанию.
+ */
 interface GitLabProjectResponse {
   id: number;
   path_with_namespace: string;
@@ -28,6 +54,12 @@ interface GitLabProjectResponse {
   default_branch: string;
 }
 
+/**
+ * Задача в том виде, в котором ее отдает REST API. `description`, `author` и
+ * `milestone` допускают null, поэтому потребители подставляют значения по
+ * умолчанию, а не считают поля всегда заполненными. Метки приходят либо
+ * строками, либо объектами - нормализация выполняется на стороне вызова.
+ */
 interface GitLabIssueResponse {
   id: number;
   iid: number;
@@ -42,17 +74,25 @@ interface GitLabIssueResponse {
   updated_at: string;
 }
 
+/**
+ * Заметка к задаче или MR. `system: true` означает событие, созданное самим
+ * GitLab (смена статуса, действие ревью), а не сообщение человека.
+ */
 export interface GitLabNoteResponse {
   id: number;
   body: string | null;
   author: { username: string } | null;
   created_at: string;
   updated_at: string;
-  /** Auto-generated record marker (state changes, review actions, etc.). */
+  /** Маркер системной записи (смена состояния, действие ревью и т.п.). */
   system?: boolean;
   type?: string | null;
 }
 
+/**
+ * MR в терминах REST: `iid` - номер внутри проекта, `sha` - вершина
+ * head-ветки. `merged_at` заполняется только у смерженных MR.
+ */
 export interface GitLabMergeRequestResponse {
   iid: number;
   web_url: string;
@@ -63,20 +103,38 @@ export interface GitLabMergeRequestResponse {
   description: string | null;
 }
 
+/**
+ * Ответ approvals API. Важно: `approved` приходит выставленным даже когда
+ * реальных аппрувов нет - см. latestReviewState ниже.
+ */
 interface GitLabApprovalResponse {
   approved?: boolean;
   approved_by?: Array<{ user: { username: string } }>;
 }
 
+/**
+ * Один статус коммита, то есть результат одной job-ы pipeline. `allow_failure`
+ * помечает job, провал которой не должен ронять pipeline.
+ */
 interface GitLabCommitStatusResponse {
   status: "pending" | "running" | "success" | "failed" | "canceled" | "skipped";
   allow_failure: boolean;
 }
 
+/** Свернутое состояние проверок; null означает "статусов у коммита нет вовсе". */
 type GitLabCheckState = "pending" | "success" | "failure" | null;
 
+/**
+ * Статусы, которые не должны блокировать MR. Без этой поблажки проект с
+ * необязательными job-ами навсегда застрял бы в pending.
+ */
 const SUCCESSFUL_STATUSES = new Set(["success", "canceled", "skipped"]);
 
+/**
+ * Достает время сброса лимита из заголовков ответа. GitLab отдает либо
+ * относительный `retry-after` в секундах, либо абсолютный `ratelimit-reset`;
+ * возвращаем ISO-строку, чтобы значение переживало запись в БД и ответ API.
+ */
 function retryAtFromHeaders(headers: Headers): string | null {
   const retryAfter = Number(headers.get("retry-after"));
   if (Number.isFinite(retryAfter) && retryAfter >= 0) {
@@ -89,6 +147,10 @@ function retryAtFromHeaders(headers: Headers): string | null {
     : null;
 }
 
+/**
+ * Единственное место, где HTTP-код превращается в категорию для ветвления.
+ * Текст сообщения здесь не участвует: он ненадежен и локализуется провайдером.
+ */
 function classifyHttpError(status: number): GitLabApiError["adapterCode"] {
   if (status === 401) return "authentication";
   if (status === 404) return "not_found";
@@ -99,14 +161,18 @@ function classifyHttpError(status: number): GitLabApiError["adapterCode"] {
 }
 
 /**
- * GitLab project-scoped requests use either the numeric project id or the
- * URL-encoded `namespace%2Fname` path. We use the encoded path so sync/publish
- * flows never need an extra resolution request after connect validates it.
+ * Запросы к проекту GitLab принимают либо числовой project id, либо
+ * URL-кодированный путь `namespace%2Fname`. Здесь используется путь, чтобы
+ * sync/publish не делали дополнительный resolve-запрос после connect-проверки.
  */
 function projectPath(namespace: string, name: string): string {
   return encodeURIComponent(`${namespace}/${name}`);
 }
 
+/**
+ * Клиент одного токена. Создается на запрос и не кэширует ответы: кэш живет
+ * уровнем выше, а здесь важна предсказуемость прав доступа.
+ */
 export class GitLabClient {
   constructor(
     private readonly token: string,
@@ -114,10 +180,10 @@ export class GitLabClient {
   ) {}
 
   /**
-   * Network-level failure codes worth retrying (undici wraps DNS/connect/
-   * timeout failures in a TypeError with a `cause.code`). Docker Desktop's
-   * embedded DNS is known to intermittently return EAI_AGAIN; a single retry
-   * usually succeeds once the resolver recovers.
+   * Коды сетевых сбоев, для которых имеет смысл повтор.
+   * undici оборачивает DNS/connect/timeout ошибки в TypeError с `cause.code`.
+   * В Docker Desktop встроенный DNS иногда кратковременно отдаёт EAI_AGAIN,
+   * и один повтор обычно срабатывает после восстановления резолвера.
    */
   private static readonly RETRYABLE_NETWORK_CODES = new Set([
     "EAI_AGAIN",
@@ -129,22 +195,35 @@ export class GitLabClient {
     "EAI_NONAME",
   ]);
 
+  /** Две повторные попытки поверх первой; дальше выигрыш не оправдывает задержку. */
   private static readonly MAX_NETWORK_RETRIES = 2;
 
+  /**
+   * Отличает сетевой сбой от логической ошибки. undici прячет причину в
+   * `cause.code`, поэтому проверяется именно код, а не текст исключения.
+   */
   private isRetryableNetworkError(error: unknown): boolean {
     if (!(error instanceof TypeError)) return false;
     const cause = (error as { cause?: { code?: string } }).cause;
     const code = cause?.code;
     if (code && GitLabClient.RETRYABLE_NETWORK_CODES.has(code)) return true;
-    // Timeout from AbortSignal.timeout(30_000) surfaces as a DOMException
-    // named "TimeoutError" (undici wraps it into the fetch TypeError cause).
+    // Таймаут от AbortSignal.timeout(30_000) проявляется как DOMException
+    // с именем "TimeoutError" (undici помещает его в cause TypeError fetch).
     return code === "TimeoutError" || error.name === "TimeoutError";
   }
 
+  /**
+   * Единая точка HTTP-вызова: транспортные ретраи, заголовки авторизации,
+   * таймаут и превращение не-2xx в GitLabApiError. Все публичные методы ходят
+   * только через него, поэтому политика повторов и классификация не
+   * расходятся между эндпоинтами.
+   */
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const method = init.method ?? "GET";
     log.debug({ method, path, baseUrl: this.baseUrl }, "GitLab API request started");
 
+    // Замыкание пересобирает запрос на каждую попытку: init тот же, но сигнал
+    // таймаута свежий, иначе повтор унаследовал бы уже истекший дедлайн.
     const attempt = async (): Promise<Response> => {
       return fetch(`${this.baseUrl}${path}`, {
         ...init,
@@ -158,6 +237,7 @@ export class GitLabClient {
     };
 
     let response: Response;
+    // Последняя сетевая ошибка держится для диагностики исчерпания попыток.
     let lastNetworkError: unknown;
     for (let attemptIndex = 0; ; attemptIndex += 1) {
       try {
@@ -165,6 +245,8 @@ export class GitLabClient {
         break;
       } catch (error) {
         lastNetworkError = error;
+        // Предел попыток проверяется до классификации: на последней попытке
+        // исходная ошибка уходит наружу без лишней задержки.
         if (attemptIndex >= GitLabClient.MAX_NETWORK_RETRIES) throw error;
         if (!this.isRetryableNetworkError(error)) throw error;
         const delayMs = 500 * (attemptIndex + 1);
@@ -182,7 +264,11 @@ export class GitLabClient {
       }
     }
 
+    // Не-2xx превращаем в структурированную ошибку: статус и код категории
+    // едут наверх отдельными полями, разбирать текст сообщения нельзя.
     if (!response.ok) {
+      // Тело ошибки не гарантировано (прокси может вернуть HTML), поэтому
+      // парсинг защищен и допускает null.
       const payload = (await response.json().catch(() => null)) as {
         message?: unknown;
         error?: unknown;
@@ -193,9 +279,9 @@ export class GitLabClient {
         (typeof payload?.message === "string" && payload.message) ||
         (typeof payload?.message === "object" && payload.message !== null
           ? JSON.stringify(payload.message)
-          : // GitLab error responses often carry `error` + `error_description`
-            // (e.g. fine-grained PAT scope denials) — surface those instead of
-            // the generic status text so operators see the actionable cause.
+          : // Ошибки GitLab часто содержат `error` + `error_description`
+            // (например, запрет по scope fine-grained PAT). Возвращаем их,
+            // а не общий statusText, чтобы причина была операционно полезной.
             payload?.error_description
             ? `${String(payload.error)}: ${String(payload.error_description)}`
             : (typeof payload?.error === "string" && payload.error) || response.statusText);
@@ -203,6 +289,8 @@ export class GitLabClient {
         { method, path, status: response.status, adapterCode: code },
         "GitLab API request failed",
       );
+      // retryAt заполняем только для rate limit: для остальных категорий
+      // повтор бессмысленен до вмешательства человека.
       throw new GitLabApiError(
         `GitLab API ${response.status}: ${message}`,
         response.status,
@@ -210,14 +298,21 @@ export class GitLabClient {
         code === "rate_limited" ? retryAtFromHeaders(response.headers) : null,
       );
     }
+    // Переменная нужна только для диагностики пути ретраев; явное обращение
+    // снимает предупреждение линтера о неиспользуемом значении.
     void lastNetworkError;
     log.debug({ method, path, status: response.status }, "GitLab API request completed");
     return (await response.json()) as T;
   }
 
+  /**
+   * Постраничный обход списочных эндпоинтов. GitLab не сообщает общее число
+   * записей, поэтому признак конца - неполная страница.
+   */
   private async list<T>(path: string): Promise<T[]> {
     const items: T[] = [];
     for (let page = 1; ; page += 1) {
+      // Разделитель зависит от наличия query: иначе сломаем уже заданные фильтры.
       const separator = path.includes("?") ? "&" : "?";
       const pageItems = await this.request<T[]>(`${path}${separator}per_page=100&page=${page}`);
       items.push(...pageItems);
@@ -225,11 +320,15 @@ export class GitLabClient {
     }
   }
 
-  /** Validate a namespace/name path on connect — returns the remote project. */
+  /** Проверяет путь namespace/name при connect и возвращает удалённый проект. */
   getRepository(path: string): Promise<GitLabProjectResponse> {
     return this.request(`/projects/${encodeURIComponent(path)}`);
   }
 
+  /**
+   * Открытые задачи проекта. `scope=all` обязателен: без него GitLab вернет
+   * только задачи, созданные владельцем токена.
+   */
   listIssues(namespace: string, name: string): Promise<GitLabIssueResponse[]> {
     const project = projectPath(namespace, name);
     return this.list<GitLabIssueResponse>(
@@ -237,11 +336,13 @@ export class GitLabClient {
     );
   }
 
+  /** Полная лента заметок задачи - источник человеческих комментариев для планировщика. */
   listIssueNotes(namespace: string, name: string, iid: number): Promise<GitLabNoteResponse[]> {
     const project = projectPath(namespace, name);
     return this.list(`/projects/${project}/issues/${iid}/notes`);
   }
 
+  /** Заметки MR: и системные события ревью, и человеческая обратная связь. */
   listMergeRequestNotes(
     namespace: string,
     name: string,
@@ -251,11 +352,13 @@ export class GitLabClient {
     return this.list(`/projects/${project}/merge_requests/${mrIid}/notes`);
   }
 
+  /** Все MR проекта, включая закрытые: нужны для поиска закрывающей ссылки. */
   listMergeRequests(namespace: string, name: string): Promise<GitLabMergeRequestResponse[]> {
     const project = projectPath(namespace, name);
     return this.list(`/projects/${project}/merge_requests?state=all`);
   }
 
+  /** Один MR по внутреннему номеру проекта (`iid`). */
   getMergeRequest(
     namespace: string,
     name: string,
@@ -265,6 +368,10 @@ export class GitLabClient {
     return this.request(`/projects/${project}/merge_requests/${mrIid}`);
   }
 
+  /**
+   * Ищет MR по ветке-источнику. Фильтр отдан GitLab: так весь список MR не
+   * выгружается ради одной записи.
+   */
   findMergeRequest(
     namespace: string,
     name: string,
@@ -277,6 +384,10 @@ export class GitLabClient {
     return rows.then((items) => items[0] ?? null);
   }
 
+  /**
+   * Создает MR. `remove_source_branch: false` выбран осознанно: ветку удаляет
+   * агент после подтверждения, иначе повторный прогон потерял бы ссылку.
+   */
   createMergeRequest(input: {
     namespace: string;
     name: string;
@@ -298,6 +409,7 @@ export class GitLabClient {
     });
   }
 
+  /** Правка заголовка и описания MR - используется при публикации плана. */
   updateMergeRequest(input: {
     namespace: string;
     name: string;
@@ -312,6 +424,7 @@ export class GitLabClient {
     });
   }
 
+  /** Аппрувы MR, свернутые в `pending` / `approved` (см. latestReviewState). */
   async getMergeRequestApprovals(
     namespace: string,
     name: string,
@@ -324,6 +437,11 @@ export class GitLabClient {
     return { reviewState: latestReviewState(approvals).state };
   }
 
+  /**
+   * Сворачивает статусы коммита в одно состояние для гейта. Приоритет задается
+   * порядком проверок в конце: failure важнее pending, а pending важнее
+   * success, чтобы гейт не пропустил MR до завершения pipeline.
+   */
   async getCommitChecks(namespace: string, name: string, sha: string): Promise<GitLabCheckState> {
     const project = projectPath(namespace, name);
     const statuses = await this.list<GitLabCommitStatusResponse>(
@@ -331,6 +449,8 @@ export class GitLabClient {
     );
     const blockingStates: Exclude<GitLabCheckState, null>[] = [];
     for (const status of statuses) {
+      // allow_failure означает, что провал job-ы не блокирует pipeline,
+      // поэтому в гейт такая job проходит как успех.
       if (status.status === "failed") {
         blockingStates.push(status.allow_failure ? "success" : "failure");
       } else if (SUCCESSFUL_STATUSES.has(status.status)) {
@@ -353,6 +473,11 @@ export class GitLabClient {
     return result;
   }
 
+  /**
+   * Идемпотентная запись заметки с маркером: если заметка с тем же маркером уже
+   * есть, она обновляется, а не дублируется. Благодаря этому статус можно
+   * публиковать многократно, не засоряя ленту MR.
+   */
   async upsertMarkerNote(input: {
     namespace: string;
     name: string;
@@ -360,6 +485,8 @@ export class GitLabClient {
     marker: string;
     body: string;
   }): Promise<void> {
+    // Ищем по маркеру в теле, а не по id: id заметки меняется между
+    // прогонами, а маркер - стабильный ключ авторства бота.
     const notes = await this.listMergeRequestNotes(input.namespace, input.name, input.mrIid);
     const existing = notes.find((note) => note.body?.includes(input.marker));
     const body = `${input.marker}\n${input.body}`;
@@ -380,10 +507,17 @@ export class GitLabClient {
   }
 }
 
+/**
+ * Проверка, что задача подходит под фильтры проекта (метки, исполнитель,
+ * веха). Незаданный фильтр означает "не ограничивать": отсутствие требования
+ * не должно отсекать задачу.
+ */
 export function issueIsEligible(
   issue: GitLabIssueResponse,
   eligibility: GitLabEligibility,
 ): boolean {
+  // Метки приходят строками или объектами; нормализуем к строкам и отбрасываем
+  // безымянные, иначе проверка includes всегда давала бы false.
   const labels = (issue.labels ?? [])
     .map((label) => (typeof label === "string" ? label : label.name))
     .filter((label): label is string => Boolean(label));
@@ -397,6 +531,11 @@ export function issueIsEligible(
   return issue.state === "opened" && hasLabels && hasAssignee && hasMilestone;
 }
 
+/**
+ * Ищет MR, закрывающий задачу, по ключевому слову в описании. Регулярка
+ * повторяет синтаксис GitLab (close/fix/resolve) и запрещает совпадение по
+ * префиксу номера: ссылка `#12` не должна матчить `#123`.
+ */
 export function findMergeRequestClosingIssue(
   mergeRequests: GitLabMergeRequestResponse[],
   iid: number,
@@ -410,6 +549,10 @@ export function findMergeRequestClosingIssue(
   );
 }
 
+/**
+ * Собирает снапшот задачи для планировщика. Комментарии берутся хвостом
+ * (последние 100): обсуждение может быть длинным, а бюджет контекста - нет.
+ */
 export async function toIssueSnapshot(
   client: GitLabClient,
   namespace: string,
@@ -437,32 +580,33 @@ export async function toIssueSnapshot(
   };
 }
 
+/** Отпечаток текста ревью: позволяет заметить изменения, не храня все тело. */
 export function reviewFingerprint(reviewComments: string): string {
   return createHash("sha256").update(reviewComments).digest("hex");
 }
 
 /**
- * Fold the MR approvals API into a review state.
+ * Сворачивает ответ approvals API MR в состояние ревью.
  *
- * GitLab EE (which includes gitlab.com projects without configured approval
- * rules) reports `approved: true` vacuously — the rule check is satisfied by
- * zero required approvals, even before anyone clicks Approve. Only a non-empty
- * `approved_by` proves a real approval exists, so the approver list gates the
- * "approved" state on every edition (CE, EE/Free, Premium rule-based).
+ * В GitLab EE (включая проекты gitlab.com без настроенных approval rules)
+ * поле `approved: true` может быть формальным: правило считается выполненным
+ * даже при нуле обязательных аппрувов. Реальное одобрение подтверждает только
+ * непустой `approved_by`, поэтому состояние "approved" зависит от списка
+ * одобривших во всех редакциях (CE, EE/Free, Premium).
  */
 export function latestReviewState(approvals: GitLabApprovalResponse): {
   state: "pending" | "approved";
 } {
-  // REQ-FR-integration.pr-mr.resolve-review-decision (criteria 1-2):
-  // approval status requires a non-empty approver list; the vacuous
-  // `approved: true` without approvers does not count as a real approval.
+  // REQ-FR-integration.pr-mr.resolve-review-decision (критерии 1-2):
+  // статус approval требует непустого списка одобривших; формальное
+  // `approved: true` без approver-ов не считается реальным одобрением.
   const hasRealApproval = (approvals.approved_by?.length ?? 0) > 0;
   return {
     state: approvals.approved === true && hasRealApproval ? "approved" : "pending",
   };
 }
 
-/** System note that records an MR review action (approved / requested changes). */
+/** Системная заметка, фиксирующая действие ревью MR (approved/changes requested). */
 export interface GitLabReviewActionNote {
   id: number;
   body: string | null;
@@ -471,14 +615,16 @@ export interface GitLabReviewActionNote {
 }
 
 /**
- * GitLab writes a system note "approved this merge request" for every Approve
- * action. The `(?:^|\s)` anchor keeps "unapproved this merge request" from
- * matching. Approval is detected through this note (like "requested changes"
- * already is) because it is the only event channel available on every tier.
+ * GitLab пишет системную заметку "approved this merge request" на каждое
+ * действие Approve. Якорь `(?:^|\s)` не даёт совпасть строке
+ * "unapproved this merge request". Одобрение определяется по этой заметке,
+ * потому что это единственный канал событий, доступный на всех тарифах.
  */
 const APPROVAL_NOTE_PATTERN = /(?:^|\s)approved this merge request/i;
+/** Системная заметка о запросе изменений; формулировку задает сам GitLab. */
 const REQUEST_CHANGES_NOTE_PATTERN = /requested changes/i;
 
+/** Приводит REST-заметку к минимальной форме, нужной вызывающему коду. */
 function toReviewActionNote(note: GitLabNoteResponse): GitLabReviewActionNote {
   return {
     id: note.id,
@@ -489,10 +635,10 @@ function toReviewActionNote(note: GitLabNoteResponse): GitLabReviewActionNote {
 }
 
 /**
- * Locate the most recent GitLab system note recording a "requested changes"
- * review action. Detection lives in the service layer so route logic never
- * spreads text-pattern checks over note payloads (structured classification
- * rule). Returns null when no such note exists.
+ * Находит самую свежую системную заметку GitLab с действием
+ * "requested changes". Поиск реализован в сервисе, чтобы логика маршрутов
+ * не размазывала проверки шаблонов по payload заметок.
+ * Возвращает null, если такой заметки нет.
  */
 export function findLatestRequestChangesNote(
   notes: GitLabNoteResponse[],
@@ -504,9 +650,9 @@ export function findLatestRequestChangesNote(
 }
 
 /**
- * Locate the most recent GitLab system note recording an "approved" MR event.
- * Returns null when no such note exists; the caller treats the note id as the
- * edge-trigger marker for plan approval.
+ * Находит самую свежую системную заметку GitLab с событием "approved".
+ * Возвращает null, если заметки нет; вызывающий код использует её id как
+ * маркер края для одобрения плана.
  */
 export function findLatestApprovalNote(notes: GitLabNoteResponse[]): GitLabReviewActionNote | null {
   const latest = notes
@@ -516,16 +662,15 @@ export function findLatestApprovalNote(notes: GitLabNoteResponse[]): GitLabRevie
 }
 
 /**
- * System notes that revoke an approval whose "approved this merge request"
- * note is still present in the MR timeline: the explicit "unapproved this
- * merge request" action, and the push-triggered "reset approvals ..." sweep
- * GitLab writes when a new commit invalidates the existing approvals.
+ * Системные заметки, отменяющие одобрение, даже если заметка
+ * "approved this merge request" ещё есть в ленте MR:
+ * явное действие "unapproved this merge request" и автоматический
+ * сброс "reset approvals ..." после push нового коммита.
  *
- * GitHub needs no equivalent helper because dismissing a review rewrites the
- * review row's own state, so `latestReviewState` never observes a stale
- * APPROVED entry. GitLab only appends notes, so the route has to compare the
- * approval note id against the newest revocation note id and ignore an
- * approval that a newer revocation superseded.
+ * В GitHub отдельный помощник не нужен: dismiss review перезаписывает состояние
+ * самой ревью-строки, и `latestReviewState` не видит устаревший APPROVED.
+ * В GitLab заметки только добавляются, поэтому маршрут сравнивает id
+ * заметки одобрения с id последней заметки отмены.
  */
 const APPROVAL_RESET_NOTE_PATTERNS = [
   /(?:^|\s)unapproved this merge request/i,
@@ -533,14 +678,13 @@ const APPROVAL_RESET_NOTE_PATTERNS = [
 ];
 
 /**
- * Locate the most recent GitLab system note that revokes an approval
- * (unapprove action or push-triggered approval reset). Returns null when no
- * such note exists. Detection lives in the service layer so route logic stays
- * free of note-body pattern checks.
+ * Находит самую свежую системную заметку GitLab, отменяющую одобрение
+ * (действие unapprove или reset approvals после push).
+ * Возвращает null, если такой заметки нет.
  *
- * REQ-FR-integration.pr-mr.resolve-review-decision (criterion 9):
- * revocation cancels the earlier approval; the route compares note ids
- * and applies only non-revoked approvals.
+ * REQ-FR-integration.pr-mr.resolve-review-decision (критерий 9):
+ * отмена аннулирует более раннее одобрение; маршрут сравнивает id заметок
+ * и применяет только неотменённые approvals.
  */
 export function findLatestApprovalResetNote(
   notes: GitLabNoteResponse[],
@@ -556,10 +700,11 @@ export function findLatestApprovalResetNote(
 }
 
 /**
- * Compose human (non-system) MR note bodies newer than `sinceNoteId` into a
- * single planner feedback string. Notes containing `excludeBodyContaining`
- * (e.g. the AIF marker prefix) are skipped so the bot never feeds its own
- * comments back into replanning. Returns null when there is no new feedback.
+ * Собирает тексты человеческих (не системных) заметок MR новее `sinceNoteId`
+ * в одну строку обратной связи для планировщика.
+ * Заметки с `excludeBodyContaining` (например, префиксом маркера AIF)
+ * пропускаются, чтобы бот не кормил в перепланирование собственные комментарии.
+ * Возвращает null, если новой обратной связи нет.
  */
 export function collectMergeRequestHumanFeedback(
   notes: GitLabNoteResponse[],
@@ -568,13 +713,19 @@ export function collectMergeRequestHumanFeedback(
 ): string | null {
   const parts: string[] = [];
   for (const note of notes) {
+    // Системные заметки - это события GitLab, а не реплики людей.
     if (note.system) continue;
     if (note.id <= sinceNoteId) continue;
     const body = (note.body ?? "").trim();
     if (!body) continue;
+    // Отсекаем собственные комментарии бота: иначе он перескажет их себе же.
     if (excludeBodyContaining.length > 0 && body.includes(excludeBodyContaining)) continue;
+    // Автор в квадратных скобках и обрезка на 2000 символов удерживают промпт
+    // в разумных рамках, даже если человек вставил огромный лог.
     parts.push(`[${note.author?.username ?? "unknown"}] ${body.slice(0, 2000)}`);
   }
+  // Жесткий лимит на итоговую обратную связь: планировщик получает выжимку,
+  // а не весь тред целиком.
   const feedback = parts.join("\n\n").trim().slice(0, 20_000);
   return feedback.length > 0 ? feedback : null;
 }

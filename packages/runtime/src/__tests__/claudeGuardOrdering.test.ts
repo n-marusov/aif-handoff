@@ -3,13 +3,13 @@ import type { RuntimeRunInput } from "../types.js";
 import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
 
 /**
- * Hermetic ordering regression (PR #162 review, P2): the version guard must run
- * BEFORE the Agent SDK `query()` so an incompatible Claude Code binary is
- * rejected with `CLAUDE_VERSION_UNSUPPORTED` rather than crashing inside the
- * SDK. The full adapter smoke is integration-gated; this test mocks the guard
- * and the stream entry point and asserts call order through the real
- * `adapter.run()` → `runClaudeRuntime` flow, with no external binary and no
- * integration flag.
+ * Герметичный регресс-тест порядка (ревью PR #162, P2): version guard обязан
+ * выполняться ДО `query()` Agent SDK, чтобы несовместимый бинарник Claude Code
+ * отклонялся с `CLAUDE_VERSION_UNSUPPORTED`, а не падал внутри SDK.
+ * Полный smoke адаптера закрыт интеграционным флагом; этот тест мокнит guard
+ * и точку входа потока и утверждает порядок вызовов через реальный
+ * `adapter.run()` → `runClaudeRuntime`, без внешнего бинарника и без
+ * интеграционного флага.
  */
 const { guardSpy, streamSpy, order } = vi.hoisted(() => {
   const order: string[] = [];

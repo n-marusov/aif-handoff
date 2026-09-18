@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { appSettings, projects, runtimeProfiles, taskComments, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 
-// Mock the shared db module to use test db
+// Мокаем общий модуль БД, чтобы использовалась тестовая БД
 const testDb = { current: createTestDb() };
 const mockInternalBroadcastToken = { value: "" };
 
@@ -31,7 +31,7 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   };
 });
 
-// Mock broadcast to prevent WS errors in tests
+// Мокаем broadcast, чтобы избежать ошибок WS в тестах
 vi.mock("../ws.js", () => ({
   broadcast: vi.fn(),
   setupWebSocket: vi.fn(() => ({
@@ -41,7 +41,7 @@ vi.mock("../ws.js", () => ({
   getInjectWebSocket: vi.fn(),
 }));
 
-// Mock attachment storage for download tests
+// Мокаем хранилище вложений для тестов скачивания
 const mockReadAttachment = vi.fn();
 vi.mock("../services/attachmentStorage.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/attachmentStorage.js")>();
@@ -57,7 +57,7 @@ vi.mock("../services/runtime.js", () => ({
   resolveApiLightModel: async () => "claude-haiku-3-5",
 }));
 
-// Import after mocks
+// Импорт после моков
 const { tasksRouter } = await import("../routes/tasks.js");
 const { broadcast: mockBroadcast } = await import("../ws.js");
 
@@ -119,13 +119,13 @@ describe("tasks API", () => {
         .run();
       db.insert(tasks).values({ id: "2", projectId: OTHER_PROJECT_UUID, title: "Task 2" }).run();
 
-      // Legacy bare path retained until dashboard consumers migrate to /overview.
+      // Легаси-голый путь сохранён до миграции потребителей дашборда на /overview.
       const res = await app.request("/tasks");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toHaveLength(2);
-      // Full mapped Task[] shape (not raw TaskRow, not lightweight TaskListItem):
-      // tags parsed into an array, runtimeOptions parsed, raw JSON columns absent.
+      // Полная форма Task[] после маппинга (не сырой TaskRow и не облегчённый TaskListItem):
+      // tags разобраны в массив, runtimeOptions разобраны, сырые JSON-колонки отсутствуют.
       expect(body[0]).toHaveProperty("plan");
       expect(body[0].tags).toEqual(["alpha", "beta"]);
       expect(body[0]).toHaveProperty("runtimeOptions");
@@ -224,13 +224,13 @@ describe("tasks API", () => {
     });
 
     it("normalizes non-UTC scheduledAt to UTC Z form", async () => {
-      // +03:00 offset, 2 hours in the future as UTC instant
+      // смещение +03:00, через 2 часа в будущем как момент времени UTC
       const future = new Date(Date.now() + 2 * 60 * 60_000);
       const futureInOffset = new Date(future.getTime() + 3 * 60 * 60_000);
       const yyyy = futureInOffset.getUTCFullYear();
       const mm = String(futureInOffset.getUTCMonth() + 1).padStart(2, "0");
       const dd = String(futureInOffset.getUTCDate()).padStart(2, "0");
-      // Express the same instant with +03:00 offset (UTC+3)
+      // Выражаем тот же момент со смещением +03:00 (UTC+3)
       const offsetIso = `${yyyy}-${mm}-${dd}T${String(futureInOffset.getUTCHours()).padStart(2, "0")}:${String(futureInOffset.getUTCMinutes()).padStart(2, "0")}:00+03:00`;
 
       const res = await app.request("/tasks", {
@@ -244,7 +244,7 @@ describe("tasks API", () => {
       });
       expect(res.status).toBe(201);
       const body = await res.json();
-      // Must be normalized to UTC Z so DB lexical compare matches instant compare
+      // Должно быть нормализовано к UTC Z, чтобы лексикографическое сравнение в БД совпадало со сравнением моментов
       expect(body.scheduledAt).toMatch(/Z$/);
       expect(new Date(body.scheduledAt).getTime()).toBe(new Date(offsetIso).getTime());
     });
@@ -2306,7 +2306,7 @@ describe("tasks API", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.position).toBe(1500);
-      // updatedAt must remain unchanged — list views sorted by "updated" stay stable
+      // updatedAt обязан остаться неизменным — списки, отсортированные по «updated», должны быть стабильны
       expect(body.updatedAt).toBe(frozen);
     });
   });

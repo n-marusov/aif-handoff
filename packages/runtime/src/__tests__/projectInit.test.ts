@@ -71,7 +71,7 @@ function createMockRegistry(
 describe("initProject (runtime)", () => {
   let projectRoot: string;
 
-  /** Configure execFileSyncMock to return a version string for --version calls. */
+  /** Настраивает execFileSyncMock возвращать строку версии на вызовы --version. */
   function mockAiFactoryVersion(version: string): void {
     execFileSyncMock.mockImplementation((cmd: string, args: string[]) => {
       if (args.includes("--version")) return version;
@@ -85,7 +85,7 @@ describe("initProject (runtime)", () => {
     aiFactoryResolveMock.mockReset();
     initBaseProjectDirectoryMock.mockReset();
     aiFactoryResolveMock.mockReturnValue("C:\\fake\\ai-factory\\bin\\ai-factory.js");
-    // Default: version below threshold — no --config
+    // По умолчанию: версия ниже порога — без --config
     mockAiFactoryVersion("2.9.2");
   });
 
@@ -127,7 +127,7 @@ describe("initProject (runtime)", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("ai-factory init");
     expect(result.error).toContain("ai-factory init exited with code 1");
-    // .ai-factory/ should NOT exist so retry is possible
+    // .ai-factory/ НЕ должен существовать, чтобы повтор был возможен
     expect(existsSync(join(projectRoot, ".ai-factory"))).toBe(false);
   });
 

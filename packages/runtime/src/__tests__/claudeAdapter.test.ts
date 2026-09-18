@@ -15,7 +15,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   getSessionMessages: getSessionMessagesMock,
 }));
 
-// Mock the CLI probe so tests don't depend on `claude` being installed
+// Мок CLI-пробы, чтобы тесты не зависели от установленного `claude`
 vi.mock("../adapters/claude/cli.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../adapters/claude/cli.js")>();
   return {
@@ -151,7 +151,7 @@ function hangingDiscoverySession(returnSpy: () => void, closeSpy?: () => void) {
   return {
     async supportedModels() {
       await new Promise<never>(() => {
-        // intentionally never resolved
+        // намеренно никогда не резолвится
       });
       return [];
     },
@@ -448,9 +448,9 @@ describe("Claude runtime adapter", () => {
   });
 
   it("emits tool:question events for AskUserQuestion tool_use blocks in session history", async () => {
-    // Reviewer point (PR #77): runtime-only/virtual sessions must surface the
-    // question on reload. Without projecting tool_use → tool:question here, a
-    // question-only assistant turn disappears from GET /chat/sessions/:id/messages.
+    // Замечание ревьюера (PR #77): runtime-only/виртуальные сессии обязаны показывать
+    // вопрос при перезагрузке. Без проекции tool_use → tool:question здесь
+    // assistant-ход с одним вопросом исчезает из GET /chat/sessions/:id/messages.
     getSessionMessagesMock.mockResolvedValueOnce([
       {
         uuid: "m-text",
@@ -542,9 +542,9 @@ describe("Claude runtime adapter", () => {
     expect(mixedIndex).toBeGreaterThanOrEqual(0);
     expect(events[mixedIndex + 1]?.type).toBe("tool:question");
 
-    // Non-question tool_use blocks (e.g. Bash) are not projected as events here —
-    // the history path only surfaces interactive questions that would otherwise
-    // be lost; activity for other tools is out of scope for chat replay.
+    // Не-вопросные tool_use блоки (например, Bash) здесь не проецируются в события —
+    // путь истории показывает только интерактивные вопросы, которые иначе
+    // потерялись бы; активность прочих инструментов вне области chat replay.
     expect(events.some((event) => event.type === "tool:use")).toBe(false);
   });
 
@@ -607,7 +607,7 @@ describe("Claude runtime adapter", () => {
   it("validates connection with runtime-specific rules", async () => {
     const adapter = createClaudeRuntimeAdapter();
 
-    // SDK transport passes without API key (session auth)
+    // SDK-транспорт проходит без API-ключа (сессионная авторизация)
     const sdkNoKey = await adapter.validateConnection!({
       runtimeId: "claude",
       providerId: "anthropic",
@@ -974,16 +974,16 @@ describe("Claude runtime adapter", () => {
     expect(queryMock).toHaveBeenCalledTimes(1);
     const env = queryMock.mock.calls[0][0].options.env as Record<string, string>;
 
-    // profile.options.environment is forwarded to the SDK
+    // profile.options.environment пробрасывается в SDK
     expect(env.PROFILE_KEY).toBe("profile-value");
-    // legacy execution.hooks.environment still works on its own
+    // legacy execution.hooks.environment по-прежнему работает сам по себе
     expect(env.LEGACY_KEY).toBe("legacy-value");
-    // per-call execution.environment still works on its own
+    // per-call execution.environment по-прежнему работает сам по себе
     expect(env.PER_CALL_KEY).toBe("per-call-value");
-    // precedence (later wins): hooks < options < execution
+    // приоритет (поздний главнее): hooks < options < execution
     expect(env.HOOK_OVER).toBe("from-profile");
     expect(env.PRECEDENCE_KEY).toBe("from-execution");
-    // non-string entries from profile.options.environment are dropped
+    // не-строковые записи из profile.options.environment отбрасываются
     expect(env).not.toHaveProperty("DROP_NUMBER");
   });
 
@@ -1025,7 +1025,7 @@ describe("Claude runtime adapter", () => {
 
     expect(queryMock).toHaveBeenCalledTimes(1);
     const env = queryMock.mock.calls[0][0].options.env as Record<string, string>;
-    // numeric-keyed array entries must not leak through as env vars
+    // записи массива с числовыми ключами не должны утекать как env-переменные
     expect(env).not.toHaveProperty("0");
     expect(env).not.toHaveProperty("1");
   });

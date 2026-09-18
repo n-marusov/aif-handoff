@@ -72,7 +72,7 @@ describe(
 
       expect(result).toEqual({ cleaned: true, stashSha: null });
       expect(existsSync(worktreePath)).toBe(false);
-      // Branch is intentionally retained — an open PR/MR may still need it.
+      // Ветку намеренно сохраняем — открытый PR/MR всё ещё может на неё ссылаться.
       expect(git(projectRoot, ["show-ref", "--verify", "refs/heads/feature/x"])).toContain(
         "refs/heads/feature/x",
       );
