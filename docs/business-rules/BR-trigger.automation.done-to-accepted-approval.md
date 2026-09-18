@@ -29,6 +29,9 @@
 - **Комментарий `/approve`:** проверяется в полях `planReviewFeedback` и `reviewComments` задачи (заполняются при синхронизации VCS).
 - **Только AI-задачи:** автоматическое принятие работает только для задач под владением AI (`executionOwner === "ai"`). Human-owned задачи остаются в `done` до ручного одобрения.
 - **Activity log:** при переходе в `accepted` в лог задачи записывается причина: "PR/MR merged", "PR/MR review approved" или "/approve comment detected".
+- **Стадия ревью:** если задача ещё не завершила стадию ревью, слияние PR/MR закрывает и её: стадия ревью завершается решением человека, после чего задача принимается; рабочее дерево задачи освобождается.
+- **Действующее одобрение:** одобрение учитывается только как действующее — отозванное или сброшенное одобрение приёмку не запускает ([`BR-inference.git.review-decision-precedence`](BR-inference.git.review-decision-precedence.md)).
+- **Повторная обработка:** если переход не удался из-за конкурентного изменения состояния задачи, решение применяется при следующей сверке и не теряется.
 - **Без PR/MR:** если у задачи нет связанного VCS issue link, `done-checker` ничего не делает — задача остаётся в `done`.
 
 ## Обоснование
@@ -45,4 +48,5 @@
 ## Связанные правила
 
 - [`BR-constraint.task-lifecycle.transitions`](BR-constraint.task-lifecycle.transitions.md) — допустимые переходы статусов задачи
+- [`BR-inference.git.review-decision-precedence`](BR-inference.git.review-decision-precedence.md) — действующее решение ревьюера
 - [`BR-constraint.automation.verify-no-loop`](BR-constraint.automation.verify-no-loop.md) — запрет циклических перезапусков Verify

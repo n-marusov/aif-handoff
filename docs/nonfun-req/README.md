@@ -72,13 +72,13 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 
 ## Текущее состояние
 
-На 2026-09-14 в каталоге **25 NFR**: формализация выполнена реверс-инжинирингом из кода и документации. Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
+На 2026-09-18 в каталоге **26 NFR**: формализация выполнена реверс-инжинирингом из кода и документации. Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
 
 | Показатель              | Значение                                                |
 | ----------------------- | ------------------------------------------------------- |
-| NFR всего (файлов)      | 25                                                      |
-| По приоритетам          | P0 — 4 · P1 — 14 · P2 — 7                               |
-| По классу               | `as is` — 16 · `to be` — 9                              |
+| NFR всего (файлов)      | 26                                                      |
+| По приоритетам          | P0 — 4 · P1 — 15 · P2 — 7                               |
+| По классу               | `as is` — 18 · `to be` — 8                              |
 | Покрытие областей       | api · security · data · infra · ops · integration       |
 | Покрытие квалификаторов | performance · availability · observability · compliance |
 
@@ -105,6 +105,7 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 | `REQ-NFR-security.compliance.origin-validation`              | P1        | to be | Валидация origin запросов (Фаза 2)                             |
 | `REQ-NFR-security.compliance.login-rate-limit`               | P1        | to be | Rate-limit на попытки входа (Фаза 2)                           |
 | `REQ-NFR-integration.availability.vcs-rate-limit-resilience` | P2        | as is | Resilience при rate-limit VCS (Фаза 2)                         |
+| `REQ-NFR-integration.compliance.review-event-idempotency`    | P1        | as is | Идемпотентная обработка решений ревью без потери событий       |
 | `REQ-NFR-integration.availability.runtime-provider-fallback` | P2        | as is | Переключение адаптера при недоступности провайдера             |
 | `REQ-NFR-infra.performance.concurrency-limits`               | P2        | as is | Ограничение параллельного выполнения задач                     |
 | `REQ-NFR-data.compliance.database-migration-integrity`       | P2        | as is | Append-only миграции без повреждения данных                    |

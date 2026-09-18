@@ -74,16 +74,16 @@ REQ-FR-<L1>.<L2>.<action>
 
 ## Текущее состояние
 
-На 2026-09-14 в каталоге **43 FR**: FR детализируют 42 UC системы и 1 дополнительное требование, выявленное из анализа ошибок workspace tools.
+На 2026-09-18 в каталоге **46 FR**: FR детализируют 44 UC системы и 2 дополнительных требования, выявленных из анализа реализации (создание workspace-файлов стадии реализации, инициализация AI Factory scaffold).
 
 | Показатель                   | Значение                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| FR всего (файлов)            | 43                                                                                                                  |
-| По приоритетам               | P0 — 16 · P1 — 17 · P2 — 10                                                                                         |
-| По классу                    | `as is` — 42 · `to be` — 1                                                                                          |
+| FR всего (файлов)            | 46                                                                                                                  |
+| По приоритетам               | P0 — 14 · P1 — 24 · P2 — 8                                                                                          |
+| По классу                    | `as is` — 45 · `to be` — 1                                                                                          |
 | Покрытие доменов (L1)        | все 11 доменов: pipeline, dashboard, runtime, vcs-auto, accounting, handoff, chat, auth, audit, integration, warmup |
 | Покрытие поддоменов (L2)     | все 35 поддоменов (полное покрытие)                                                                                 |
-| UC-источников (`use-cases/`) | 42 UC (`as is`): все домены L1 покрыты; 0 `to be`-UC                                                                |
+| UC-источников (`use-cases/`) | 44 UC (`as is`): все домены L1 покрыты; 0 `to be`-UC                                                                |
 
 Все FR верифицированы на соответствие исходному коду: state machine (`packages/shared/src/stateMachine.ts`), data layer (`packages/data/src/taskTransitions.ts`, `taskOwnership.ts`, `audit.ts`, `participants.ts`, `authSessions.ts`), coordinator (`packages/agent/src/coordinator.ts`), runtime (`packages/runtime/src/errors.ts`, `usageSink.ts`, `registry.ts`, `resolution.ts`, `bootstrap.ts`), API routes (`packages/api/src/routes/`) и subagents (`packages/agent/src/subagents/`).
 

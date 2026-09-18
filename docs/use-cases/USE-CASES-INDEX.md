@@ -102,6 +102,7 @@
 | --------------------------------------------------------------------------------------------------- | --------- | -------------- | ------- |
 | [UC-integration.issues.sync-github-issue](UC-integration.issues.sync-github-issue.md)               | P2        | Schedule/Agent | `as is` |
 | [UC-integration.pr-mr.publish-github-pr](UC-integration.pr-mr.publish-github-pr.md)                 | P2        | Agent          | `as is` |
+| [UC-integration.pr-mr.resolve-review-decision](UC-integration.pr-mr.resolve-review-decision.md)     | P1        | Schedule/Agent | `as is` |
 | [UC-integration.ci-status.check-pipeline-status](UC-integration.ci-status.check-pipeline-status.md) | P2        | Schedule/Agent | `as is` |
 
 ## warmup — Разогрев сессий (HF12)
@@ -112,4 +113,4 @@
 
 ---
 
-> Всего UC: **42**. Статус UC должен актуализироваться по мере развития системы. `to be`-UC помечаются фазой roadmap.
+> Всего UC: **44**. Статус UC должен актуализироваться по мере развития системы. `to be`-UC помечаются фазой roadmap.

@@ -63,9 +63,9 @@ business-rules/              — бизнес-правила продукта (B
 | `task-lifecycle` | Стадии задачи, допустимость переходов, приостановка, приёмка, планирование | 6      |
 | `ownership`      | Владение задачей, передача, история исполнителей, допуск к автоматизации   | 5      |
 | `auth`           | Роли, полномочия, изоляция задач, учётные данные, сессии                   | 6      |
-| `project`        | Границы проекта, профили runtime                                           | 2      |
-| `automation`     | Конвейер, авто-очередь, гейты ревью и лимитов, фиксация, параллелизм, сбои | 9      |
-| `git`            | Ветки, коммиты, конвенции, Git-лок, рабочие деревья, внешняя VCS           | 6      |
+| `project`        | Границы проекта, профили runtime                                           | 4      |
+| `automation`     | Конвейер, авто-очередь, гейты ревью и лимитов, фиксация, параллелизм, сбои | 15     |
+| `git`            | Ветки, коммиты, конвенции, Git-лок, рабочие деревья, внешняя VCS           | 8      |
 | `audit`          | Неизменяемый журнал, субъект действия, снимки состояния, наблюдаемость     | 4      |
 
 ---
@@ -118,11 +118,12 @@ business-rules/              — бизнес-правила продукта (B
 
 Политики границ проекта и конфигурации исполнения.
 
-| Правило                                                                                   | Назначение                                                                      |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [BR-fact.project.task-scope](BR-fact.project.task-scope.md)                               | Задача принадлежит ровно одному проекту; проект изолирует задачи и настройки.   |
-| [BR-fact.project.runtime-profiles](BR-fact.project.runtime-profiles.md)                   | Профили runtime для этапов с каскадным разрешением (задача → проект → система). |
-| [BR-constraint.project.no-auto-agent-infra](BR-constraint.project.no-auto-agent-infra.md) | Агентская инфраструктура не добавляется в проект автоматически.                 |
+| Правило                                                                                     | Назначение                                                                                           |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [BR-fact.project.task-scope](BR-fact.project.task-scope.md)                                 | Задача принадлежит ровно одному проекту; проект изолирует задачи и настройки.                        |
+| [BR-fact.project.runtime-profiles](BR-fact.project.runtime-profiles.md)                     | Профили runtime для этапов с каскадным разрешением (задача → проект → система).                      |
+| [BR-constraint.project.no-auto-agent-infra](BR-constraint.project.no-auto-agent-infra.md)   | Агентская инфраструктура не добавляется в проект автоматически.                                      |
+| [BR-constraint.project.scaffold-idempotency](BR-constraint.project.scaffold-idempotency.md) | AI Factory scaffold инициализируется только при отсутствии; повторный prepare его не перезаписывает. |
 
 ---
 
@@ -130,17 +131,23 @@ business-rules/              — бизнес-правила продукта (B
 
 Политики автоматического продвижения задач, гейтов качества и обработки сбоев.
 
-| Правило                                                                                 | Назначение                                                                          |
-| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [BR-trigger.automation.pipeline](BR-trigger.automation.pipeline.md)                     | Система автоматически продвигает задачу по стадиям с условиями входа и выхода.      |
-| [BR-trigger.automation.auto-queue](BR-trigger.automation.auto-queue.md)                 | Авто-очередь наполняет конвейер проекта до заданной глубины в порядке постановки.   |
-| [BR-trigger.automation.plan-review-gate](BR-trigger.automation.plan-review-gate.md)     | План публикуется и требует утверждения человеком до начала реализации.              |
-| [BR-trigger.automation.auto-review](BR-trigger.automation.auto-review.md)               | Авто-ревью идёт циклами с ограниченным числом попыток и эскалацией человеку.        |
-| [BR-trigger.automation.completion-commit](BR-trigger.automation.completion-commit.md)   | Перед терминальной стадией изменения фиксируются и проверяются.                     |
-| [BR-constraint.automation.concurrency](BR-constraint.automation.concurrency.md)         | В проекте одна задача за раз, если нет изоляции; общие рабочие копии — эксклюзивно. |
-| [BR-trigger.automation.failure-recovery](BR-trigger.automation.failure-recovery.md)     | Сбои классифицируются: повтор, блокировка или ручной разбор; циклы прерываются.     |
-| [BR-trigger.automation.runtime-limit-gate](BR-trigger.automation.runtime-limit-gate.md) | Учёт и упреждающая блокировка при приближении к лимиту провайдера.                  |
-| [BR-trigger.automation.qa](BR-trigger.automation.qa.md)                                 | QA для задач AI, не более одного прогона, зависшие прогоны восстанавливаются.       |
+| Правило                                                                                                     | Назначение                                                                          |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [BR-trigger.automation.pipeline](BR-trigger.automation.pipeline.md)                                         | Система автоматически продвигает задачу по стадиям с условиями входа и выхода.      |
+| [BR-trigger.automation.auto-queue](BR-trigger.automation.auto-queue.md)                                     | Авто-очередь наполняет конвейер проекта до заданной глубины в порядке постановки.   |
+| [BR-trigger.automation.plan-review-gate](BR-trigger.automation.plan-review-gate.md)                         | План публикуется и требует утверждения человеком до начала реализации.              |
+| [BR-constraint.automation.plan-validation-gate](BR-constraint.automation.plan-validation-gate.md)           | Задача не переходит в Plan Review с пустым или отсутствующим планом.                |
+| [BR-trigger.automation.auto-review](BR-trigger.automation.auto-review.md)                                   | Авто-ревью идёт циклами с ограниченным числом попыток и эскалацией человеку.        |
+| [BR-trigger.automation.completion-commit](BR-trigger.automation.completion-commit.md)                       | Перед терминальной стадией изменения фиксируются и проверяются.                     |
+| [BR-constraint.automation.implementation-commit](BR-constraint.automation.implementation-commit.md)         | Изменения реализатора коммитятся в ветку задачи перед публикацией PR/MR.            |
+| [BR-constraint.automation.workspace-tool-capability](BR-constraint.automation.workspace-tool-capability.md) | Workspace tools покрывают файловые операции, необходимые для выполнения плана.      |
+| [BR-constraint.automation.skill-content-delivery](BR-constraint.automation.skill-content-delivery.md)       | Модель получает полный текст инструкций скилла, а не только его имя.                |
+| [BR-constraint.automation.verify-no-loop](BR-constraint.automation.verify-no-loop.md)                       | Непрерывный цикл verify без прохождения реализации запрещён.                        |
+| [BR-constraint.automation.concurrency](BR-constraint.automation.concurrency.md)                             | В проекте одна задача за раз, если нет изоляции; общие рабочие копии — эксклюзивно. |
+| [BR-trigger.automation.failure-recovery](BR-trigger.automation.failure-recovery.md)                         | Сбои классифицируются: повтор, блокировка или ручной разбор; циклы прерываются.     |
+| [BR-trigger.automation.runtime-limit-gate](BR-trigger.automation.runtime-limit-gate.md)                     | Учёт и упреждающая блокировка при приближении к лимиту провайдера.                  |
+| [BR-trigger.automation.qa](BR-trigger.automation.qa.md)                                                     | QA для задач AI, не более одного прогона, зависшие прогоны восстанавливаются.       |
+| [BR-trigger.automation.done-to-accepted-approval](BR-trigger.automation.done-to-accepted-approval.md)       | Слияние или одобрение PR/MR автоматически принимает задачу.                         |
 
 ---
 
@@ -148,14 +155,16 @@ business-rules/              — бизнес-правила продукта (B
 
 Политики именования, фиксации, изоляции и работы с внешней VCS.
 
-| Правило                                                                             | Назначение                                                                                                        |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [BR-constraint.git.branch-naming](BR-constraint.git.branch-naming.md)               | Ветка задачи именуется по конвенции проекта: префикс + идентификатор задачи.                                      |
-| [BR-constraint.git.commit-conventions](BR-constraint.git.commit-conventions.md)     | Коммиты плана используют выделенный префикс; сообщение детерминировано.                                           |
-| [BR-inference.git.convention-resolution](BR-inference.git.convention-resolution.md) | Конвенции разрешаются по приоритету: правила проекта → настройки → значения по умолчанию.                         |
-| [BR-constraint.git.operation-lock](BR-constraint.git.operation-lock.md)             | Git-операции сериализуются по проекту и не удерживаются во время работы модели.                                   |
-| [BR-constraint.git.worktree-isolation](BR-constraint.git.worktree-isolation.md)     | Рабочее дерево задачи определяется веткой; базовая ветка разрешается по fallback-цепочке; работа не уничтожается. |
-| [BR-fact.git.vcs-workflow](BR-fact.git.vcs-workflow.md)                             | Модель «одна задача — одна ветка — один PR/MR»; финальная публикация не закрывает issue раньше.                   |
+| Правило                                                                                       | Назначение                                                                                                        |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [BR-constraint.git.branch-naming](BR-constraint.git.branch-naming.md)                         | Ветка задачи именуется по конвенции проекта: префикс + идентификатор задачи.                                      |
+| [BR-constraint.git.commit-conventions](BR-constraint.git.commit-conventions.md)               | Коммиты плана используют выделенный префикс; сообщение детерминировано.                                           |
+| [BR-inference.git.convention-resolution](BR-inference.git.convention-resolution.md)           | Конвенции разрешаются по приоритету: правила проекта → настройки → значения по умолчанию.                         |
+| [BR-constraint.git.operation-lock](BR-constraint.git.operation-lock.md)                       | Git-операции сериализуются по проекту и не удерживаются во время работы модели.                                   |
+| [BR-constraint.git.worktree-isolation](BR-constraint.git.worktree-isolation.md)               | Рабочее дерево задачи определяется веткой; базовая ветка разрешается по fallback-цепочке; работа не уничтожается. |
+| [BR-constraint.git.submodule-init](BR-constraint.git.submodule-init.md)                       | При подготовке репозитория субмодули из `.gitmodules` инициализируются рекурсивно.                                |
+| [BR-fact.git.vcs-workflow](BR-fact.git.vcs-workflow.md)                                       | Модель «одна задача — одна ветка — один PR/MR»; финальная публикация не закрывает issue раньше.                   |
+| [BR-inference.git.review-decision-precedence](BR-inference.git.review-decision-precedence.md) | Действующим решением ревьюера считается последнее неотозванное; отзыв одобрения отменяет разрешение.              |
 
 ---
 
@@ -211,7 +220,7 @@ BR-<тип>.<домен>.<семантический-тег>
 
 ## Текущее состояние
 
-На 2026-09-15 каталог разбит на отдельные файлы: **44 правила в 7 доменах**. Правила выявлены из существующей документации (`vision.md`, `architecture.md`, `adr/`, `use-cases/`) и из фактической реализации (`packages/`) и сформулированы в терминах предметной области.
+На 2026-09-18 каталог разбит на отдельные файлы: **48 правил в 7 доменах**. Правила выявлены из существующей документации (`vision.md`, `architecture.md`, `adr/`, `use-cases/`) и из фактической реализации (`packages/`) и сформулированы в терминах предметной области. Счётчик домена соответствует числу файлов правил и числу строк в таблице домена.
 
 **Открытые вопросы (TBD):**
 

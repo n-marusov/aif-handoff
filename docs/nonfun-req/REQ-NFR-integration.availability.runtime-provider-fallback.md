@@ -1,4 +1,4 @@
-[← REQ-NFR-integration.availability.vcs-rate-limit-resilience](REQ-NFR-integration.availability.vcs-rate-limit-resilience.md) · [Back to README](README.md) · [REQ-NFR-infra.performance.concurrency-limits →](REQ-NFR-infra.performance.concurrency-limits.md)
+[← REQ-NFR-integration.compliance.review-event-idempotency](REQ-NFR-integration.compliance.review-event-idempotency.md) · [Back to README](README.md) · [REQ-NFR-infra.performance.concurrency-limits →](REQ-NFR-infra.performance.concurrency-limits.md)
 
 # REQ-NFR-integration.availability.runtime-provider-fallback
 

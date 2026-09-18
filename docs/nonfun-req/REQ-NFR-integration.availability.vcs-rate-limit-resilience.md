@@ -1,4 +1,4 @@
-[← REQ-NFR-security.compliance.login-rate-limit](REQ-NFR-security.compliance.login-rate-limit.md) · [Back to README](README.md) · [REQ-NFR-integration.availability.runtime-provider-fallback →](REQ-NFR-integration.availability.runtime-provider-fallback.md)
+[← REQ-NFR-security.compliance.login-rate-limit](REQ-NFR-security.compliance.login-rate-limit.md) · [Back to README](README.md) · [REQ-NFR-integration.compliance.review-event-idempotency →](REQ-NFR-integration.compliance.review-event-idempotency.md)
 
 # REQ-NFR-integration.availability.vcs-rate-limit-resilience
 
