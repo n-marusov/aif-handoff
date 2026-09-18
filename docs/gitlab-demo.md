@@ -472,7 +472,7 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 Сводка переходов при синхронизации (из кода `routes/gitlab.ts`):
 | Состояние MR на gitlab.com | Действие системы |
 | -------------------------- | ---------------- |
-| `merged` + задача `done` | задача → `verified` |
+| `merged` + задача `review`/`done` | задача → `done` → `accepted` (слияние закрывает стадию ревью) |
 | `closed` | задача → `paused` |
 | `open` | ждёт человека (никаких изменений статуса) |
 | MR «Closes #<iid>» найден у задачи в `backlog` | задача → `done` (задача уже реализована) |

@@ -112,12 +112,63 @@ resolveEffectiveRuntimeProfile(taskId: string, ...): RuntimeProfile | null
 resolveEffectiveRuntimeProfilesForTasks(projectId: string): ...
 ```
 
-### GitHub / GitLab
+### GitHub / GitLab — VCS-привязки задач
+
+GitHub и GitLab имеют зеркальный набор репозиториев (CRUD-функции).
+
+**GitHub:**
 
 ```typescript
+// Репозиторий (connection) — одна запись на проект
+findGitHubRepository(projectId: string): GitHubRepositoryConnection | undefined
+listEnabledGitHubRepositories(): GitHubRepositoryConnection[]
+upsertGitHubRepository(input: { projectId, owner, name, webUrl, defaultBranch, tokenEnvVar, eligibility, enabled, gitPreparedAt? }): GitHubRepositoryConnection
+deleteGitHubRepository(projectId: string): boolean
+recordGitHubRepositorySync(projectId: string, error: string | null): void
+
+// Иммутабельная привязка задачи к Issue
+importGitHubIssueTask(input: { projectId, owner, repository, issueNumber, state, sourceUpdatedAt, snapshot, mergeRequest?, ... }): { issue: GitHubIssueLink, taskId: string, created: boolean }
+findGitHubIssue(projectId: string, issueNumber: number): GitHubIssueLink | undefined
 findGitHubIssueByTaskId(taskId: string): GitHubIssueLink | undefined
-// CRUD GitHub/GitLab-подключений
+listGitHubIssues(projectId: string): GitHubIssueLink[]
+markGitHubIssueUnavailable(projectId: string, issueNumber: number, reason: string): void
+
+// PR state and review decision persistence
+updateGitHubPullRequest(input: { projectId, issueNumber, prNumber, prUrl, prState, reviewState, prChecksStatus?, reviewFingerprint?, lastReviewId? }): GitHubIssueLink | undefined
+updateGitHubPullRequestLastReviewId(input: { projectId, issueNumber, lastReviewId }): void
+updateGitHubPullRequestMode(projectId: string, issueNumber: number, mode: PullRequestMode): void
+
+// Review fingerprint (dedup для auto-review)
+getGitHubIssueReviewFingerprint(projectId: string, issueNumber: number): { fingerprint: string } | null
 ```
+
+**GitLab:**
+
+```typescript
+// Репозиторий (connection) — одна запись на проект
+findGitLabRepository(projectId: string): GitLabRepositoryConnection | undefined
+listEnabledGitLabRepositories(): GitLabRepositoryConnection[]
+upsertGitLabRepository(input: { projectId, namespace, name, webUrl, defaultBranch, tokenEnvVar, eligibility, enabled, gitPreparedAt? }): GitLabRepositoryConnection
+deleteGitLabRepository(projectId: string): boolean
+recordGitLabRepositorySync(projectId: string, error: string | null): void
+
+// Иммутабельная привязка задачи к Issue
+importGitLabIssueTask(input: { projectId, namespace, repository, iid, globalId, state, sourceUpdatedAt, snapshot, mergeRequest?, ... }): { issue: GitLabIssueLink, taskId: string, created: boolean }
+findGitLabIssue(projectId: string, iid: number): GitLabIssueLink | undefined
+findGitLabIssueByTaskId(taskId: string): GitLabIssueLink | undefined
+listGitLabIssues(projectId: string): GitLabIssueLink[]
+markGitLabIssueUnavailable(projectId: string, iid: number, reason: string): void
+
+// MR state, review decision, and note-id marker
+updateGitLabMergeRequest(input: { projectId, iid, mrIid, mrUrl, mrState, mrChecksStatus?, reviewState?, reviewFingerprint?, lastReviewNoteId? }): GitLabIssueLink | undefined
+updateGitLabMergeRequestLastReviewNoteId(input: { projectId, iid, lastReviewNoteId }): GitLabIssueLink | undefined
+updateGitLabMergeRequestMode(projectId: string, iid: number, mode: PullRequestMode): void
+
+// Review fingerprint (dedup для auto-review)
+getGitLabIssueReviewFingerprint(projectId: string, iid: number): { fingerprint: string } | null
+```
+
+**REQ-FR-integration.pr-mr.resolve-review-decision (критерии 11–12):** маркер `lastReviewNoteId` / `lastReviewId` записывается отдельным целенаправленным вызовом (`updateGitLabMergeRequestLastReviewNoteId`, `updateGitHubPullRequestLastReviewId`) только после успешного перехода задачи — повторная синхронизация не теряет решение при транзакционном конфликте.
 
 ## Типизированные ответы
 

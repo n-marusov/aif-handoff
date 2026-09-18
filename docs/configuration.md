@@ -206,7 +206,8 @@ requests when Participants Mode is enabled.
 Eligibility is an AND filter: every configured label must be present, and the optional
 assignee and milestone must match. With no filters, all open issues are eligible. Sync is
 idempotent by project plus issue IID and updates the existing task instead of importing
-duplicates. Review state is approvals-only (approved/pending); the coordinator never merges
+duplicates. Review state is approvals-derived (`approved` requires a non-empty `approved_by`
+list; GitLab EE's vacuous `approved=true` is never trusted); the coordinator never merges
 an MR.
 
 ## Plan Review PR/MR Gate
@@ -236,8 +237,10 @@ GitHub/GitLab issue link). The publisher:
 
 The task leaves `plan_review` only through VCS sync:
 
-- **Approval** — a GitHub review with state `approved` (or GitLab MR approvals reporting
-  `approved=true`) transitions the task `plan_review → implementing` with
+- **Approval** — a GitHub review with state `approved` (or a GitLab MR system note
+  "approved this merge request", edge-triggered by note id and cancelled by a newer
+  "unapproved…" or approval-reset note) transitions the task
+  `plan_review → implementing` with
   `planReviewState=approved`; the coordinator then starts implementation.
 - **Changes requested / comments** — a `changes_requested` GitHub review or a GitLab
   request-changes note transitions the task back to `planning` with

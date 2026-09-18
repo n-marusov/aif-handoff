@@ -202,7 +202,7 @@ GitLab issue → sync/dedupe → task → isolated worktree/branch → commit + 
       ↑                                                          │
       └── approval pending ← same task/MR ← automated review ← MR publish/update
                                                                  │
-                                       human merge → Done → Verified
+                                       human merge → Done → Accepted
 ```
 
 GitLab tasks use the same persisted per-task worktree and commit-gate machinery as GitHub
@@ -215,9 +215,12 @@ changes.
 `Done` is the terminal **MR ready for human decision** state in this mode. The coordinator
 never merges and the web UI does not offer local approve/request-change actions for MR-ready
 `done` tasks (the human decides on the MR itself; a `done`-status GitLab task is resolved via
-merge on GitLab). Review state is approvals-only: `approved` when the MR approvals endpoint reports
-`approved=true`, otherwise `pending`. A merged MR advances a MR-ready `Done` task to
-`Verified`; a closed unmerged MR pauses its task. A GitLab "Request changes" review action
+merge on GitLab). Review state is approvals-derived: `approved` only when the MR approvals
+endpoint reports `approved=true` **with** a non-empty `approved_by` list (GitLab EE reports
+`approved=true` vacuously when no approval rules are configured), otherwise `pending`. A
+merged MR advances a task parked at `review` or `done` through `done → Accepted` in one pass
+(a human merge closes the review stage); a closed unmerged MR pauses its task. A GitLab
+"Request changes" review action
 is detected from the MR notes API (system note body `requested changes` — Free tier does
 not expose it in `detailed_merge_status`) and, when newer than the last-processed note id
 (`gitlab_issues.last_review_note_id`), resumes a `done`/`review` task at `Implementing`

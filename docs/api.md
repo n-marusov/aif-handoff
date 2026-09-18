@@ -830,25 +830,36 @@ and issue linkage.
 issues/comments, and reconciles MR approval/check state. Repeated calls update the same
 task. For a newly imported issue, sync also detects an open MR whose description contains
 a same-repository `Closes`, `Fixes`, or `Resolves #<iid>` reference and creates the linked
-task directly in `done`. Review state is approvals-only: `approved` when
-`GET /merge_requests/:iid/approvals` reports `approved=true`, otherwise `pending`. A closed
-issue pauses its task; a closed unmerged MR also pauses it. A merged MR advances a MR-ready
-`done` task to `accepted`; the coordinator never merges an MR itself.
+task directly in `done`. The persisted review state is approvals-derived: `approved` only
+when `GET /merge_requests/:iid/approvals` reports `approved=true` **with a non-empty
+`approved_by` list** — GitLab EE (which includes gitlab.com projects without configured
+approval rules) reports `approved=true` vacuously, so the boolean alone is never treated as
+an approval; otherwise `pending`. A closed issue pauses its task; a closed unmerged MR also
+pauses it. A merged MR advances a task parked at `review` or `done` through `done → accepted`
+in one pass (a human merge closes the review stage and counts as final acceptance), then
+drops the task worktree; the coordinator never merges an MR itself.
 
 When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the linked MR
-is in `plan_review` mode (`mrMode === "plan_review"`), sync drives the gate the same way:
-an approvals `approved=true` result transitions the task `plan_review → implementing` with
-`planReviewState=approved`; a request-changes note transitions it back to `planning` with
-`planReviewState=changes_requested` and `planReviewFeedback` populated. Note ids are
-deduped (`lastReviewNoteId`) so repeated syncs do not bounce the task. A plan-mode MR that
-is closed without merge pauses its task with a WARN.
+is in `plan_review` mode (`mrMode === "plan_review"`), sync drives the gate from MR **system
+notes**, not the approvals boolean: an unprocessed "approved this merge request" note
+transitions the task `plan_review → implementing` with `planReviewState=approved`; a
+"requested changes" note transitions it back to `planning` with
+`planReviewState=changes_requested` and `planReviewFeedback` populated. When both review
+actions are still unprocessed, the newer note id wins. An approval only counts while no
+newer revocation note exists: the explicit "unapproved this merge request" action and the
+push-triggered "reset approvals …" sweep both invalidate the earlier approval note, because
+GitLab appends notes instead of rewriting the review (unlike a GitHub review dismissal).
+The consumed note id (`lastReviewNoteId`) is recorded only after the transition succeeds —
+a transient conflict stays retryable on the next sync — so repeated syncs do not bounce the
+task. A plan-mode MR that is closed without merge pauses its task with a WARN.
 
 A GitLab "Request changes" review action is detected from the MR notes API
 (`GET /merge_requests/:iid/notes`): the signal is a system note whose body is
 `requested changes` (GitLab Free does not expose `requested_changes` in
 `detailed_merge_status`, which stays `mergeable`). When such a note is newer than the
-last-processed one (`gitlab_issues.last_review_note_id`, persisted on every sync) and the
-task is in `done` or `review`, the sync resumes the task at `implementing` with
+last-processed one (`gitlab_issues.last_review_note_id`, recorded only after a successful
+transition) and the task is in `done` or `review`, the sync resumes the task at
+`implementing` with
 `reworkRequested=true` and resets the auto-queue commit state. The transition is
 edge-triggered by the note id, so repeated syncs do not bounce the task.
 

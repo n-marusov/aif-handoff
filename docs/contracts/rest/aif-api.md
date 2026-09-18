@@ -185,14 +185,46 @@ Middleware-цепочка:
 
 ### VCS Integration (`/api/github`, `/api/gitlab`)
 
-| Метод  | Путь                              | Описание                    | Auth      |
-| ------ | --------------------------------- | --------------------------- | --------- |
-| `GET`  | `/api/github/connections`         | Список GitHub-подключений   | Требуется |
-| `POST` | `/api/github/connections`         | Создание GitHub-подключения | Требуется |
-| `POST` | `/api/github/issues/:number/sync` | Синхронизация Issue         | Требуется |
-| `GET`  | `/api/gitlab/connections`         | Список GitLab-подключений   | Требуется |
-| `POST` | `/api/gitlab/connections`         | Создание GitLab-подключения | Требуется |
-| `POST` | `/api/gitlab/issues/:iid/sync`    | Синхронизация Issue         | Требуется |
+Эндпоинты для подключения и управления GitHub/GitLab-интеграцией.
+
+**GitHub Routes** (зарегистрированы на `projects/:id/github*`):
+
+| Метод    | Путь                                     | Описание                                                                                                                                                                                             | Auth      |
+| -------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `GET`    | `/:id/github`                            | Состояние GitHub-подключения: конфигурация + импортированные Issue                                                                                                                                   | Требуется |
+| `PUT`    | `/:id/github`                            | Создание/обновление GitHub-подключения (валидация repo, получение namespace, определение defaultBranch)                                                                                              | Требуется |
+| `DELETE` | `/:id/github`                            | Удаление GitHub-подключения                                                                                                                                                                          | Требуется |
+| `POST`   | `/:id/github/sync`                       | Синхронизация Issues, PR и решений ревью: импорт новых/изменения существующих; обработка merge → accepted, changes requested → implementing, plan review gate (approve / changes requested / revoke) | Требуется |
+| `POST`   | `/:id/github/tasks/:taskId/publish`      | Публикация реализации в виде атомарного PR (commit + push + create PR с Closes-ссылкой)                                                                                                              | Требуется |
+| `POST`   | `/:id/github/tasks/:taskId/publish-plan` | Публикация Change Plan как черновика PR (без Closes) — задача остаётся в `plan_review` до утверждения                                                                                                | Требуется |
+
+**GitLab Routes** (зарегистрированы на `projects/:id/gitlab*`):
+
+| Метод    | Путь                                     | Описание                                                                                                                      | Auth      |
+| -------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `GET`    | `/:id/gitlab`                            | Состояние GitLab-подключения: конфигурация + импортированные Issue                                                            | Требуется |
+| `PUT`    | `/:id/gitlab`                            | Создание/обновление GitLab-подключения (валидация repo, получение namespace, определение defaultBranch)                       | Требуется |
+| `DELETE` | `/:id/gitlab`                            | Удаление GitLab-подключения                                                                                                   | Требуется |
+| `POST`   | `/:id/gitlab/sync`                       | Синхронизация Issues, MR и решений ревью (см. примечание ниже)                                                                | Требуется |
+| `POST`   | `/:id/gitlab/tasks/:taskId/publish`      | Публикация реализации в виде атомарного MR (commit + push + create MR, для plan_review — черновик, для completion — с Closes) | Требуется |
+| `POST`   | `/:id/gitlab/tasks/:taskId/publish-plan` | Публикация Change Plan как черновика MR (без Closes) — задача остаётся в `plan_review` до утверждения                         | Требуется |
+
+**Примечание — обработка решений ревью через `POST sync`:**
+
+Для задачи, связанной с MR (`mrMode === "plan_review"`), sync читает системные заметки ревью (MR notes API) и применяет решение по фронту события:
+
+- **Approval** — при обнаружении новой заметки `«approved this merge request»` и отсутствии более новой заметки отзыва (`«unapproved this merge request»` / `«reset approvals …»`) задача переводится `plan_review → implementing` с `planReviewState=approved`.
+- **Changes requested** — при заметке `«requested changes»` задача возвращается в `planning` с `planReviewState=changes_requested` и сохранённой обратной связью.
+- **Competing notes** — если необработаны несколько решений, применяется последнее по времени (более новый id).
+- **Marker after success** — отметка `lastReviewNoteId` записывается только после успешного перехода; при конфликте решение повторяется на следующем sync.
+
+Для завершённой задачи (`done`/`review`):
+
+- **Changes requested** на открытом MR возвращает задачу в `implementing` с пометкой `reworkRequested=true`.
+- **Merge** (статус MR = `merged`) принимает задачу (`review → done → accepted`) за один sync; рабочее дерево освобождается.
+- **Close without merge** приостанавливает задачу.
+
+**Определение статуса одобрения:** одобренным считается состояние, в котором `/merge_requests/:iid/approvals` возвращает `approved=true` с непустым `approved_by` (на GitLab EE без настроенных правил одобрения `approved: true` приходит вакуумно — без одобряющих, поэтому требуетcя non-empty `approved_by`).
 
 ### Settings (`/api/settings`)
 
