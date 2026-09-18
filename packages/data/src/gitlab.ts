@@ -518,6 +518,43 @@ export function updateGitLabMergeRequest(input: {
 }
 
 /**
+ * Record the GitLab MR review-note marker after a review action (plan approval
+ * or requested changes) has been successfully processed. Intentionally a
+ * separate single-field update so the marker is NOT persisted until the state
+ * transition succeeds — a transient CAS conflict stays retryable on the next
+ * sync instead of permanently swallowing the review event (mirrors
+ * updateGitHubPullRequestLastReviewId; see the 2026-09-11 plan-review
+ * burn-marker incident).
+ *
+ * REQ-FR-integration.pr-mr.resolve-review-decision criteria 11-12:
+ *   marker recorded only after a successful transition; on conflict the
+ *   event stays unprocessed and retries at the next sync.
+ * REQ-NFR-integration.compliance.review-event-idempotency:
+ *   однократность применения, отсутствие потери, наблюдаемость отказа.
+ */
+export function updateGitLabMergeRequestLastReviewNoteId(input: {
+  projectId: string;
+  iid: number;
+  lastReviewNoteId: number | null;
+}): GitLabIssueLink | undefined {
+  const now = new Date().toISOString();
+  log.debug(
+    {
+      projectId: input.projectId,
+      iid: input.iid,
+      lastReviewNoteId: input.lastReviewNoteId,
+    },
+    "GitLab merge request lastReviewNoteId updated",
+  );
+  getDb()
+    .update(gitlabIssues)
+    .set({ lastReviewNoteId: input.lastReviewNoteId, lastSyncedAt: now, updatedAt: now })
+    .where(and(eq(gitlabIssues.projectId, input.projectId), eq(gitlabIssues.iid, input.iid)))
+    .run();
+  return findGitLabIssue(input.projectId, input.iid);
+}
+
+/**
  * Switch the published MR for a linked GitLab issue between plan-review and
  * final implementation mode. The MR stays on the same issue branch; only the
  * description semantics change.

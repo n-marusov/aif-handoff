@@ -64,8 +64,8 @@ export interface GitLabMergeRequestResponse {
 }
 
 interface GitLabApprovalResponse {
-  approved: boolean;
-  approved_by: Array<{ user: { username: string } }>;
+  approved?: boolean;
+  approved_by?: Array<{ user: { username: string } }>;
 }
 
 interface GitLabCommitStatusResponse {
@@ -441,18 +441,51 @@ export function reviewFingerprint(reviewComments: string): string {
   return createHash("sha256").update(reviewComments).digest("hex");
 }
 
-/** Approvals-only review state: approved ⇔ approvals.approved === true; otherwise pending. No changes_requested in v1. */
+/**
+ * Fold the MR approvals API into a review state.
+ *
+ * GitLab EE (which includes gitlab.com projects without configured approval
+ * rules) reports `approved: true` vacuously — the rule check is satisfied by
+ * zero required approvals, even before anyone clicks Approve. Only a non-empty
+ * `approved_by` proves a real approval exists, so the approver list gates the
+ * "approved" state on every edition (CE, EE/Free, Premium rule-based).
+ */
 export function latestReviewState(approvals: GitLabApprovalResponse): {
   state: "pending" | "approved";
 } {
-  return { state: approvals.approved ? "approved" : "pending" };
+  // REQ-FR-integration.pr-mr.resolve-review-decision (criteria 1-2):
+  // approval status requires a non-empty approver list; the vacuous
+  // `approved: true` without approvers does not count as a real approval.
+  const hasRealApproval = (approvals.approved_by?.length ?? 0) > 0;
+  return {
+    state: approvals.approved === true && hasRealApproval ? "approved" : "pending",
+  };
 }
 
-export interface GitLabRequestChangesNote {
+/** System note that records an MR review action (approved / requested changes). */
+export interface GitLabReviewActionNote {
   id: number;
   body: string | null;
   authorUsername: string | null;
   createdAt: string;
+}
+
+/**
+ * GitLab writes a system note "approved this merge request" for every Approve
+ * action. The `(?:^|\s)` anchor keeps "unapproved this merge request" from
+ * matching. Approval is detected through this note (like "requested changes"
+ * already is) because it is the only event channel available on every tier.
+ */
+const APPROVAL_NOTE_PATTERN = /(?:^|\s)approved this merge request/i;
+const REQUEST_CHANGES_NOTE_PATTERN = /requested changes/i;
+
+function toReviewActionNote(note: GitLabNoteResponse): GitLabReviewActionNote {
+  return {
+    id: note.id,
+    body: note.body,
+    authorUsername: note.author?.username ?? null,
+    createdAt: note.created_at,
+  };
 }
 
 /**
@@ -463,17 +496,63 @@ export interface GitLabRequestChangesNote {
  */
 export function findLatestRequestChangesNote(
   notes: GitLabNoteResponse[],
-): GitLabRequestChangesNote | null {
+): GitLabReviewActionNote | null {
   const latest = notes
-    .filter((note) => note.system && note.body?.trim().toLowerCase().includes("requested changes"))
+    .filter((note) => note.system && REQUEST_CHANGES_NOTE_PATTERN.test((note.body ?? "").trim()))
     .sort((a, b) => b.id - a.id)[0];
-  if (!latest) return null;
-  return {
-    id: latest.id,
-    body: latest.body,
-    authorUsername: latest.author?.username ?? null,
-    createdAt: latest.created_at,
-  };
+  return latest ? toReviewActionNote(latest) : null;
+}
+
+/**
+ * Locate the most recent GitLab system note recording an "approved" MR event.
+ * Returns null when no such note exists; the caller treats the note id as the
+ * edge-trigger marker for plan approval.
+ */
+export function findLatestApprovalNote(notes: GitLabNoteResponse[]): GitLabReviewActionNote | null {
+  const latest = notes
+    .filter((note) => note.system && APPROVAL_NOTE_PATTERN.test((note.body ?? "").trim()))
+    .sort((a, b) => b.id - a.id)[0];
+  return latest ? toReviewActionNote(latest) : null;
+}
+
+/**
+ * System notes that revoke an approval whose "approved this merge request"
+ * note is still present in the MR timeline: the explicit "unapproved this
+ * merge request" action, and the push-triggered "reset approvals ..." sweep
+ * GitLab writes when a new commit invalidates the existing approvals.
+ *
+ * GitHub needs no equivalent helper because dismissing a review rewrites the
+ * review row's own state, so `latestReviewState` never observes a stale
+ * APPROVED entry. GitLab only appends notes, so the route has to compare the
+ * approval note id against the newest revocation note id and ignore an
+ * approval that a newer revocation superseded.
+ */
+const APPROVAL_RESET_NOTE_PATTERNS = [
+  /(?:^|\s)unapproved this merge request/i,
+  /(?:^|\s)reset approvals?/i,
+];
+
+/**
+ * Locate the most recent GitLab system note that revokes an approval
+ * (unapprove action or push-triggered approval reset). Returns null when no
+ * such note exists. Detection lives in the service layer so route logic stays
+ * free of note-body pattern checks.
+ *
+ * REQ-FR-integration.pr-mr.resolve-review-decision (criterion 9):
+ * revocation cancels the earlier approval; the route compares note ids
+ * and applies only non-revoked approvals.
+ */
+export function findLatestApprovalResetNote(
+  notes: GitLabNoteResponse[],
+): GitLabReviewActionNote | null {
+  const latest = notes
+    .filter(
+      (note) =>
+        note.system &&
+        APPROVAL_RESET_NOTE_PATTERNS.some((pattern) => pattern.test((note.body ?? "").trim())),
+    )
+    .sort((a, b) => b.id - a.id)[0];
+  return latest ? toReviewActionNote(latest) : null;
 }
 
 /**

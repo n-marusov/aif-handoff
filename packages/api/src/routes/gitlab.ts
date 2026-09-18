@@ -15,6 +15,7 @@ import {
   recordGitLabRepositorySync,
   setTaskFields,
   updateGitLabMergeRequest,
+  updateGitLabMergeRequestLastReviewNoteId,
   updateGitLabMergeRequestMode,
   updateTaskStatus,
   upsertGitLabRepository,
@@ -35,6 +36,8 @@ import {
   GitLabApiError,
   GitLabClient,
   collectMergeRequestHumanFeedback,
+  findLatestApprovalNote,
+  findLatestApprovalResetNote,
   findLatestRequestChangesNote,
   findMergeRequestClosingIssue,
   issueIsEligible,
@@ -279,22 +282,50 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
         const mrState: "open" | "closed" | "merged" =
           mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
         const checks = await client.getCommitChecks(connection.namespace, connection.name, mr.sha);
-        // GitLab "Request changes" is not exposed via detailed_merge_status on
-        // Free; the signal is a system note ("requested changes") in the MR
-        // notes API. Track the last-processed note id so a task resumes at
-        // implementing exactly once per review action (edge-trigger), mirroring
-        // the GitHub changes_requested handling in routes/github.ts.
+        // GitLab "requested changes" and "approved" are not exposed through
+        // detailed_merge_status or the approvals API on every tier (EE/Free
+        // reports `approved: true` vacuously with no approval rules). The
+        // reliable event channel is the MR system notes API; detection lives in
+        // the service helpers and the route only consumes the structured note
+        // ids for edge-triggered transitions, mirroring the review-id model in
+        // routes/github.ts.
         const mrNotes = await client.listMergeRequestNotes(
           connection.namespace,
           connection.name,
           mr.iid,
         );
-        // GitLab "Request changes" is not exposed via detailed_merge_status on
-        // Free; the signal is a system note ("requested changes") in the MR
-        // notes API. Detection lives in the service helper; the route only
-        // consumes the structured note identity for edge-triggered transitions.
         const requestChangesNote = findLatestRequestChangesNote(mrNotes);
-        const mergeRequestUpdate: Parameters<typeof updateGitLabMergeRequest>[0] = {
+        const approvalNote = findLatestApprovalNote(mrNotes);
+        const approvalResetNote = findLatestApprovalResetNote(mrNotes);
+        // An approval stops being actionable as soon as a newer note revokes it:
+        // both the "unapproved this merge request" action and the push-triggered
+        // "reset approvals ..." sweep leave the original approval note in the MR
+        // timeline, so the note ids decide which one still stands. Without this
+        // check a revoked approval would still move plan_review to implementing.
+        // REQ-FR-integration.pr-mr.resolve-review-decision criteria 3, 9, 10:
+        // — действующее решение: последнее неотозванное;
+        // — отзыв отменяет одобрение;
+        // — при нескольких необработанных решениях действует последнее.
+        const approvalNoteIsCurrent =
+          approvalNote !== null &&
+          (approvalResetNote === null || approvalResetNote.id < approvalNote.id);
+        const effectiveApprovalNote = approvalNoteIsCurrent ? approvalNote : null;
+        if (approvalNote && !effectiveApprovalNote) {
+          log.info(
+            {
+              iid: issue.iid,
+              mrIid: mr.iid,
+              approvalNoteId: approvalNote.id,
+              resetNoteId: approvalResetNote?.id ?? null,
+            },
+            "GitLab approval note superseded by a newer unapprove/reset note; ignoring it",
+          );
+        }
+        // The lastReviewNoteId edge marker is deliberately NOT written here.
+        // It is recorded only after the matching state transition succeeds, so
+        // a transient CAS conflict stays retryable on the next sync instead of
+        // permanently swallowing the review event.
+        updateGitLabMergeRequest({
           projectId,
           iid: issue.iid,
           mrIid: mr.iid,
@@ -302,11 +333,28 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           mrState,
           mrChecksStatus: checks,
           reviewState: approvals.reviewState,
-        };
-        if (requestChangesNote) {
-          mergeRequestUpdate.lastReviewNoteId = requestChangesNote.id;
-        }
-        updateGitLabMergeRequest(mergeRequestUpdate);
+        });
+        const processedReviewNoteId = existing?.lastReviewNoteId ?? 0;
+        const pendingApprovalNote =
+          effectiveApprovalNote && effectiveApprovalNote.id > processedReviewNoteId
+            ? effectiveApprovalNote
+            : null;
+        const pendingRequestChangesNote =
+          requestChangesNote && requestChangesNote.id > processedReviewNoteId
+            ? requestChangesNote
+            : null;
+        // When both an approval and a changes-request sit unprocessed, the
+        // higher note id is the reviewer's current intent and wins.
+        const pendingReviewNote =
+          pendingApprovalNote && pendingRequestChangesNote
+            ? pendingRequestChangesNote.id > pendingApprovalNote.id
+              ? pendingRequestChangesNote
+              : pendingApprovalNote
+            : (pendingApprovalNote ?? pendingRequestChangesNote);
+        const latestReviewActionIsApproval =
+          pendingReviewNote !== null && pendingReviewNote === pendingApprovalNote;
+        const latestReviewActionIsChangesRequest =
+          pendingReviewNote !== null && pendingReviewNote === pendingRequestChangesNote;
         let task = findTaskById(result.taskId);
         const discoveredMrNeedsDone =
           closingMr && task && task.status !== "done" && task.status !== "accepted";
@@ -322,22 +370,43 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           task = findTaskById(result.taskId);
         }
         const planReviewMode = existing?.mrMode === "plan_review";
-        if (task && mrState === "merged" && task.status === "done") {
-          const verifiedTask = task;
-          updateTaskStatus(
-            task.id,
-            "accepted",
-            {},
-            { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
-          );
-          // Lifecycle close-out: drop the worktree, keep the branch.
-          await requestWorktreeCleanupAfterMerge(
-            snapshotTaskWorktree(
-              verifiedTask,
-              findProjectById(verifiedTask.projectId)?.rootPath ?? null,
-            ),
-            `MR !${mr.iid}`,
-          );
+        if (task && mrState === "merged" && (task.status === "done" || task.status === "review")) {
+          // A human merging the implementation MR is the final acceptance:
+          // when the pipeline is still parked at `review` (e.g. manual review
+          // handoff or auto-review gate disabled), the merge itself closes
+          // that stage before the task is accepted.
+          // REQ-FR-integration.pr-mr.resolve-review-decision criterion 7:
+          // слияние принимает результат, закрывая стадию ревью.
+          if (task.status === "review") {
+            updateTaskStatus(
+              task.id,
+              "done",
+              {},
+              { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
+            );
+            log.info(
+              { taskId: task.id, iid: issue.iid, mrIid: mr.iid },
+              "GitLab merge request merged; task completed the review stage",
+            );
+            task = findTaskById(task.id) ?? task;
+          }
+          if (task.status === "done") {
+            const verifiedTask = task;
+            updateTaskStatus(
+              task.id,
+              "accepted",
+              {},
+              { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
+            );
+            // Lifecycle close-out: drop the worktree, keep the branch.
+            await requestWorktreeCleanupAfterMerge(
+              snapshotTaskWorktree(
+                verifiedTask,
+                findProjectById(verifiedTask.projectId)?.rootPath ?? null,
+              ),
+              `MR !${mr.iid}`,
+            );
+          }
         } else if (task && mrState === "closed") {
           setTaskFields(task.id, { paused: true, updatedAt: new Date().toISOString() });
           if (planReviewMode && task.status === "plan_review") {
@@ -350,10 +419,10 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
           task &&
           planReviewMode &&
           task.status === "plan_review" &&
-          approvals.reviewState === "approved" &&
-          existing?.reviewState !== "approved"
+          latestReviewActionIsApproval &&
+          pendingApprovalNote
         ) {
-          markTaskPlanApproved({
+          const approved = markTaskPlanApproved({
             taskId: task.id,
             actor: {
               kind: "system",
@@ -361,23 +430,48 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
               displayNameSnapshot: "GitLab Sync",
             },
           });
-          log.info(
-            { taskId: task.id, iid: issue.iid, mrIid: mr.iid },
-            "GitLab plan approved; task resumed at implementing",
-          );
+          if (approved.ok) {
+            // Record the consumed note id only after a successful transition
+            // so a transient failure does not block retry on the next sync.
+            // REQ-FR-integration.pr-mr.resolve-review-decision criteria 11-12:
+            // отметка после успеха; при конфликте — ретрай.
+            // REQ-NFR-integration.compliance.review-event-idempotency:
+            // идемпотентность, отсутствие потери, наблюдаемость отказа.
+            updateGitLabMergeRequestLastReviewNoteId({
+              projectId,
+              iid: issue.iid,
+              lastReviewNoteId: pendingApprovalNote.id,
+            });
+            log.info(
+              { taskId: task.id, iid: issue.iid, mrIid: mr.iid, noteId: pendingApprovalNote.id },
+              "GitLab plan approved; task resumed at implementing",
+            );
+          } else {
+            log.error(
+              {
+                taskId: task.id,
+                iid: issue.iid,
+                mrIid: mr.iid,
+                noteId: pendingApprovalNote.id,
+                code: approved.code,
+                currentStatus: approved.currentStatus ?? null,
+              },
+              "markTaskPlanApproved failed; task will retry on next sync",
+            );
+          }
         } else if (
           task &&
           planReviewMode &&
           task.status === "plan_review" &&
-          requestChangesNote &&
-          requestChangesNote.id > (existing?.lastReviewNoteId ?? 0)
+          latestReviewActionIsChangesRequest &&
+          pendingRequestChangesNote
         ) {
           const feedback = collectMergeRequestHumanFeedback(
             mrNotes,
-            existing?.lastReviewNoteId ?? 0,
+            processedReviewNoteId,
             REVIEW_MARKER,
           );
-          markTaskPlanChangesRequested({
+          const requested = markTaskPlanChangesRequested({
             taskId: task.id,
             feedback,
             actor: {
@@ -386,20 +480,39 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
               displayNameSnapshot: "GitLab Review",
             },
           });
-          log.info(
-            {
-              taskId: task.id,
+          if (requested.ok) {
+            updateGitLabMergeRequestLastReviewNoteId({
+              projectId,
               iid: issue.iid,
-              mrIid: mr.iid,
-              noteId: requestChangesNote.id,
-              feedbackLength: feedback?.length ?? 0,
-            },
-            "GitLab plan review requested changes; task returned to planning",
-          );
+              lastReviewNoteId: pendingRequestChangesNote.id,
+            });
+            log.info(
+              {
+                taskId: task.id,
+                iid: issue.iid,
+                mrIid: mr.iid,
+                noteId: pendingRequestChangesNote.id,
+                feedbackLength: feedback?.length ?? 0,
+              },
+              "GitLab plan review requested changes; task returned to planning",
+            );
+          } else {
+            log.error(
+              {
+                taskId: task.id,
+                iid: issue.iid,
+                mrIid: mr.iid,
+                noteId: pendingRequestChangesNote.id,
+                code: requested.code,
+                currentStatus: requested.currentStatus ?? null,
+              },
+              "markTaskPlanChangesRequested failed; task will retry on next sync",
+            );
+          }
         } else if (
           task &&
-          requestChangesNote &&
-          requestChangesNote.id > (existing?.lastReviewNoteId ?? 0) &&
+          latestReviewActionIsChangesRequest &&
+          pendingRequestChangesNote &&
           (task.status === "done" || task.status === "review")
         ) {
           updateTaskStatus(
@@ -416,20 +529,25 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
             },
             { kind: "system", id: "gitlab-review", displayNameSnapshot: "GitLab Review" },
           );
+          updateGitLabMergeRequestLastReviewNoteId({
+            projectId,
+            iid: issue.iid,
+            lastReviewNoteId: pendingRequestChangesNote.id,
+          });
           log.info(
-            { taskId: task.id, iid: issue.iid, noteId: requestChangesNote.id },
+            { taskId: task.id, iid: issue.iid, noteId: pendingRequestChangesNote.id },
             "GitLab requested-changes review resumed task at implementing",
           );
-        } else if (requestChangesNote && task) {
+        } else if (pendingReviewNote && task) {
           log.debug(
             {
               taskId: task.id,
               iid: issue.iid,
-              noteId: requestChangesNote.id,
+              noteId: pendingReviewNote.id,
               lastReviewNoteId: existing?.lastReviewNoteId ?? null,
               status: task.status,
             },
-            "GitLab requested-changes note already processed or task not actionable; skipping",
+            "GitLab review note already processed or task not actionable; skipping",
           );
         }
       }

@@ -19,6 +19,7 @@ const {
   markGitLabIssueUnavailable,
   markGitLabRepositoryPrepared,
   updateGitLabMergeRequest,
+  updateGitLabMergeRequestLastReviewNoteId,
   updateGitLabMergeRequestMode,
   upsertGitLabRepository,
 } = await import("../index.js");
@@ -256,6 +257,34 @@ describe("GitLab issue import", () => {
       lastReviewNoteId: null,
     });
     expect(findGitLabIssueByTaskId(imported.taskId)?.lastReviewNoteId).toBeNull();
+  });
+
+  it("records the review note marker with a targeted update only", () => {
+    const imported = importGitLabIssueTask(input);
+    expect(imported.taskId).toBeTruthy();
+    const before = updateGitLabMergeRequest({
+      projectId: "project-1",
+      iid: 42,
+      mrIid: 7,
+      mrUrl: "https://gitlab.com/gitlab-org/example/-/merge_requests/7",
+      mrState: "open",
+      reviewState: "pending",
+    });
+    expect(before?.lastReviewNoteId).toBeNull();
+
+    const recorded = updateGitLabMergeRequestLastReviewNoteId({
+      projectId: "project-1",
+      iid: 42,
+      lastReviewNoteId: 555,
+    });
+
+    // Only the marker moves; every other MR column stays untouched.
+    expect(recorded).toMatchObject({
+      lastReviewNoteId: 555,
+      mrIid: 7,
+      mrState: "open",
+      reviewState: "pending",
+    });
   });
 });
 

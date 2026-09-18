@@ -13,6 +13,9 @@ vi.mock("../services/gitPrepareBridge.js", () => ({
   callAgentGitPrepare: vi
     .fn()
     .mockResolvedValue({ ok: true, gitPreparedAt: "2026-09-14T21:00:00.000Z" }),
+  // Sync routes fire-and-forget the submodule bridge; the mock factory must
+  // expose the export or the call throws a TypeError before the try block.
+  callAgentSubmoduleSync: vi.fn(async () => ({ ok: true })),
 }));
 
 const { githubRouter } = await import("../routes/github.js");
