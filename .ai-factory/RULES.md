@@ -20,3 +20,7 @@
 - **Requirements before code changes.** Before changing application behavior, capture requirements (BR, UC, FR, NFR — determine which set applies based on scope) and ADR if the change affects architecture. Use the `$requirements-clarity` skill and `software-requirements-wiegers-beatty.md` reference to formulate requirements.
 - **TDD: tests before implementation.** After requirements are captured, generate tests first according to TDD principles, verify they cover all traced acceptance criteria, and only then write implementation code. Tests must validate requirements.
 - **Traceability from requirements to tests to code.** Annotate tests and implementation code with requirement IDs in comments to maintain bidirectional traceability (requirement → test → code). Every code path should be traceable back to a requirement.
+
+## References
+
+- For **Antora documentation structure, `antora.yml` descriptors, page authoring, navigation, playbook keys, CLI, build/publish, and extensions**, see `.ai-factory/references/antora.md`.

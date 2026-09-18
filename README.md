@@ -404,6 +404,7 @@ AGENT_BYPASS_PERMISSIONS=true
 | [Architecture](docs/architecture.md)       | Agent pipeline, state machine, data flow             |
 | [API Reference](docs/api.md)               | REST endpoints, WebSocket events                     |
 | [Configuration](docs/configuration.md)     | Environment variables, logging, auth                 |
+| [Telemetry](docs/telemetry.md)             | Proposed OTel-based telemetry subsystem architecture |
 | [Providers](docs/providers.md)             | Runtime profiles, adapters, capability matrix        |
 | [MCP Sync](docs/mcp-sync.md)               | MCP tools, transports, and authentication            |
 | [GitHub Demo](docs/github-demo.md)         | GitHub.com + router.ai runbook (Plan Review PR Gate) |
