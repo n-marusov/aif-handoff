@@ -39,14 +39,14 @@
 
 ## Текущее состояние
 
-| Файл                           | Уровень            | Статус                                                                                   |
-| ------------------------------ | ------------------ | ---------------------------------------------------------------------------------------- |
-| `README.md`                    | индекс             | актуален (этот файл)                                                                     |
-| [`context.md`](context.md)     | 1 — System Context | актуален: персоны, внешние системы, функции HF1–HF12 и ключевые сценарии для AIF Handoff |
-| [`container.md`](container.md) | 2 — Container      | актуален: контейнеры `web`, `api`, `agent`, `mcp` и БД SQLite, их интерфейсы и связи     |
-| `component-*.md`               | 3 — Component      | планируется                                                                              |
-| `code-*.md`                    | 4 — Code           | планируется                                                                              |
-| [`deployment.md`](deployment.md) | Deployment       | актуален: развёртывание по окружениям (development compose, production compose, MCP stdio mode) |
+| Файл                             | Уровень            | Статус                                                                                          |
+| -------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------- |
+| `README.md`                      | индекс             | актуален (этот файл)                                                                            |
+| [`context.md`](context.md)       | 1 — System Context | актуален: персоны, внешние системы, функции HF1–HF12 и ключевые сценарии для AIF Handoff        |
+| [`container.md`](container.md)   | 2 — Container      | актуален: контейнеры `web`, `api`, `agent`, `mcp` и БД SQLite, их интерфейсы и связи            |
+| `component-*.md`                 | 3 — Component      | планируется                                                                                     |
+| `code-*.md`                      | 4 — Code           | планируется                                                                                     |
+| [`deployment.md`](deployment.md) | Deployment         | актуален: развёртывание по окружениям (development compose, production compose, MCP stdio mode) |
 
 > Уровни 1–2 и Deployment ([context.md](context.md), [container.md](container.md), [deployment.md](deployment.md)) синхронизированы с фактической реализацией в `packages/` и compose-конфигурациями.
 
