@@ -136,17 +136,18 @@ data/                    # SQLite database files (gitignored)
 | README              | README.md                     | Project landing page                                            |
 | Getting Started     | docs/getting-started.md       | Installation, setup, first steps                                |
 | Architecture        | docs/architecture.md          | Agent pipeline, state machine, data flow                        |
-| ADR                 | docs/adr/README.md            | Architecture Decision Records (13 as-is decisions)              |
+| ADR                 | docs/adr/README.md            | Architecture Decision Records (13 as-is, 6 proposed telemetry)  |
 | C4 Diagrams         | docs/c4/README.md             | C4 model: context, containers, components, deployment           |
 | API Reference       | docs/api.md                   | REST endpoints, WebSocket events                                |
 | Configuration       | docs/configuration.md         | Environment variables, logging, auth                            |
+| Telemetry           | docs/telemetry.md             | OTel telemetry subsystem architecture (proposed)                |
 | Providers           | docs/providers.md             | Runtime profiles and adapter capabilities                       |
 | MCP Sync            | docs/mcp-sync.md              | MCP tools, transports, and authentication                       |
 | GitHub Demo         | docs/github-demo.md           | GitHub.com + router.ai runbook (Plan Review PR Gate)            |
 | GitLab Demo         | docs/gitlab-demo.md           | End-to-end GitLab.com + router.ai demo runbook                  |
 | Dev GUI Demo        | docs/dev-gui-demo.md          | Local dev + Web UI GitLab/router.ai runbook                     |
-| Use Cases           | docs/use-cases/README.md      | Use case index with 42 UC files mapped to HF1–HF12              |
-| Functional Reqs     | docs/fun-req/README.md        | 42 FR files generated from 42 UC, mapped to HF1–HF12            |
+| Use Cases           | docs/use-cases/README.md      | Use case index with 46 UC files mapped to HF1–HF12              |
+| Functional Reqs     | docs/fun-req/README.md        | 49 FR files generated from 46 UC, mapped to HF1–HF12            |
 | Non-Functional Reqs | docs/nonfun-req/README.md     | NFR specification: areas, quality criteria, project constraints |
 | Contracts           | docs/contracts/README.md      | Inter-package contracts, API, WebSocket, and adapter interfaces |
 | Business Rules      | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies          |

@@ -72,13 +72,13 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 
 ## Текущее состояние
 
-На 2026-09-18 в каталоге **26 NFR**: формализация выполнена реверс-инжинирингом из кода и документации. Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
+На 2026-09-18 в каталоге **29 NFR**: формализация выполнена реверс-инжинирингом из кода и документации; добавлены 3 proposed требования телеметрии (Фаза 5, `docs/telemetry.md`). Требования распределены по областям `api`, `security`, `data`, `infra`, `ops`, `integration`.
 
 | Показатель              | Значение                                                |
 | ----------------------- | ------------------------------------------------------- |
-| NFR всего (файлов)      | 26                                                      |
-| По приоритетам          | P0 — 4 · P1 — 15 · P2 — 7                               |
-| По классу               | `as is` — 18 · `to be` — 8                              |
+| NFR всего (файлов)      | 29                                                      |
+| По приоритетам          | P0 — 5 · P1 — 17 · P2 — 7                               |
+| По классу               | `as is` — 18 · `to be` — 11                             |
 | Покрытие областей       | api · security · data · infra · ops · integration       |
 | Покрытие квалификаторов | performance · availability · observability · compliance |
 
@@ -86,34 +86,37 @@ REQ-NFR-<area>.<qualifier>.<attribute>
 
 ### Полный перечень NFR
 
-| ID                                                           | Приоритет | Класс | Описание                                                       |
-| ------------------------------------------------------------ | --------- | ----- | -------------------------------------------------------------- |
-| `REQ-NFR-data.compliance.task-state-persistence`             | P0        | as is | Состояние задачи не теряется при перезапуске                   |
-| `REQ-NFR-ops.observability.audit-trail-completeness`         | P0        | as is | 100% переходов фиксируются в иммутабельном аудите              |
-| `REQ-NFR-data.compliance.task-transactional-consistency`     | P0        | as is | Атомарные транзакционные переходы с защитой конфликтов         |
-| `REQ-NFR-api.availability.coordinator-resilience`            | P0        | as is | Coordinator восстанавливается после сбоев без потери контекста |
-| `REQ-NFR-api.performance.coordinator-polling-latency`        | P1        | as is | Задержка обнаружения задачи не более 30 с                      |
-| `REQ-NFR-api.availability.websocket-reconnect`               | P1        | as is | Авто-восстановление WebSocket после разрыва                    |
-| `REQ-NFR-api.availability.runtime-adapter-timeouts`          | P1        | as is | Таймауты адаптеров runtime с категоризацией                    |
-| `REQ-NFR-ops.observability.heartbeat-detection`              | P1        | as is | Stale-детекция и эскалация зависших задач                      |
-| `REQ-NFR-ops.observability.error-categorization`             | P1        | as is | Структурированная категоризация ошибок runtime                 |
-| `REQ-NFR-ops.observability.log-level-config`                 | P1        | as is | Конфигурируемый уровень логирования                            |
-| `REQ-NFR-api.compliance.request-validation`                  | P1        | as is | Zod-валидация всех мутирующих эндпоинтов                       |
-| `REQ-NFR-security.compliance.session-auth`                   | P1        | to be | 100% API-запросов требуют аутентификации (Фаза 2)              |
-| `REQ-NFR-security.compliance.csrf-protection`                | P1        | to be | CSRF-защита мутирующих запросов (Фаза 2)                       |
-| `REQ-NFR-security.compliance.password-storage`               | P1        | to be | Scrypt-хеширование паролей (Фаза 2)                            |
-| `REQ-NFR-security.compliance.origin-validation`              | P1        | to be | Валидация origin запросов (Фаза 2)                             |
-| `REQ-NFR-security.compliance.login-rate-limit`               | P1        | to be | Rate-limit на попытки входа (Фаза 2)                           |
-| `REQ-NFR-integration.availability.vcs-rate-limit-resilience` | P2        | as is | Resilience при rate-limit VCS (Фаза 2)                         |
-| `REQ-NFR-integration.compliance.review-event-idempotency`    | P1        | as is | Идемпотентная обработка решений ревью без потери событий       |
-| `REQ-NFR-integration.availability.runtime-provider-fallback` | P2        | as is | Переключение адаптера при недоступности провайдера             |
-| `REQ-NFR-infra.performance.concurrency-limits`               | P2        | as is | Ограничение параллельного выполнения задач                     |
-| `REQ-NFR-data.compliance.database-migration-integrity`       | P2        | as is | Append-only миграции без повреждения данных                    |
-| `REQ-NFR-api.compliance.rate-limit-requests`                 | P2        | to be | Rate-limit HTTP API (Фаза 3)                                   |
-| `REQ-NFR-ops.observability.activity-log-batching`            | P2        | as is | Пакетная запись activity log                                   |
-| `REQ-NFR-ops.observability.tool-error-readability`           | P1        | to be | Ошибки workspace tools возвращаются модели в читаемом формате  |
-| `REQ-NFR-infra.performance.implementation-commit-latency`    | P1        | to be | Коммит изменений реализации выполняется за ≤5 с (fallback)     |
-| `REQ-NFR-infra.compliance.worktree-isolation`                | P2        | as is | Git-worktree изоляция параллельных задач                       |
+| ID                                                           | Приоритет | Класс | Описание                                                        |
+| ------------------------------------------------------------ | --------- | ----- | --------------------------------------------------------------- |
+| `REQ-NFR-data.compliance.task-state-persistence`             | P0        | as is | Состояние задачи не теряется при перезапуске                    |
+| `REQ-NFR-ops.observability.audit-trail-completeness`         | P0        | as is | 100% переходов фиксируются в иммутабельном аудите               |
+| `REQ-NFR-data.compliance.task-transactional-consistency`     | P0        | as is | Атомарные транзакционные переходы с защитой конфликтов          |
+| `REQ-NFR-api.availability.coordinator-resilience`            | P0        | as is | Coordinator восстанавливается после сбоев без потери контекста  |
+| `REQ-NFR-api.performance.coordinator-polling-latency`        | P1        | as is | Задержка обнаружения задачи не более 30 с                       |
+| `REQ-NFR-api.availability.websocket-reconnect`               | P1        | as is | Авто-восстановление WebSocket после разрыва                     |
+| `REQ-NFR-api.availability.runtime-adapter-timeouts`          | P1        | as is | Таймауты адаптеров runtime с категоризацией                     |
+| `REQ-NFR-ops.observability.heartbeat-detection`              | P1        | as is | Stale-детекция и эскалация зависших задач                       |
+| `REQ-NFR-ops.observability.error-categorization`             | P1        | as is | Структурированная категоризация ошибок runtime                  |
+| `REQ-NFR-ops.observability.log-level-config`                 | P1        | as is | Конфигурируемый уровень логирования                             |
+| `REQ-NFR-api.compliance.request-validation`                  | P1        | as is | Zod-валидация всех мутирующих эндпоинтов                        |
+| `REQ-NFR-security.compliance.session-auth`                   | P1        | to be | 100% API-запросов требуют аутентификации (Фаза 2)               |
+| `REQ-NFR-security.compliance.csrf-protection`                | P1        | to be | CSRF-защита мутирующих запросов (Фаза 2)                        |
+| `REQ-NFR-security.compliance.password-storage`               | P1        | to be | Scrypt-хеширование паролей (Фаза 2)                             |
+| `REQ-NFR-security.compliance.origin-validation`              | P1        | to be | Валидация origin запросов (Фаза 2)                              |
+| `REQ-NFR-security.compliance.login-rate-limit`               | P1        | to be | Rate-limit на попытки входа (Фаза 2)                            |
+| `REQ-NFR-integration.availability.vcs-rate-limit-resilience` | P2        | as is | Resilience при rate-limit VCS (Фаза 2)                          |
+| `REQ-NFR-integration.compliance.review-event-idempotency`    | P1        | as is | Идемпотентная обработка решений ревью без потери событий        |
+| `REQ-NFR-integration.availability.runtime-provider-fallback` | P2        | as is | Переключение адаптера при недоступности провайдера              |
+| `REQ-NFR-infra.performance.concurrency-limits`               | P2        | as is | Ограничение параллельного выполнения задач                      |
+| `REQ-NFR-data.compliance.database-migration-integrity`       | P2        | as is | Append-only миграции без повреждения данных                     |
+| `REQ-NFR-api.compliance.rate-limit-requests`                 | P2        | to be | Rate-limit HTTP API (Фаза 3)                                    |
+| `REQ-NFR-ops.observability.activity-log-batching`            | P2        | as is | Пакетная запись activity log                                    |
+| `REQ-NFR-ops.observability.tool-error-readability`           | P1        | to be | Ошибки workspace tools возвращаются модели в читаемом формате   |
+| `REQ-NFR-infra.performance.implementation-commit-latency`    | P1        | to be | Коммит изменений реализации выполняется за ≤5 с (fallback)      |
+| `REQ-NFR-infra.compliance.worktree-isolation`                | P2        | as is | Git-worktree изоляция параллельных задач                        |
+| `REQ-NFR-ops.observability.otel-export-resilience`           | P0        | to be | Экспорт non-throwing; конвейер не зависит от collector (Фаза 5) |
+| `REQ-NFR-ops.observability.telemetry-overhead-budget`        | P1        | to be | Накладные расходы телеметрии в бюджете гейтов ai:load/ai:perf   |
+| `REQ-NFR-ops.observability.telemetry-cardinality-cap`        | P1        | to be | High-cardinality не попадает в метки метрик                     |
 
 ## Правила оформления
 
