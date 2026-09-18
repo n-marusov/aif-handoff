@@ -13,7 +13,6 @@ export default defineConfig({
         "src/browser.ts",
         "src/types.ts",
         "src/constants.ts",
-        "src/db.ts",
         "src/**/*SFConflict*",
       ],
       thresholds: {

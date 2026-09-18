@@ -21,7 +21,6 @@ export default defineConfig({
       exclude: [
         "src/index.ts",
         "src/hooks.ts",
-        "src/subagents/**",
         "src/queryAudit.ts",
         "src/wakeChannel.ts",
         "src/**/*SFConflict*",

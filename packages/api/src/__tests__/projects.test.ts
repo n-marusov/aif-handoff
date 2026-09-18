@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -40,20 +41,25 @@ vi.mock("@aif/shared/server", async (importOriginal) => {
   };
 });
 
-vi.mock("@aif/runtime", () => ({
-  initProject: vi.fn(() => ({ ok: true })),
-  bootstrapRuntimeRegistry: vi.fn(() =>
-    Promise.resolve({
-      resolveRuntime: vi.fn(),
-      listRuntimes: vi.fn(() => []),
-      registerRuntimeModule: vi.fn(),
-    }),
-  ),
-}));
+vi.mock("@aif/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/runtime")>();
+  return {
+    ...actual,
+    initProject: vi.fn(() => ({ ok: true })),
+    bootstrapRuntimeRegistry: vi.fn(() =>
+      Promise.resolve({
+        resolveRuntime: vi.fn(),
+        listRuntimes: vi.fn(() => []),
+        registerRuntimeModule: vi.fn(),
+      }),
+    ),
+  };
+});
 
 const mockResolveApiWarmupSupport = vi.fn();
 const mockResolveApiWarmupSupports = vi.fn();
 const mockRunApiRuntimeOneShot = vi.fn();
+const mockResolveApiLightModel = vi.fn();
 
 vi.mock("../services/runtime.js", () => ({
   getApiRuntimeRegistry: vi.fn(() =>
@@ -65,6 +71,7 @@ vi.mock("../services/runtime.js", () => ({
   resolveApiWarmupSupport: (...args: unknown[]) => mockResolveApiWarmupSupport(...args),
   resolveApiWarmupSupports: (...args: unknown[]) => mockResolveApiWarmupSupports(...args),
   runApiRuntimeOneShot: (...args: unknown[]) => mockRunApiRuntimeOneShot(...args),
+  resolveApiLightModel: (...args: unknown[]) => mockResolveApiLightModel(...args),
 }));
 
 vi.mock("../ws.js", () => ({
@@ -121,6 +128,8 @@ describe("projects API", () => {
       },
       context: {},
     });
+    mockResolveApiLightModel.mockReset();
+    mockResolveApiLightModel.mockResolvedValue("light-model");
     vi.unstubAllEnvs();
     vi.stubEnv("NODE_ENV", "test");
   });
@@ -1814,5 +1823,219 @@ describe("projects API", () => {
       error: "taskId does not belong to the target project",
     });
     expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  describe("misc uncovered routes", () => {
+    it("GET /defaults returns configured paths and workflow for a project", async () => {
+      const rootPath = mkdtempSync(join(tmpdir(), "aif-defaults"));
+      mkdirSync(join(rootPath, ".ai-factory"), { recursive: true });
+      writeFileSync(
+        join(rootPath, ".ai-factory", "config.yaml"),
+        "paths:\n  plan: docs/MY_PLAN.md\n",
+      );
+      testDb.current
+        .insert(projects)
+        .values({ id: "p-defaults", name: "Defaults", rootPath })
+        .run();
+
+      const res = await app.request("/projects/p-defaults/defaults");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.paths.plan).toBe("docs/MY_PLAN.md");
+      expect(body.workflow).toBeDefined();
+    });
+
+    it("GET /defaults returns 404 for missing project", async () => {
+      const res = await app.request("/projects/missing-defaults/defaults");
+      expect(res.status).toBe(404);
+    });
+
+    it("DELETE /:id deletes the project", async () => {
+      testDb.current
+        .insert(projects)
+        .values({ id: "p-del", name: "Delete me", rootPath: "/tmp/del" })
+        .run();
+      const res = await app.request("/projects/p-del", { method: "DELETE" });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+      expect(
+        testDb.current.select().from(projects).where(eq(projects.id, "p-del")).get(),
+      ).toBeUndefined();
+    });
+
+    it("DELETE /:id returns 404 for missing project", async () => {
+      const res = await app.request("/projects/missing-delete", { method: "DELETE" });
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /roadmap/generate returns 404 for missing project", async () => {
+      const res = await app.request("/projects/missing-roadmap-generate/roadmap/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roadmapAlias: "rm-1" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /roadmap/generate accepts a vision payload and starts a background job", async () => {
+      mockRunApiRuntimeOneShot.mockResolvedValue({
+        result: { outputText: "# Roadmap\n", sessionId: null, usage: null },
+        context: {},
+      });
+      const rootPath = mkdtempSync(join(tmpdir(), "aif-rmgen"));
+      mkdirSync(join(rootPath, ".ai-factory"), { recursive: true });
+      writeFileSync(join(rootPath, ".ai-factory", "DESCRIPTION.md"), "# Demo\n");
+      testDb.current.insert(projects).values({ id: "p-rmgen", name: "RM Gen", rootPath }).run();
+
+      const res = await app.request("/projects/p-rmgen/roadmap/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roadmapAlias: "rm-1", vision: "Ship it" }),
+      });
+      expect(res.status).toBe(202);
+      const body = await res.json();
+      expect(body.status).toBe("started");
+      expect(body.projectId).toBe("p-rmgen");
+    });
+
+    it("POST /roadmap/import returns 404 for missing project", async () => {
+      const res = await app.request("/projects/missing-roadmap-import/roadmap/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roadmapAlias: "rm-1" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /roadmap/import imports tasks from an existing roadmap file", async () => {
+      const rootPath = mkdtempSync(join(tmpdir(), "aif-rmimport"));
+      const aifDir = join(rootPath, ".ai-factory");
+      mkdirSync(aifDir, { recursive: true });
+      writeFileSync(join(aifDir, "ROADMAP.md"), "# Roadmap\n\n## Milestones\n- [ ] Ship X\n");
+      mockRunApiRuntimeOneShot.mockResolvedValue({
+        result: {
+          outputText: JSON.stringify({
+            alias: "rm-1",
+            tasks: [
+              {
+                title: "Ship X",
+                phase: 1,
+                phaseName: "Milestone 1",
+                sequence: 1,
+                description: "Ship X details",
+              },
+            ],
+          }),
+          sessionId: null,
+          usage: null,
+        },
+        context: {},
+      });
+      testDb.current
+        .insert(projects)
+        .values({ id: "p-rmimport", name: "RM Import", rootPath })
+        .run();
+
+      const res = await app.request("/projects/p-rmimport/roadmap/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roadmapAlias: "rm-1" }),
+      });
+      const body = await res.json();
+      expect(res.status).toBe(201);
+      expect(body.created).toBeGreaterThan(0);
+      expect(body.skipped).toBe(0);
+      const created = testDb.current
+        .select()
+        .from(tasks)
+        .where(eq(tasks.projectId, "p-rmimport"))
+        .all();
+      expect(created.length).toBeGreaterThan(0);
+    });
+
+    it("POST /roadmap/import maps a missing roadmap file to 404", async () => {
+      mockRunApiRuntimeOneShot.mockResolvedValue({
+        result: { outputText: "", sessionId: null, usage: null },
+        context: {},
+      });
+      const rootPath = mkdtempSync(join(tmpdir(), "aif-rmimport-missing"));
+      mkdirSync(join(rootPath, ".ai-factory"), { recursive: true });
+      testDb.current
+        .insert(projects)
+        .values({ id: "p-rmimport-missing", name: "RM Import Missing", rootPath })
+        .run();
+
+      const res = await app.request("/projects/p-rmimport-missing/roadmap/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roadmapAlias: "rm-1" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /warmup deduplicates targets that resolve to the same runtime and model", async () => {
+      mockWarmupEnabled.value = true;
+      const supportedWarmup = {
+        supported: true,
+        workflowKind: "planner",
+        profileMode: "plan",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        runtimeProfileId: "profile-warm-dup",
+        transport: "sdk",
+        model: "claude-dup",
+        selectionSource: "project_default",
+      };
+      mockResolveApiWarmupSupports.mockResolvedValue([
+        { ...supportedWarmup, workflowKind: "planner" },
+        { ...supportedWarmup, workflowKind: "implementer" },
+      ]);
+      mockRunApiRuntimeOneShot.mockResolvedValue({
+        result: { outputText: "Warmup", sessionId: "seed-dup", usage: null },
+        context: {},
+      });
+      testDb.current
+        .insert(projects)
+        .values({ id: "warm-dup", name: "Warm Dup", rootPath: "/tmp/warm-dup" })
+        .run();
+
+      const res = await app.request("/projects/warm-dup/warmup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ttlSeconds: 600 }),
+      });
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.warmups).toHaveLength(1);
+      expect(mockRunApiRuntimeOneShot).toHaveBeenCalledTimes(1);
+    });
+
+    it("GET /warmup falls back to single-resolve when the target list is empty", async () => {
+      mockWarmupEnabled.value = true;
+      mockResolveApiWarmupSupports.mockResolvedValue([]);
+      mockResolveApiWarmupSupport.mockResolvedValue({
+        supported: false,
+        skipReason: "unsupported_capability",
+        workflowKind: "planner",
+        profileMode: "plan",
+        runtimeId: "openrouter",
+        providerId: "openrouter",
+        runtimeProfileId: null,
+        transport: "api",
+        model: "openrouter/auto",
+        selectionSource: "none",
+      });
+      testDb.current
+        .insert(projects)
+        .values({ id: "warm-empty", name: "Warm Empty", rootPath: "/tmp/warm-empty" })
+        .run();
+
+      const res = await app.request("/projects/warm-empty/warmup");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.support.supported).toBe(false);
+      expect(mockResolveApiWarmupSupport).toHaveBeenCalled();
+    });
   });
 });
