@@ -553,7 +553,7 @@ function backfillParticipantOwnership(sqlite: Database.Database): Record<string,
 //
 // ALTER TABLE ADD COLUMN безопасно выпускать повторно: ошибка о дублирующейся колонке
 // поглощается isIgnorableMigrationError.
-const MIGRATIONS: Migration[] = [
+export const MIGRATIONS: Migration[] = [
   // Наследованные колонки, добавлявшиеся через ensureColumn, — сведены в миграции.
   // Идемпотентные проверки в стиле ensureColumn: в существующих базах они уже есть.
   {
@@ -1259,6 +1259,8 @@ function isIgnorableMigrationError(error: unknown): boolean {
 // Применение миграций от текущей версии к последней. Все они выполняются в одной
 // транзакции вместе с обновлением user_version: прерывание на середине откатит изменения
 // целиком, и база не останется в состоянии "часть схемы новая, часть нет".
+export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+
 function runMigrations(sqlite: Database.Database): void {
   const currentVersion = (sqlite.pragma("user_version", { simple: true }) as number) ?? 0;
   const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
@@ -1268,9 +1270,8 @@ function runMigrations(sqlite: Database.Database): void {
     // поэтому прогонять по ней все миграции незачем - достаточно отметить последнюю версию.
     // Для свежих баз (user_version=0), только что созданных через CREATE TABLE IF NOT EXISTS
     // (схема уже включает session_id), выставляется последняя версия, чтобы пропустить миграции.
-    if (currentVersion === 0 && MIGRATIONS.length > 0) {
-      const latest = MIGRATIONS[MIGRATIONS.length - 1].version;
-      sqlite.pragma(`user_version = ${latest}`);
+    if (currentVersion === 0 && LATEST_SCHEMA_VERSION > 0) {
+      sqlite.pragma(`user_version = ${LATEST_SCHEMA_VERSION}`);
     }
     return;
   }

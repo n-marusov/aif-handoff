@@ -94,7 +94,10 @@ export function releaseDueBlockedTasks(): void {
         blockedReason: null,
         blockedFromStatus: null,
         retryAfter: null,
-        retryCount: task.retryCount ?? 0,
+        // Попытка исчерпана и разблокирована: счётчик повторных попыток
+        // возвращается к нулю, чтобы следующие генерации/стадии стартовали
+        // с чистого листа, а не наследовали историю старой блокировки.
+        retryCount: 0,
       },
       actor: WATCHDOG_ACTOR,
       action: "task.watchdog_released",

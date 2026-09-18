@@ -556,6 +556,10 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 // структуры, а порядок ключей в форме настроек стабилен. Любое расхождение
 // трактуется как "профиль отредактировали" - пин снимается, чтобы задача не ушла
 // в рантайм с устаревшей моделью или ключом.
+//
+// Отсутствие строки профиля НЕ инвалидирует пин: снимок пина самодостаточен
+// (hydratePinnedRuntimeProfile восстанавливает профиль из него), а пин в первую
+// очередь фиксирует выбор стадии для повторных запусков той же стадии.
 function isPinnedRuntimeProfileCurrent(
   selection: ReturnType<typeof getTaskActiveRuntimeSelection>,
   taskProjectId: string | null | undefined,
@@ -563,7 +567,12 @@ function isPinnedRuntimeProfileCurrent(
   if (!selection || !taskProjectId) return false;
   if (selection.profileId) {
     const profile = findRuntimeProfileById(selection.profileId);
-    if (!profile || !profile.enabled) return false;
+    if (!profile) {
+      // Снимок доверяется как есть: задача продолжала бы стадию на том же
+      // рантайме, даже если запись профиля была удалена между попытками.
+      return true;
+    }
+    if (!profile.enabled) return false;
     if (
       !isRuntimeProfileVisibleToProject({ projectId: taskProjectId, runtimeProfileId: profile.id })
     )

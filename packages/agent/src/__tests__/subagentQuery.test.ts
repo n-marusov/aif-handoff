@@ -582,15 +582,21 @@ describe("executeSubagentQuery attribution", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const systemPrompt = request.messages.find(
+      (message: { role: string }) => message.role === "system",
+    )?.content;
     const userPrompt = request.messages.find(
       (message: { role: string }) => message.role === "user",
     )?.content;
-    expect(userPrompt).toContain("API transport workflow contract:");
-    expect(userPrompt).toContain("Planning is read-only");
-    expect(userPrompt).toContain(
+    // API-транспорт не понимает slash-команд: содержимое скилла раскрывается
+    // в системное сообщение (systemPromptAppend), а пользовательский промпт
+    // остаётся чистым (см. runtime promptPolicy.useApiSkillExpansion).
+    expect(systemPrompt).toContain("API transport workflow — skill instructions:");
+    expect(systemPrompt).toContain("Planning is read-only");
+    expect(systemPrompt).toContain(
       "Requested workflow command: /aif-plan fast @.ai-factory/PLAN.md docs:false tests:false",
     );
-    expect(userPrompt).not.toBe("/aif-plan fast @.ai-factory/PLAN.md docs:false tests:false");
+    expect(userPrompt).toBe("Plan the requested task without implementing it.");
     expect(userPrompt).not.toContain("*** Begin Patch");
     expect(queryMock).not.toHaveBeenCalled();
   });
@@ -1710,7 +1716,7 @@ describe("executeSubagentQuery model fallback policy", () => {
     });
 
     const callInput = queryMock.mock.calls[0][0];
-    expect(callInput.model).toBe("profile-model");
+    expect(callInput.options.model).toBe("profile-model");
     expect(resolveEffectiveRuntimeProfileMock).toHaveBeenCalled();
     expect(getTaskActiveRuntimeSelectionMock).not.toHaveBeenCalled();
     expect(saveTaskActiveRuntimeSelectionMock).not.toHaveBeenCalled();
@@ -1736,7 +1742,7 @@ describe("executeSubagentQuery model fallback policy", () => {
     });
 
     const callInput = queryMock.mock.calls[0][0];
-    expect(callInput.model).toBe("profile-model");
+    expect(callInput.options.model).toBe("profile-model");
     expect(saveTaskActiveRuntimeSelectionMock).toHaveBeenCalledWith(
       "task-1",
       expect.objectContaining({
@@ -1798,7 +1804,7 @@ describe("executeSubagentQuery model fallback policy", () => {
     });
 
     const callInput = queryMock.mock.calls[0][0];
-    expect(callInput.model).toBe("pinned-model");
+    expect(callInput.options.model).toBe("pinned-model");
     expect(callInput.options.effort).toBe("medium");
     expect(resolveEffectiveRuntimeProfileMock).not.toHaveBeenCalled();
     expect(saveTaskActiveRuntimeSelectionMock).not.toHaveBeenCalled();

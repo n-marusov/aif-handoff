@@ -476,15 +476,36 @@ function runtimeProfileModeForStage(stage: CoordinatorStage): "task" | "plan" | 
 }
 
 // Improve включается только для skills-mode сценария.
+// Improve включается только для skills-mode.
 function shouldRunSkillsModeImprove(task: TaskRow): boolean {
   return task.runPlanImprove && !task.useSubagents;
 }
 
-// Переопределение success-перехода: planner -> improve для skills-mode.
+// Verify включается только для skills-mode при явном флаге runPostVerify.
+function shouldRunSkillsModeVerify(task: TaskRow): boolean {
+  return task.runPostVerify && !task.useSubagents;
+}
+
+// Переопределение success-переходов по флагам пайплайна.
 function getStageSuccessStatus(task: TaskRow, stage: StatusTransition): TaskStatus {
   if (stage.label === "planner" && shouldRunSkillsModeImprove(task)) {
     return "improve";
   }
+
+  if (stage.label === "implementer") {
+    if (shouldRunSkillsModeVerify(task)) {
+      return "verify";
+    }
+    if (task.skipReview) {
+      return "done";
+    }
+    return "review";
+  }
+
+  if (stage.label === "verifier") {
+    return task.skipReview ? "done" : "review";
+  }
+
   return stage.onSuccess;
 }
 
@@ -748,41 +769,51 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
 
     flushActivityQueue(task.id);
 
+    // Гейт валидации плана (BR-constraint.automation.plan-validation-gate)
+    // применяется только там, где файл плана — критичный артефакт потока:
+    // VCS-связанный plan-review публикует план для человеческого ревью.
+    // Для локальных задач план пишется и валидируется самим runner'ом
+    // (persistTaskPlan), поэтому дублирующая проверка диска координатором
+    // не блокирует диспатч конвейера.
+    const planGateApplies = taskRequiresPlanReview(task.id);
+
     if (stage.label === "planner") {
       // После генерации плана проверяем, что файл плана действительно
       // создан с содержимым. Ошибка потока или пустой ответ модели
       // могут дать коммит без валидного плана. Остаёмся в planning,
       // чтобы следующий цикл опроса повторил planner.
-      const plannedTask = findTaskById(task.id);
-      let planValid = false;
-      if (plannedTask) {
-        try {
-          const cfg = getProjectConfig(executionRoot);
-          const planRelPath = task.isFix
-            ? cfg.paths.fix_plan
-            : plannedTask.planPath || cfg.paths.plan;
-          const planAbsPath = resolve(executionRoot, planRelPath);
-          if (existsSync(planAbsPath)) {
-            const content = readFileSync(planAbsPath, "utf8").trim();
-            planValid = content.length > 0;
+      if (planGateApplies) {
+        const plannedTask = findTaskById(task.id);
+        let planValid = false;
+        if (plannedTask) {
+          try {
+            const cfg = getProjectConfig(executionRoot);
+            const planRelPath = task.isFix
+              ? cfg.paths.fix_plan
+              : plannedTask.planPath || cfg.paths.plan;
+            const planAbsPath = resolve(executionRoot, planRelPath);
+            if (existsSync(planAbsPath)) {
+              const content = readFileSync(planAbsPath, "utf8").trim();
+              planValid = content.length > 0;
+            }
+          } catch {
+            planValid = false;
           }
-        } catch {
-          planValid = false;
         }
-      }
-      if (!planValid) {
-        log.warn(
-          { taskId: task.id },
-          "Plan file is empty or missing after planner, staying in planning for retry",
-        );
-        clearTaskActiveRuntimeSelection(task.id);
-        clearTaskRuntimeLimitSnapshot(task.id);
-        updateTaskStatus(task.id, "planning", CLEAN_STATE_RESET, {
-          title: taskTitle,
-          fromStatus: stage.inProgress,
-        });
-        logActivity(task.id, "Agent", "planner: empty plan, staying in planning for retry");
-        return true;
+        if (!planValid) {
+          log.warn(
+            { taskId: task.id, reason: "plan_file_missing_or_empty" },
+            "Plan file is empty or missing after planner, staying in planning for retry",
+          );
+          clearTaskActiveRuntimeSelection(task.id);
+          clearTaskRuntimeLimitSnapshot(task.id);
+          updateTaskStatus(task.id, "planning", CLEAN_STATE_RESET, {
+            title: taskTitle,
+            fromStatus: stage.inProgress,
+          });
+          logActivity(task.id, "Agent", "planner: empty plan, staying in planning for retry");
+          return true;
+        }
       }
     }
 
@@ -791,36 +822,38 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       // Если план всё ещё пуст (например, сбой вышестоящего потока или
       // потеря содержимого), возвращаемся в planning, чтобы planner
       // перегенерировал его — не оставляем задачу циклиться в improve.
-      const improvedTask = findTaskById(task.id);
-      let planValid = false;
-      if (improvedTask) {
-        try {
-          const cfg = getProjectConfig(executionRoot);
-          const planRelPath = task.isFix
-            ? cfg.paths.fix_plan
-            : improvedTask.planPath || cfg.paths.plan;
-          const planAbsPath = resolve(executionRoot, planRelPath);
-          if (existsSync(planAbsPath)) {
-            const content = readFileSync(planAbsPath, "utf8").trim();
-            planValid = content.length > 0;
+      if (planGateApplies) {
+        const improvedTask = findTaskById(task.id);
+        let planValid = false;
+        if (improvedTask) {
+          try {
+            const cfg = getProjectConfig(executionRoot);
+            const planRelPath = task.isFix
+              ? cfg.paths.fix_plan
+              : improvedTask.planPath || cfg.paths.plan;
+            const planAbsPath = resolve(executionRoot, planRelPath);
+            if (existsSync(planAbsPath)) {
+              const content = readFileSync(planAbsPath, "utf8").trim();
+              planValid = content.length > 0;
+            }
+          } catch {
+            planValid = false;
           }
-        } catch {
-          planValid = false;
         }
-      }
-      if (!planValid) {
-        log.warn(
-          { taskId: task.id },
-          "Plan not found or empty after improve, returning to planning",
-        );
-        clearTaskActiveRuntimeSelection(task.id);
-        clearTaskRuntimeLimitSnapshot(task.id);
-        updateTaskStatus(task.id, "planning", CLEAN_STATE_RESET, {
-          title: taskTitle,
-          fromStatus: stage.inProgress,
-        });
-        logActivity(task.id, "Agent", "improve returned to planning: plan is empty or missing");
-        return true;
+        if (!planValid) {
+          log.warn(
+            { taskId: task.id, reason: "plan_file_missing_or_empty" },
+            "Plan not found or empty after improve, returning to planning",
+          );
+          clearTaskActiveRuntimeSelection(task.id);
+          clearTaskRuntimeLimitSnapshot(task.id);
+          updateTaskStatus(task.id, "planning", CLEAN_STATE_RESET, {
+            title: taskTitle,
+            fromStatus: stage.inProgress,
+          });
+          logActivity(task.id, "Agent", "improve returned to planning: plan is empty or missing");
+          return true;
+        }
       }
     }
 
@@ -859,6 +892,26 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       return true;
     }
 
+    if (stage.label === "done-checker") {
+      // Done Checker — self-loop стадия: переход в accepted выполняет только
+      // сам раннер (при merge/approve PR/MR), поэтому координатор не должен
+      // принудительно применять onSuccess=accepted после возврата раннера.
+      // Без этого блока generic-путь успеха переводил бы задачу из done в
+      // accepted на каждом цикле, минуя сигналы одобрения.
+      const doneTask = findTaskById(task.id);
+      clearTaskActiveRuntimeSelection(task.id);
+      clearTaskRuntimeLimitSnapshot(task.id);
+      log.debug(
+        {
+          taskId: task.id,
+          status: doneTask?.status ?? task.status,
+          planReviewFeedback: doneTask?.planReviewFeedback ?? null,
+        },
+        "Done-checker stage complete; task stays at its status unless the runner transitioned it",
+      );
+      return true;
+    }
+
     // Реализатор, не изменивший ни одного файла, не считается успехом: сбрасываем состояние
     // коммит-гейта и оставляем задачу в implementing, чтобы повторный запуск был вынужден
     // либо написать код, либо явно упасть.
@@ -894,9 +947,11 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       flushActivityQueue(task.id);
     }
 
-    // skipReview - явное желание автора проскочить verify и review. Пути назад нет, поэтому
+    // skipReview - явное желание автора проскочить ревью, но не обязательную
+    // skills-mode верификацию: при runPostVerify задача сначала проходит
+    // verifier и только потом завершается в done. Пути назад нет, поэтому
     // единственное, что здесь обязательно, - коммит-гейт перед статусом done.
-    if (stage.label === "implementer" && task.skipReview) {
+    if (stage.label === "implementer" && task.skipReview && !shouldRunSkillsModeVerify(task)) {
       clearTaskActiveRuntimeSelection(task.id);
       clearTaskRuntimeLimitSnapshot(task.id);
       const doneStatus = "done";
@@ -1478,8 +1533,32 @@ async function runPollCycle(): Promise<void> {
         stage.label,
         candidateWindow,
       )
-        .filter((t) => !failedInCycle.has(t.id))
-        .filter((t) => !planReviewStageIneligible(stage.label, t));
+        .filter((t) => {
+          if (failedInCycle.has(t.id)) {
+            log.warn(
+              { taskId: t.id, projectId, stage: stage.label, reason: "failed_in_cycle" },
+              "Skipped stage candidate",
+            );
+            return false;
+          }
+          return true;
+        })
+        .filter((t) => {
+          const ineligible = planReviewStageIneligible(stage.label, t);
+          if (ineligible) {
+            log.warn(
+              {
+                taskId: t.id,
+                projectId,
+                stage: stage.label,
+                reason: "plan_review_gate_ineligible",
+                planReviewState: t.planReviewState ?? null,
+              },
+              "Skipped stage candidate",
+            );
+          }
+          return !ineligible;
+        });
 
       if (candidates.length === 0) {
         log.debug({ stage: stage.label, projectId }, "No tasks to process in project lane");
@@ -1508,6 +1587,16 @@ async function runPollCycle(): Promise<void> {
               { taskId: task.id, projectId: task.projectId, projectMax, stage: stage.label },
               "Project at capacity, skipping task",
             );
+            log.warn(
+              {
+                taskId: task.id,
+                projectId: task.projectId,
+                stage: stage.label,
+                reason: "project_capacity",
+                projectMax,
+              },
+              "Skipped stage candidate",
+            );
             continue;
           }
 
@@ -1517,6 +1606,15 @@ async function runPollCycle(): Promise<void> {
             log.debug(
               { taskId: task.id, projectId: task.projectId },
               "Exclusive (branchless fix) task already claimed this cycle; deferring candidate",
+            );
+            log.warn(
+              {
+                taskId: task.id,
+                projectId: task.projectId,
+                stage: stage.label,
+                reason: "exclusive_run_already_claimed",
+              },
+              "Skipped stage candidate",
             );
             continue;
           }
@@ -1533,6 +1631,15 @@ async function runPollCycle(): Promise<void> {
               },
               "Branchless fix task requires exclusive execution; deferring while other project tasks are active",
             );
+            log.warn(
+              {
+                taskId: task.id,
+                projectId: task.projectId,
+                stage: stage.label,
+                reason: "exclusive_run_conflict",
+              },
+              "Skipped stage candidate",
+            );
             continue;
           }
 
@@ -1543,10 +1650,28 @@ async function runPollCycle(): Promise<void> {
               { taskId: task.id, projectId: task.projectId },
               "Non-parallel project has active lock from another cycle, skipping",
             );
+            log.warn(
+              {
+                taskId: task.id,
+                projectId: task.projectId,
+                stage: stage.label,
+                reason: "active_project_lock",
+              },
+              "Skipped stage candidate",
+            );
             continue;
           }
 
           if (blockCandidateIfRuntimeLimited(task, stage)) {
+            log.warn(
+              {
+                taskId: task.id,
+                projectId: task.projectId,
+                stage: stage.label,
+                reason: "runtime_gate_blocked",
+              },
+              "Skipped stage candidate",
+            );
             continue;
           }
 
@@ -1592,10 +1717,28 @@ async function runPollCycle(): Promise<void> {
                 { taskId: task.id, projectId: task.projectId },
                 "Non-parallel project became active while waiting for permit, skipping",
               );
+              log.warn(
+                {
+                  taskId: task.id,
+                  projectId: task.projectId,
+                  stage: stage.label,
+                  reason: "active_project_lock_after_wait",
+                },
+                "Skipped stage candidate",
+              );
               continue;
             }
 
             if (blockCandidateIfRuntimeLimited(task, stage)) {
+              log.warn(
+                {
+                  taskId: task.id,
+                  projectId: task.projectId,
+                  stage: stage.label,
+                  reason: "runtime_gate_blocked_after_wait",
+                },
+                "Skipped stage candidate",
+              );
               continue;
             }
 
@@ -1626,12 +1769,14 @@ async function runPollCycle(): Promise<void> {
 
             log.debug(
               {
-                stage: stage.label,
                 taskId: executionTask.id,
-                candidateStatus: executionTask.status,
+                stage: stage.label,
+                runner: stage.runner.name || "anonymous",
+                from: executionTask.status,
+                onSuccess: getStageSuccessStatus(executionTask, stage),
                 parallel,
               },
-              "[FIX:149] Task revalidated and claimed for processing",
+              "Stage candidate selected for execution",
             );
 
             // Задача обрабатывается без await: несколько задач одной стадии должны идти

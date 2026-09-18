@@ -112,13 +112,14 @@ describe("Board", () => {
 
     expect(screen.getByText("Backlog")).toBeDefined();
     expect(screen.getByText("Planning")).toBeDefined();
-    expect(screen.getByText("Plan Ready")).toBeDefined();
+    expect(screen.getByText("Improve")).toBeDefined();
     expect(screen.getByText("Plan Review")).toBeDefined();
     expect(screen.getByText("Implementing")).toBeDefined();
+    expect(screen.getByText("Verify")).toBeDefined();
     expect(screen.getByText("Review")).toBeDefined();
     expect(screen.getByText("Blocked")).toBeDefined();
     expect(screen.getByText("Done")).toBeDefined();
-    expect(screen.getByText("Verified")).toBeDefined();
+    expect(screen.getByText("Accepted")).toBeDefined();
   });
 
   it("should render task cards in correct columns", () => {
@@ -161,14 +162,13 @@ describe("Board", () => {
       "Backlog",
       "Planning",
       "Improve",
-      "Plan Ready",
       "Plan Review",
       "Implementing",
       "Verify",
       "Review",
       "Blocked",
       "Done",
-      "Verified",
+      "Accepted",
     ]) {
       const taskList = getColumn(label).lastElementChild;
       expect(taskList?.className).toContain("max-h-[calc(100vh-");
@@ -243,7 +243,7 @@ describe("Board", () => {
     });
     mockTasks.splice(originalLength);
 
-    expectTaskBefore(getColumn("Verified"), "Verified Newer", "Verified Older");
+    expectTaskBefore(getColumn("Accepted"), "Verified Newer", "Verified Older");
 
     const doneColumn = getColumn("Done");
     expectTaskBefore(doneColumn, "Done Newer", "Done Older");

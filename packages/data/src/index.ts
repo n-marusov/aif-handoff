@@ -2210,7 +2210,9 @@ function coordinatorStageFilter(stage: CoordinatorStage) {
           ? inArray(tasks.status, ["planning"])
           : stage === "verifier"
             ? inArray(tasks.status, ["verify"])
-            : inArray(tasks.status, ["review"]);
+            : stage === "done-checker"
+              ? inArray(tasks.status, ["done"])
+              : inArray(tasks.status, ["review"]);
 }
 
 function coordinatorAnyStageFilter() {

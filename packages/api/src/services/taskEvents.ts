@@ -355,6 +355,7 @@ export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHa
       // задачу нельзя: правило доступа не должно зависеть от содержимого описания.
       const authorization = resolveTaskAction(
         {
+          id: task.id,
           status: task.status,
           autoMode: task.autoMode,
           executionOwner: task.executionOwner,

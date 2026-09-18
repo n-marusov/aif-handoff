@@ -9,11 +9,11 @@ Run through this list whenever you touch anything under `packages/agent/`.
   - `reviewer.ts` → `review-sidecar` + `security-sidecar`
 - [x] All DB access goes through `@aif/data`. No direct drizzle/SQL imports here.
 - [ ] If you added a new subagent, add tests that verify it resolves the correct agent definition and handles the runtime capability fallback.
-- [x] If you touched the coordinator polling logic, verify the state machine transitions in `@aif/shared/stateMachine.ts` still line up. (GitLab sync/publish wired in; 72 coordinator tests pass)
+- [x] If you touched the coordinator polling logic, verify the state machine transitions in `@aif/shared/stateMachine.ts` still line up. (GitLab sync/publish wired in; 78 coordinator tests pass)
 - [x] Polling intervals are configured in milliseconds. Do not convert values above 59 seconds into a cron step expression.
 - [ ] If you touched the poll scheduler, verify periodic ticks and event-driven wakes share a single-flight coordinator loop; triggers received during an active cycle may request only one coalesced follow-up cycle.
-- [ ] If a task waits for a coordinator permit before claim, revalidate eligibility with an atomic CAS after the wait and keep permit/claim cleanup exception-safe until ownership transfers to the task promise.
-- [ ] If candidate setup can fail after earlier tasks were spawned, drain all started task promises in `finally` before the project lane exits or propagates the setup error.
+- [x] If a task waits for a coordinator permit before claim, revalidate eligibility with an atomic CAS after the wait and keep permit/claim cleanup exception-safe until ownership transfers to the task promise. (coordinator claims/drain tests green)
+- [x] If candidate setup can fail after earlier tasks were spawned, drain all started task promises in `finally` before the project lane exits or propagates the setup error. (drain/claim-throw tests green)
 - [ ] When `AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED=true`, auto-queue terminal transitions await a verified commit and auto-queue projects sharing one Git worktree remain serial; when disabled, preserve legacy concurrency.
 - [ ] If you touched first-activity watchdog logic, verify streamed runtime events (not only tool/subagent hooks) count as activity for tool-less workflows.
 - [x] `npm run lint`

@@ -5,11 +5,19 @@ import { tmpdir } from "os";
 import { rmSync } from "fs";
 import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
-import { closeDb, createTestDb, getDb } from "../db.js";
+import { logger } from "../logger.js";
+import { closeDb, createTestDb, getDb, LATEST_SCHEMA_VERSION } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 34;
+const log = logger("shared-db-test");
+const CURRENT_SCHEMA_VERSION = LATEST_SCHEMA_VERSION;
+
+log.info(
+  { currentSchemaVersion: CURRENT_SCHEMA_VERSION },
+  "Derived CURRENT_SCHEMA_VERSION from exported migrations",
+);
 
 function removeSqliteArtifacts(dbPath: string): void {
+  log.debug({ dbPath, currentSchemaVersion: CURRENT_SCHEMA_VERSION }, "Cleaning sqlite artifacts");
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     try {
       rmSync(path, { force: true });

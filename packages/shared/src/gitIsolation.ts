@@ -706,15 +706,11 @@ function resolveGitDefaultBaseBranch(
     );
     return { branchName: "master", createFromRemote: false };
   }
-  // Последний запасной вариант: для репозитория без коммитов читаем HEAD напрямую.
-  const currentBranch = getCurrentBranch(projectRoot);
-  if (currentBranch) {
-    log.warn(
-      { projectRoot, configuredBase: fallbackBase, resolvedBase: currentBranch, source: "HEAD" },
-      "No project git base branch is configured; using current HEAD branch",
-    );
-    return { branchName: currentBranch, createFromRemote: false };
-  }
+  // Репозиторий без коммитов (unborn HEAD): `branchExists` сам распознаёт текущую
+  // ветку как существующую, поэтому отдельный fallback на HEAD не нужен — иначе
+  // переименованная рабочая ветка была бы ошибочно принята за base (см. gitBranch
+  // "throws base_branch_unavailable when base is missing"). Возвращаем настроенную
+  // базовую ветку; её отсутствие корректно даст base_branch_unavailable.
   return { branchName: fallbackBase, createFromRemote: false };
 }
 

@@ -23,6 +23,7 @@ import type {
   TaskStatus,
   UpdateTaskInput,
 } from "./types.js";
+import { logger } from "./logger.js";
 
 // FR: REQ-FR-pipeline.gate.enforce-stage-transition-gate (criteria 2, 8) — гейт отдаёт патч перехода с целевым статусом.
 // Патч перехода - ровно те поля, которые может менять смена статуса. Тип выведен из
@@ -61,6 +62,8 @@ export type TransitionResult =
 // FR: REQ-FR-auth.roles.assign-participant-role (criterion 5) — RBAC проверяется в resolveTaskAction.
 // Контекст актора, от которого зависит решение. Роль и активность передаются
 // отдельно, потому что актор бывает и системным (без участия в проекте).
+const log = logger("state-machine");
+
 export interface TaskActionContext {
   participantsModeEnabled: boolean;
   actor: AuditActor;
@@ -71,6 +74,7 @@ export interface TaskActionContext {
 // FR: REQ-FR-pipeline.gate.enforce-stage-transition-gate (criterion 2) — проверка идёт по снимку задачи.
 export type TaskPolicyView = Pick<
   Task,
+  | "id"
   | "status"
   | "autoMode"
   | "executionOwner"
@@ -100,6 +104,40 @@ export const CLEAN_STATE_RESET = {
 // Единая точка создания отказа: гарантирует, что код причины всегда заполнен.
 function denied(code: TaskActionDeniedCode, error: string): TransitionResult {
   return { ok: false, code, error };
+}
+
+function logTransitionDecision(
+  task: TaskPolicyView,
+  event: TaskEvent,
+  result: TransitionResult,
+): void {
+  if (result.ok) {
+    log.debug(
+      {
+        taskId: task.id,
+        event,
+        status: task.status,
+        runPostVerify: task.runPostVerify,
+        skipReview: task.skipReview,
+        targetStatus: result.patch.status,
+      },
+      "Resolved task action transition",
+    );
+    return;
+  }
+
+  log.warn(
+    {
+      taskId: task.id,
+      event,
+      status: task.status,
+      runPostVerify: task.runPostVerify,
+      skipReview: task.skipReview,
+      denialCode: result.code,
+      error: result.error,
+    },
+    "Task action denied",
+  );
 }
 
 // Legacy-набор переходов: режим участников выключен. Понятия владельца-человека здесь
@@ -192,7 +230,7 @@ function resolveLegacyAction(
         ok: true,
         patch: {
           ...CLEAN_STATE_RESET,
-          status: "done",
+          status: task.runPostVerify ? "verify" : "done",
         },
       };
     case "request_review_changes":
@@ -245,8 +283,8 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
           "submit_implementation is only allowed from implementing",
         );
       }
-      const status = "verify";
-      return { ok: true, patch: { ...CLEAN_STATE_RESET, status } };
+      const targetStatus = task.runPostVerify ? "verify" : task.skipReview ? "done" : "review";
+      return { ok: true, patch: { ...CLEAN_STATE_RESET, status: targetStatus } };
     }
     case "complete_review":
       if (task.status !== "review") {
@@ -280,7 +318,7 @@ function resolveHumanOwnerAction(task: TaskPolicyView, event: TaskEvent): Transi
         ok: true,
         patch: {
           ...CLEAN_STATE_RESET,
-          status: "review",
+          status: task.runPostVerify || task.skipReview ? "done" : "review",
         },
       };
     case "fail_verification":
@@ -363,13 +401,18 @@ export function resolveTaskAction(
   context: TaskActionContext,
 ): TransitionResult {
   const authorization = resolveParticipantAuthorization(task, context);
-  if (authorization) return authorization;
-  if (!context.participantsModeEnabled) {
-    return resolveLegacyAction(task, event);
+  if (authorization) {
+    logTransitionDecision(task, event, authorization);
+    return authorization;
   }
-  return task.executionOwner === "human"
-    ? resolveHumanOwnerAction(task, event)
-    : resolveLegacyAction(task, event);
+
+  const result =
+    !context.participantsModeEnabled || task.executionOwner !== "human"
+      ? resolveLegacyAction(task, event)
+      : resolveHumanOwnerAction(task, event);
+
+  logTransitionDecision(task, event, result);
+  return result;
 }
 
 // FR: REQ-FR-pipeline.gate.enforce-stage-transition-gate (criterion 1) — совместимый вход гейта без контекста актора.

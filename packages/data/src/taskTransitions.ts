@@ -385,6 +385,7 @@ export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResu
       // resolveTaskAction — единый автомат жизненного цикла для API и агента.
       const resolution = resolveTaskAction(
         {
+          id: task.id,
           status: task.status,
           autoMode: task.autoMode,
           executionOwner: task.executionOwner,
