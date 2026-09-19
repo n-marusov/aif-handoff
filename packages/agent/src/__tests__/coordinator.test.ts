@@ -9,7 +9,7 @@ import {
   getEnv,
   resetEnvCache,
 } from "@aif/shared";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 import { RuntimeExecutionError } from "@aif/runtime";
 import { eq } from "drizzle-orm";
 import { execFileSync } from "node:child_process";
@@ -35,8 +35,8 @@ function createGitRoot(prefix: string): string {
   return createGitTestRoot(prefix, { readme: "# auto queue\n" }).rootPath;
 }
 
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

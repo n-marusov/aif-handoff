@@ -12,7 +12,7 @@ import {
   logger as createLogger,
   type RuntimeLimitSnapshot,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { isObjectRecord, parseRuntimeLimitSnapshot } from "./internal.js";
 
 const log = createLogger("data");

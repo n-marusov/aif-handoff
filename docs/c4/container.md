@@ -99,7 +99,7 @@ C4Container
 | `api`                 | Node.js 22, Hono, `ws`, Zod                    | REST + WebSocket, session/CSRF/RBAC, маршруты VCS, фоновый Codex-индексатор, graceful shutdown                    | `packages/api/src/index.ts`, `serverBootstrap.ts`, `ws.ts`, `routes/`, `services/`, `middleware/`                                           |
 | `agent`               | Node.js 22, `node-cron`, Hono (внутренний API) | Цикл координатора, стадии конвейера и субагенты, git worktree, публикация PR/MR, уведомления, внутренний HTTP API | `packages/agent/src/coordinator.ts`, `subagentQuery.ts`, `internalApi.ts`, `worktreeLifecycle.ts`, `githubWorkflow.ts`, `gitlabWorkflow.ts` |
 | `mcp`                 | Node.js 22, `@modelcontextprotocol/sdk`, Zod   | MCP-сервер с инструментами `handoff_*`; транспорты Streamable HTTP и stdio                                        | `packages/mcp/src/index.ts`, `server.ts`, `tools/`, `middleware/rateLimit.ts`                                                               |
-| `SQLite (aif.sqlite)` | better-sqlite3 + drizzle-orm                   | Единое хранилище состояния: задачи, проекты, участники, аудит, лимиты, read-модели Codex                          | Том `db-data` / `DATABASE_URL`; схема — `packages/shared/src/schema.ts`; миграции — `packages/shared/src/db.ts`; доступ — `packages/data`   |
+| `SQLite (aif.sqlite)` | better-sqlite3 + drizzle-orm                   | Единое хранилище состояния: задачи, проекты, участники, аудит, лимиты, read-модели Codex                          | Том `db-data` / `DATABASE_URL`; схема — `packages/shared/src/schema.ts`; миграции — `packages/data/src/db.ts`; доступ — `packages/data`     |
 
 ### Библиотечные модули (не контейнеры)
 

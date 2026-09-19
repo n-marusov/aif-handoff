@@ -3,11 +3,14 @@
 // Файл нужен потому, что план читают люди и внешние инструменты (в том числе ревью
 // в PR/MR), а база - источник истины для конвейера. Обе записи выполняются в одной
 // функции, чтобы они не разошлись: файл без строки в базе или наоборот.
+//
+// Модуль переехал из @aif/shared в слой персистентности (@aif/data): запись в БД
+// и работа с файлом - это операция приложения поверх хранилища, а не чистый
+// контракт, поэтому здесь его место.
 
 import { eq } from "drizzle-orm";
+import { projects, tasks, syncPlanTextToCanonicalFile } from "@aif/shared";
 import { getDb } from "./db.js";
-import { projects, tasks } from "./schema.js";
-import { syncPlanTextToCanonicalFile } from "./planFile.js";
 
 interface PersistTaskPlanInput {
   db: ReturnType<typeof getDb>;

@@ -710,7 +710,7 @@ loads bounded:
 
 ## Database
 
-SQLite via `better-sqlite3` with `drizzle-orm` for type-safe queries. Schema is defined in `packages/shared/src/schema.ts`, and all DB reads/writes are executed through `packages/data/src/index.ts`.
+SQLite via `better-sqlite3` with `drizzle-orm` for type-safe queries. Schema is defined in `packages/shared/src/schema.ts`, the driver and append-only migrations live in `packages/data/src/db.ts` (`@aif/data/db`), and all DB reads/writes are executed through `packages/data/src/index.ts`.
 
 Key tables:
 

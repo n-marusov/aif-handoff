@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { projects, resetEnvCache, type RuntimeLimitSnapshot } from "@aif/shared";
 import { toRuntimeProfileResponse, toTaskResponse, toTaskSummary } from "@aif/shared";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 import {
   createTask,
   createRuntimeProfile,
@@ -27,8 +27,8 @@ import {
 } from "../index.js";
 
 const testDb = { current: createTestDb() };
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

@@ -13,7 +13,7 @@ import {
   type RuntimeWarmupSessionStatus,
   type UpdateRuntimeProfileInput,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { serializeRuntimeLimitSnapshot } from "./internal.js";
 import {
   findLatestRuntimeProfileUsageByIds,

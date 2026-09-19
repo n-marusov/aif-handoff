@@ -33,7 +33,7 @@ import {
   type TaskEvent,
   type TaskStatus,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
 
 const log = logger("data:task-ownership");

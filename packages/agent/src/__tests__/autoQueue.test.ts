@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tasks, projects } from "@aif/shared";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 import { createGitTestRoot } from "./gitTestUtils.js";
 
 const testDb = { current: createTestDb() };
 
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

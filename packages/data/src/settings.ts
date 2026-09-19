@@ -7,7 +7,7 @@ import {
   logger as createLogger,
   type UpdateAppSettingsInput,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { findRuntimeProfileById } from "./runtimeProfiles.js";
 
 const log = createLogger("data");

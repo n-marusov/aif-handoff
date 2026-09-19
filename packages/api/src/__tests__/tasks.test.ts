@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { appSettings, projects, runtimeProfiles, taskComments, tasks } from "@aif/shared";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 
 // Мокаем общий модуль БД, чтобы использовалась тестовая БД
 const testDb = { current: createTestDb() };
@@ -23,8 +23,8 @@ vi.mock("@aif/shared", async (importOriginal) => {
   };
 });
 
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

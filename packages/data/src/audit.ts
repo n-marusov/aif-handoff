@@ -17,7 +17,7 @@ import {
   type TaskAssigneeSummary,
   type TaskStatus,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 
 // Именованное пространство логов "data:audit" позволяет отфильтровать события
 // аудита при разборе инцидентов, не поднимая уровень логирования всего пакета.

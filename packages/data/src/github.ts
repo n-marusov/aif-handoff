@@ -27,7 +27,7 @@ import {
   type GitHubRepositoryConnection,
   type PullRequestMode,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
 
 // Репозиторный слой интеграции с GitHub: привязка репозитория к проекту,

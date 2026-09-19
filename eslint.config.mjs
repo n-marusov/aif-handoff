@@ -47,8 +47,9 @@ export default tseslint.config(
               message: "Use centralized data access via @aif/data.",
             },
             {
-              name: "@aif/shared/server",
-              message: "Use centralized data access via @aif/data.",
+              name: "@aif/data/db",
+              message:
+                "The SQLite driver is internal to @aif/data; use @aif/data repository functions.",
             },
             {
               name: "drizzle-orm",
@@ -165,8 +166,8 @@ export default tseslint.config(
               message: "Web must import shared contracts from @aif/shared/browser.",
             },
             {
-              name: "@aif/shared/server",
-              message: "Web must not import server-side DB helpers.",
+              name: "@aif/data/db",
+              message: "Web must not import the data-access layer or its driver.",
             },
             {
               name: "@aif/data",

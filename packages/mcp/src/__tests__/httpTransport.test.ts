@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 
 // Готовим in-memory тестовую БД до импорта сервера (тулзы попадают в БД
-// через @aif/data → @aif/shared/server getDb).
+// через @aif/data → @aif/data/db getDb).
 const testDb = { current: createTestDb() };
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

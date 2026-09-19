@@ -140,7 +140,7 @@ mcp ──→ data
 - ❌ `api` → import from `web` or `agent` (API is independent)
 - ❌ `web` → import from `api` or `agent` (UI communicates via HTTP/WS only)
 - ❌ `agent` → import from `api` or `web` (agent runtime integration is via HTTP, not code imports)
-- ❌ Cross-package deep imports (e.g., `@aif/shared/src/db` — use public API only)
+- ❌ Cross-package deep imports (e.g., `@aif/data/db` — use the public barrel API only)
 - ❌ DB access from `api`/`agent` outside `@aif/data` (enforced by lint guards)
 
 ## Module Communication
@@ -148,7 +148,7 @@ mcp ──→ data
 - **web ↔ api:** HTTP REST calls + WebSocket for real-time updates
 - **api/agent → data:** DB operations through centralized repository layer
 - **api/agent → runtime:** Runtime/provider selection and adapter execution via shared registry APIs
-- **data → shared:** Uses shared schema, DB helpers, and data contracts
+- **data → shared:** Uses shared schema and data contracts (driver itself is internal to data)
 - **agent → api:** HTTP REST calls for WebSocket broadcasts (best-effort via notifier.ts)
 - **runtime adapters → provider SDKs:** Each adapter (Claude, Codex, custom) wraps its provider SDK while agent/api stay provider-agnostic
 - **Shared types:** All modules import types and schemas from `@aif/shared`

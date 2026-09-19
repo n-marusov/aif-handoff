@@ -16,7 +16,7 @@ import {
   type EffectiveRuntimeProfileSelection,
   type TaskRow,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { findTaskById } from "./tasks.js";
 import { findProjectById } from "./projects.js";
 import { findRuntimeProfileById } from "./runtimeProfiles.js";

@@ -15,13 +15,18 @@
 // подменённый SQL на таких базах просто не выполнится, оставив схему рассинхронизированной
 // с кодом. При конфликте веток новая миграция добавляется в конец со следующим номером.
 
+// Модуль базы данных переехал из @aif/shared в слой персистентности (@aif/data):
+// драйвер SQLite и раннер миграций живут там, где живут операции над хранилищем.
+// Схема осталась в @aif/shared (чистый контракт), поэтому здесь она импортируется
+// через серверный сабпуть @aif/shared/schema, а корень монорепозитория и логгер
+// — через основной вход @aif/shared.
+
 import { mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import Database from "better-sqlite3";
 import { drizzle, BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import * as schema from "./schema.js";
-import { logger } from "./logger.js";
-import { findMonorepoRootFromUrl } from "./monorepoRoot.js";
+import * as schema from "@aif/shared/schema";
+import { findMonorepoRootFromUrl, logger } from "@aif/shared";
 
 const log = logger("db");
 

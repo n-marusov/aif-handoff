@@ -4,9 +4,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTestDb } from "../db.js";
-import { projects, tasks } from "../schema.js";
+import { projects, tasks } from "@aif/shared/schema";
 import { persistTaskPlan } from "../taskPlan.js";
-import { getCanonicalPlanPath } from "../planFile.js";
+import { getCanonicalPlanPath } from "@aif/shared";
 
 describe("persistTaskPlan", () => {
   it("updates DB plan and writes canonical PLAN.md", () => {

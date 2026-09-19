@@ -24,7 +24,7 @@ import {
   type TaskAssigneeSummary,
   type UpdateParticipantInput,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
 import {
   hashParticipantPassword,

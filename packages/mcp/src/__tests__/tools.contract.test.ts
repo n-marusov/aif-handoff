@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { projects } from "@aif/shared";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 import { RateLimiter } from "../middleware/rateLimit.js";
 import type { ToolContext } from "../tools/index.js";
 import { register as registerCreateTask } from "../tools/createTask.js";
@@ -28,8 +28,8 @@ import { register as registerSearchTasks } from "../tools/searchTasks.js";
 import { register as registerListProjects } from "../tools/listProjects.js";
 
 const testDb = { current: createTestDb() };
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

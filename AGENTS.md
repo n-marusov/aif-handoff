@@ -24,7 +24,7 @@ Autonomous task management system with Kanban board and AI subagents. Tasks flow
 packages/
 ├── shared/              # @aif/shared — contracts, schema, state machine, env, constants, logger
 │   └── src/
-│       ├── schema.ts        # Drizzle ORM schema (SQLite)
+│       ├── schema.ts        # Drizzle ORM schema (SQLite; subpath @aif/shared/schema)
 │       ├── types.ts         # Shared TypeScript types + RuntimeTransport enum
 │       ├── stateMachine.ts  # Task stage transitions
 │       ├── constants.ts     # App constants
@@ -54,8 +54,10 @@ packages/
 │           ├── claude/          # Claude adapter (Agent SDK transport)
 │           ├── codex/           # Codex adapter (CLI + API transports)
 │           └── openrouter/      # OpenRouter adapter (API transport)
-├── data/                 # @aif/data — centralized data-access module
+├── data/                 # @aif/data — centralized data-access module (owns the SQLite driver)
 │   └── src/
+│       ├── db.ts            # SQLite driver + MIGRATIONS + createTestDb (subpath @aif/data/db)
+│       ├── taskPlan.ts      # Plan write to DB + canonical file (persistTaskPlan)
 │       ├── participants.ts  # Participant lifecycle and admin invariants
 │       ├── authSessions.ts  # Password/session/CSRF persistence
 │       ├── taskOwnership.ts # Atomic handoff, assignment, executor history

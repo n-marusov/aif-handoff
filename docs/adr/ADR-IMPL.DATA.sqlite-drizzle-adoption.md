@@ -6,7 +6,7 @@
 
 **Требование-источник:** `vision.md` §2.1 (функциональные блоки), `docs/architecture.md` §Database
 
-**Решение:** SQLite через `better-sqlite3` (синхронный, нативный) с `drizzle-orm` (type-safe, schema-first). Схема — в `packages/shared/src/schema.ts`, все миграции — в `packages/shared/src/db.ts`. Drizzle обеспечивает TypeScript-типизацию запросов без генерации кода (no `prisma generate`), что упрощает CI/CD. `better-sqlite3` выбран за синхронный API (не нужно await для локальных вызовов, проще контроль транзакций) и нативную производительность (C binding). Ключевые таблицы: tasks, projects, runtime_profiles, chat_sessions, chat_messages, participants, task_comments, github/gitlab репозитории и issues, codex_sessions и limit metadata.
+**Решение:** SQLite через `better-sqlite3` (синхронный, нативный) с `drizzle-orm` (type-safe, schema-first). Схема — в `packages/shared/src/schema.ts`, все миграции — в `packages/data/src/db.ts` (после clean-architecture рефакторинга драйвер перенесён в @aif/data). Drizzle обеспечивает TypeScript-типизацию запросов без генерации кода (no `prisma generate`), что упрощает CI/CD. `better-sqlite3` выбран за синхронный API (не нужно await для локальных вызовов, проще контроль транзакций) и нативную производительность (C binding). Ключевые таблицы: tasks, projects, runtime_profiles, chat_sessions, chat_messages, participants, task_comments, github/gitlab репозитории и issues, codex_sessions и limit metadata.
 
 **Рассмотренные альтернативы:**
 

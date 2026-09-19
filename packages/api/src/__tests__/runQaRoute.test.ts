@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Hono } from "hono";
 import { projects, tasks, resetEnvCache } from "@aif/shared";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 
 // QA-маршруты гейтятся флагом AIF_QA_PIPELINE_ENABLED (по умолчанию выключен). Включим его
 // до импорта модуля маршрутов — schemas.ts вызывает getEnv() в момент определения
@@ -10,8 +10,8 @@ process.env.AIF_QA_PIPELINE_ENABLED = "true";
 
 const testDb = { current: createTestDb() };
 
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

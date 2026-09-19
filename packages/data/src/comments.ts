@@ -7,7 +7,7 @@ import {
   taskComments,
   type ParticipantSummary,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 
 // Приватный тип строки комментария: наружу отдаются гидратированные формы.
 type CommentRow = typeof taskComments.$inferSelect;

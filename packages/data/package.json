@@ -1,14 +1,19 @@
 {
   "name": "@aif/data",
   "version": "0.1.0",
-  "description": "Centralized data-access layer for AIF Handoff",
+  "description": "Centralized data-access layer for AIF Handoff (including the SQLite driver and migrations)",
   "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./db": "./src/db.ts"
+  },
   "scripts": {
     "build": "tsc",
+    "db:setup": "node --import tsx -e \"import('./src/db.ts').then((m) => { m.getDb(); m.closeDb(); })\"",
     "normalize:backlog": "node --import tsx src/normalizeBacklogPositions.ts",
     "test": "vitest run --passWithNoTests --configLoader runner",
     "coverage": "vitest run --coverage --passWithNoTests",
@@ -17,9 +22,11 @@
   },
   "dependencies": {
     "@aif/shared": "*",
+    "better-sqlite3": "^12.8.0",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2"

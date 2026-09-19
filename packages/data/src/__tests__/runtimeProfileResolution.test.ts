@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestDb } from "@aif/shared/server";
+import { createTestDb } from "@aif/data/db";
 import { projects, runtimeProfiles, tasks } from "@aif/shared";
 
 const { loggerMock, testDb } = vi.hoisted(() => ({
@@ -22,8 +22,8 @@ vi.mock("@aif/shared", async (importOriginal) => {
   };
 });
 
-vi.mock("@aif/shared/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@aif/shared/server")>();
+vi.mock("@aif/data/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/data/db")>();
   return {
     ...actual,
     getDb: () => testDb.current,

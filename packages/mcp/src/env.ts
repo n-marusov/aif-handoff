@@ -70,7 +70,7 @@ function resolveMcpPort(value: string | undefined, transport: McpEnv["transport"
 
 /**
  * Загружает конфигурацию окружения MCP.
- * Соединение с БД использует общий getDb() из @aif/shared/server (как у api/agent).
+ * Соединение с БД использует общий getDb() из @aif/data/db (как у api/agent).
  * API_BASE_URL берётся из общего окружения.
  */
 export function loadMcpEnv(): McpEnv {

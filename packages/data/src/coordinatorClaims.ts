@@ -30,7 +30,7 @@ import {
   type RuntimeLimitSnapshot,
   type TaskStatus,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
 import { serializeRuntimeLimitSnapshot } from "./internal.js";
 import type { ProjectRow, TaskRow } from "@aif/shared";

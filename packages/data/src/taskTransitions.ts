@@ -26,7 +26,7 @@ import {
   type TaskStatus,
   type TransitionPatch,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
 
 // Логгер переходов статусов в слое данных.

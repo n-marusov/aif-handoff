@@ -27,7 +27,7 @@ import {
   participants,
   type ParticipantSummary,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 
 const log = logger("data:auth-sessions");
 // Идентификатор схемы хранения хеша. Вынесен в отдельное поле формата, чтобы в

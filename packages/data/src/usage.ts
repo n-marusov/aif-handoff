@@ -12,7 +12,7 @@ import {
   usageEvents,
   type RuntimeProfileUsage,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 
 const log = createLogger("data");
 

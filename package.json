@@ -35,7 +35,7 @@
     "coverage": "turbo coverage --concurrency=1",
     "mutation": "node scripts/mutation.mjs",
     "mutation:dry-run": "node scripts/mutation.mjs --dryRunOnly",
-    "db:setup": "npm run db:setup --workspace=@aif/shared",
+    "db:setup": "npm run db:setup --workspace=@aif/data",
     "db:push": "turbo db:push --filter=@aif/shared",
     "participants:bootstrap": "npm run participants:bootstrap --workspace=@aif/api --",
     "format": "prettier --write .",

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { eq, getTableName, sql } from "drizzle-orm";
 import { createTestDb } from "../db.js";
-import { projects, tasks, gitlabRepositories, gitlabIssues } from "../schema.js";
-import type { TaskStatus } from "../types.js";
+import { projects, tasks, gitlabRepositories, gitlabIssues } from "@aif/shared/schema";
+import type { TaskStatus } from "@aif/shared";
 
 describe("tasks schema", () => {
   let db: ReturnType<typeof createTestDb>;

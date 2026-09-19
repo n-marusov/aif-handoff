@@ -13,7 +13,7 @@
 import { pathToFileURL } from "node:url";
 import { and, asc, eq } from "drizzle-orm";
 import { logger as createLogger, tasks } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 
 const log = createLogger("normalize-backlog-positions");
 // Шаг между соседними позициями. Достаточно большой, чтобы между двумя задачами

@@ -4,8 +4,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { rmSync } from "fs";
 import { eq } from "drizzle-orm";
-import { chatSessions } from "../schema.js";
-import { logger } from "../logger.js";
+import { chatSessions } from "@aif/shared/schema";
+import { logger } from "@aif/shared";
 import { closeDb, createTestDb, getDb, LATEST_SCHEMA_VERSION } from "../db.js";
 
 const log = logger("shared-db-test");

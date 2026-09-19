@@ -27,7 +27,7 @@ import {
   type GitLabRepositoryConnection,
   type PullRequestMode,
 } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
 
 // Персистентность интеграции с GitLab: привязка репозитория к проекту,

@@ -28,7 +28,6 @@ import {
   logger as createLogger,
   normalizeRuntimeLimitSnapshot,
   participants,
-  persistTaskPlan,
   sanitizeRuntimeLimitSnapshotForExposure,
   taskAssignments,
   taskComments,
@@ -45,7 +44,8 @@ import {
   type TaskStatus,
 } from "@aif/shared";
 export { parseTaskCurrentTool } from "@aif/shared";
-import { getDb } from "@aif/shared/server";
+import { getDb } from "./db.js";
+import { persistTaskPlan } from "./taskPlan.js";
 import {
   buildTaskOwnershipConditions,
   listTaskAssigneesByTaskIds,

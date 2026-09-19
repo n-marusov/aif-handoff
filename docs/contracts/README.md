@@ -79,12 +79,11 @@ HTTP REST API сервера (порт 3009) для управления зад�
 ### `contract-aif-data` — Data-access layer (`@aif/data`)
 
 Централизованный слой доступа к данным. Единственный способ чтения и записи БД для `api`, `agent` и `runtime`.
-Lint-правила блокируют прямой импорт `@aif/shared/src/db` из этих пакетов.
+Lint-правила блокируют прямой импорт `@aif/data/db` из этих пакетов.
 
 - **Источник правды:** TypeScript-типы в `packages/data/src/index.ts`:
   - Repositories: `participants`, `authSessions`, `taskOwnership`, `taskTransitions`, `audit`
-  - Каждая операция — атомарная функция, принимающая `db` из `@aif/shared/server`
-- **Реализация (as is):** `packages/data/src/*.ts`.
+- **Реализация (as is):** `packages/data/src/*.ts`; драйвер и миграции — `packages/data/src/db.ts` (сабпуть `@aif/data/db`).
 - **Трассируемость:** архитектурное правило (ADR-DES.API.data-access-boundary), все UC с операциями с данными.
 
 ### `contract-aif-db-schema` — SQLite schema (Drizzle ORM)
@@ -93,7 +92,7 @@ Lint-правила блокируют прямой импорт `@aif/shared/sr
 
 - **Источник правды:** `packages/shared/src/schema.ts` — таблицы: `tasks`, `projects`, `participants`,
   `auth_sessions`, `task_ownership_history`, `audit_events`, `runtime_profiles`, и др.
-- **Миграции:** `MIGRATIONS` в `packages/shared/src/db.ts` — append-only, версионируются через `PRAGMA user_version`.
+- **Миграции:** `MIGRATIONS` в `packages/data/src/db.ts` — append-only, версионируются через `PRAGMA user_version`.
 - **Трассируемость:** все UC с персистентностью данных.
 
 ## Как пользоваться каталогом (инструкция для ИИ-агентов)
