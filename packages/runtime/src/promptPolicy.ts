@@ -25,16 +25,12 @@ import { existsSync, readFileSync } from "node:fs";
 // оказывается вне проекта, относительный путь начнётся с ".." - это
 // дешёвый и надёжный способ поймать path traversal без перечисления плохих форм.
 import { relative, resolve } from "node:path";
-import { RuntimeTransport, type RuntimeCapabilities } from "./types.js";
-import type { RuntimeWorkflowSpec } from "./workflowSpec.js";
-// Стратегия субагентов Codex вынесена в адаптер, но политика промптов
-// должна её учитывать - иначе здесь и в адаптере разъедутся правила выбора.
 import {
-  CODEX_SUBAGENT_STRATEGIES,
-  getNativeSubagentWorkflowGuidance,
-  resolveCodexNativeSubagentReadiness,
-  resolveCodexSubagentStrategy,
-} from "./adapters/codex/subagentStrategy.js";
+  RuntimeTransport,
+  type RuntimeCapabilities,
+  type RuntimeSubagentStrategyPort,
+} from "./types.js";
+import type { RuntimeWorkflowSpec } from "./workflowSpec.js";
 
 // Оба метода опциональны (?) и вызываются через `?.method?.()`: политика
 // не требует логгера и не должна падать, если у переданного логгера нет
@@ -70,6 +66,12 @@ export interface RuntimePromptPolicyInput {
   // "true"), считается выключенным - safe-by-default.
   codexNativeSubagentsEnabled?: boolean;
   logger?: RuntimePromptPolicyLogger;
+  /**
+   * Порт стратегии нативных субагентов (объявляет адаптер Codex через
+   * `adapter.subagentStrategy`). Без порта политика работает с не-Codex умолчанием
+   * (non_codex) — ядро больше не импортирует `adapters/**` (Task 11).
+   */
+  adapterSubagentStrategy?: RuntimeSubagentStrategyPort;
   // Транспорт (SDK/CLI/API) важен: у API-режима нет ни slash-команд, ни
   // файлов проекта в привычном виде, и политика подбирает другой способ
   // донести инструкции.
@@ -226,13 +228,14 @@ function prependNativeSubagentPrompt(
   workflow: RuntimeWorkflowSpec,
   prompt: string,
   agentDefinitionName: string,
+  getGuidance: (workflowKind: string) => string,
 ): string {
   // Имя agent-определения подставляется в текст: именно так модель Codex
   // находит кастомного агента, описанного в .codex/assets.
   const agentReference = `Spawn the custom Codex agent "${agentDefinitionName}" and delegate this workflow to it.`;
   // Хвостовая подсказка по типу workflow: планирование, имплементация и
   // ревью имеют разную постановку задачи для субагента.
-  const workflowSpecificGuidance = getNativeSubagentWorkflowGuidance(workflow.workflowKind);
+  const workflowSpecificGuidance = getGuidance(workflow.workflowKind);
 
   // Пустая строка перед prompt - визуальный разделитель: служебная рамка
   // не должна сливаться с телом задачи при join("\n").
@@ -273,16 +276,21 @@ export function resolveRuntimePromptPolicy(
   const wantsIsolatedSkillCommand = input.workflow.executionMode === "isolated_skill_session";
   const wantsSlashFallback = input.workflow.fallbackStrategy === "slash_command";
   // Стратегия Codex резолвится отдельно от capabilities: у одного и того же
-  // рантайма она может переключаться runtime-опциями и env-флагами.
-  const codexSubagentStrategy = resolveCodexSubagentStrategy(
-    input.runtimeId,
-    input.runtimeOptions,
-    { nativeSubagentsEnabled: input.codexNativeSubagentsEnabled === true },
-  );
+  // рантайма она может переключаться runtime-опциями и env-флагами. Логика
+  // живёт в адаптере (порт subagentStrategy), ядро её не знает (Task 11).
+  const strategyPort = input.adapterSubagentStrategy;
+  const codexSubagentStrategy = strategyPort
+    ? strategyPort.resolveStrategy(input.runtimeId, input.runtimeOptions, {
+        nativeSubagentsEnabled: input.codexNativeSubagentsEnabled === true,
+      })
+    : { strategy: null, reason: "non_codex", nativeSubagentsEnabled: false };
   // Готовность нативных субагентов спрашивается только у Codex: другой
   // рантайм с таким именем - чужие внутренности, лезть в которые не стоит.
-  const codexNativeReadiness =
-    input.runtimeId === "codex" ? resolveCodexNativeSubagentReadiness(input.projectRoot) : null;
+  const codexNativeReadiness = strategyPort
+    ? input.runtimeId === "codex"
+      ? strategyPort.resolveReadiness(input.projectRoot)
+      : null
+    : null;
   // supports*-флаг изолированных сессий читается прямо из capabilities:
   // это чисто декларативная возможность адаптера, внешних проверок не требует.
   const supportsIsolatedSkillCommand = Boolean(
@@ -291,10 +299,8 @@ export function resolveRuntimePromptPolicy(
   // Готовность нативных субагентов - конъюнкция трёх независимых условий:
   // стратегия выбрана native, адаптер это умеет, и (только для Codex)
   // проектные ассеты на месте. Любое «нет» роняет всю ветку в fallback.
-  // Заметьте `?.ready === true`: отсутствующий объект readiness или любое
-  // значение, отличное от true, трактуется как «не готов» - safe-by-default.
   const supportsNativeSubagentWorkflow =
-    codexSubagentStrategy.strategy === CODEX_SUBAGENT_STRATEGIES.native &&
+    codexSubagentStrategy.strategy === strategyPort?.nativeStrategy &&
     Boolean(input.capabilities.supportsNativeSubagentWorkflows) &&
     (input.runtimeId !== "codex" || codexNativeReadiness?.ready === true);
   // has*-флаги проверяют наличие «топлива»: без fallback-команды нечего
@@ -419,7 +425,7 @@ export function resolveRuntimePromptPolicy(
   if (
     wantsNativeSubagentWorkflow &&
     input.runtimeId === "codex" &&
-    codexSubagentStrategy.strategy === CODEX_SUBAGENT_STRATEGIES.native &&
+    codexSubagentStrategy.strategy === strategyPort?.nativeStrategy &&
     codexNativeReadiness &&
     !codexNativeReadiness.ready
   ) {
@@ -455,7 +461,7 @@ export function resolveRuntimePromptPolicy(
     !supportsNativeSubagentWorkflow &&
     !(
       input.runtimeId === "codex" &&
-      codexSubagentStrategy.strategy === CODEX_SUBAGENT_STRATEGIES.native &&
+      codexSubagentStrategy.strategy === strategyPort?.nativeStrategy &&
       codexNativeReadiness &&
       !codexNativeReadiness.ready
     ) &&
@@ -550,6 +556,9 @@ export function resolveRuntimePromptPolicy(
         input.workflow,
         input.workflow.promptInput.prompt,
         input.workflow.agentDefinitionName ?? "",
+        strategyPort?.getGuidance ??
+          ((_workflowKind: string) =>
+            "Delegate work to the named custom agent and keep the final response in the parent thread."),
       )
     : useApiSkillExpansion
       ? input.workflow.promptInput.prompt // clean prompt; skill content is in systemPromptAppend

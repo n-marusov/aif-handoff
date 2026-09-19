@@ -87,6 +87,12 @@ import { CodexAppServerClient } from "./appServer/client.js";
 import { classifyCodexAppServerError } from "./appServer/errors.js";
 import { listCodexSdkSessions, getCodexSdkSession, listCodexSdkSessionEvents } from "./sessions.js";
 import { classifyCodexRuntimeError } from "./errors.js";
+import {
+  CODEX_SUBAGENT_STRATEGIES,
+  getNativeSubagentWorkflowGuidance,
+  resolveCodexNativeSubagentReadiness,
+  resolveCodexSubagentStrategy,
+} from "./subagentStrategy.js";
 
 export type CodexRuntimeAdapterLogger = CodexCliLogger & CodexAgentApiLogger & CodexSdkLogger;
 
@@ -960,6 +966,15 @@ export function createCodexRuntimeAdapter(
     },
     async uninstallMcpServer(input) {
       return uninstallCodexMcpServer(input);
+    },
+
+    // Порт стратегии нативных субагентов (Task 11): promptPolicy достигает
+    // codex-специфичной логики через этот порт, а не импортом `adapters/**`.
+    subagentStrategy: {
+      nativeStrategy: CODEX_SUBAGENT_STRATEGIES.native,
+      resolveStrategy: resolveCodexSubagentStrategy,
+      resolveReadiness: resolveCodexNativeSubagentReadiness,
+      getGuidance: getNativeSubagentWorkflowGuidance,
     },
   };
 }

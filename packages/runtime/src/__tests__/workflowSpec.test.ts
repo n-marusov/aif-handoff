@@ -9,6 +9,12 @@ import {
   UsageReporting,
   type RuntimeCapabilities,
 } from "../index.js";
+import { createCodexRuntimeAdapter } from "../adapters/codex/index.js";
+
+// Порт стратегии нативных субагентов Codex берётся из реального адаптера: после
+// Task 11 promptPolicy не импортирует adapters/**, и тесты обязаны давать порт
+// как это делает реестр/агент в рантайме.
+const codexStrategyPort = createCodexRuntimeAdapter().subagentStrategy;
 
 const CODEX_CAPABILITIES: RuntimeCapabilities = {
   supportsResume: true,
@@ -76,6 +82,7 @@ describe("runtime workflow spec + prompt policy", () => {
     const resolved = resolveRuntimePromptPolicy({
       runtimeId: "codex",
       capabilities: CODEX_CAPABILITIES,
+      adapterSubagentStrategy: codexStrategyPort,
       workflow,
     });
 
@@ -119,6 +126,7 @@ describe("runtime workflow spec + prompt policy", () => {
     const resolved = resolveRuntimePromptPolicy({
       runtimeId: "codex",
       capabilities: CODEX_CAPABILITIES,
+      adapterSubagentStrategy: codexStrategyPort,
       workflow,
     });
 
@@ -147,6 +155,7 @@ describe("runtime workflow spec + prompt policy", () => {
       runtimeOptions: { codexSubagentStrategy: "native" },
       workflow,
       codexNativeSubagentsEnabled: true,
+      adapterSubagentStrategy: codexStrategyPort,
     });
 
     expect(resolved.usedNativeSubagentWorkflow).toBe(true);
@@ -174,6 +183,7 @@ describe("runtime workflow spec + prompt policy", () => {
       capabilities: CODEX_CAPABILITIES,
       runtimeOptions: { codexSubagentStrategy: "isolated" },
       workflow,
+      adapterSubagentStrategy: codexStrategyPort,
     });
 
     expect(resolved.usedNativeSubagentWorkflow).toBe(false);
@@ -201,6 +211,7 @@ describe("runtime workflow spec + prompt policy", () => {
       capabilities: CODEX_CAPABILITIES,
       runtimeOptions: { codexSubagentStrategy: "isloated" },
       workflow,
+      adapterSubagentStrategy: codexStrategyPort,
       logger: {
         warn(context, message) {
           warnings.push({ context, message });
@@ -244,6 +255,7 @@ describe("runtime workflow spec + prompt policy", () => {
       capabilities: CODEX_CAPABILITIES,
       runtimeOptions: {},
       workflow,
+      adapterSubagentStrategy: codexStrategyPort,
       logger: {
         warn(context, message) {
           warnings.push({ context, message });
@@ -288,6 +300,7 @@ describe("runtime workflow spec + prompt policy", () => {
       runtimeOptions: {},
       workflow,
       codexNativeSubagentsEnabled: true,
+      adapterSubagentStrategy: codexStrategyPort,
     });
 
     expect(resolved.usedNativeSubagentWorkflow).toBe(true);
@@ -314,6 +327,7 @@ describe("runtime workflow spec + prompt policy", () => {
       runtimeOptions: {},
       workflow,
       codexNativeSubagentsEnabled: true,
+      adapterSubagentStrategy: codexStrategyPort,
     });
 
     expect(resolved.usedNativeSubagentWorkflow).toBe(false);

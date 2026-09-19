@@ -990,6 +990,10 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     workflow,
     transport: resolved.transport,
     codexNativeSubagentsEnabled: getEnv().AIF_RUNTIME_CODEX_NATIVE_SUBAGENTS_ENABLED,
+    // Порт стратегии нативных субагентов приходит от самого адаптера: ядро не
+    // импортирует adapters/** (Task 11), а делегирует codex-специфичный выбор
+    // сюда. resolveRuntime уже вернул обёрнутый адаптер с этим портом.
+    adapterSubagentStrategy: registry.resolveRuntime(resolved.runtimeId).subagentStrategy,
     logger: {
       debug(context, message) {
         log.debug({ ...context }, `[runtime-workflow] ${message}`);

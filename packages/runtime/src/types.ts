@@ -923,6 +923,48 @@ export interface RuntimeAdapter {
   installMcpServer?(input: RuntimeMcpInstallInput): Promise<void>;
   /** Удалить MCP-сервер из конфигурации этого runtime. */
   uninstallMcpServer?(input: RuntimeMcpInput): Promise<void>;
+
+  /**
+   * Порт стратегии нативных субагентов (Codex). Опциональная «выносная» логика:
+   * promptPolicy достигает её через этот порт, а не импортом `adapters/**`, чтобы
+   * ядро не зависело от конкретного адаптера (Task 11). Адаптеры без нативных
+   * субагентов порт не объявляют — политика работает с не-Codex умолчанием.
+   */
+  subagentStrategy?: RuntimeSubagentStrategyPort;
+}
+
+/**
+ * Порт стратегии нативных субагентов, который адаптер может объявить, чтобы
+ * promptPolicy не импортировала `adapters/**`. Ядро работает только с этими
+ * полями/методами; конкретный адаптер (Codex) владеет реализацией.
+ */
+export interface RuntimeSubagentStrategyPort {
+  /** Имя native-стратегии (значение-литерал "native"). */
+  nativeStrategy: string;
+  /** Резолвер стратегии: native/isolated/null по рантайму, опциям и env-флагу. */
+  resolveStrategy(
+    runtimeId: string,
+    runtimeOptions?: Record<string, unknown>,
+    options?: { nativeSubagentsEnabled?: boolean },
+  ): RuntimeSubagentStrategyResolution;
+  /** Готовность нативных ассетов проекта; null = «не применимо». */
+  resolveReadiness(projectRoot?: string | null): RuntimeSubagentReadiness | null;
+  /** Инструкция-хвост для субагента по типу workflow. */
+  getGuidance(workflowKind: string): string;
+}
+
+/** Резолвер-результат стратегии (зеркало CodexSubagentStrategyResolution). */
+export interface RuntimeSubagentStrategyResolution {
+  strategy: string | null;
+  reason: string;
+  configuredValue?: string;
+  nativeSubagentsEnabled: boolean;
+}
+
+/** Готовность нативных ассетов проекта (зеркало CodexNativeSubagentReadiness). */
+export interface RuntimeSubagentReadiness {
+  ready: boolean;
+  missingPaths: string[];
 }
 
 /**
