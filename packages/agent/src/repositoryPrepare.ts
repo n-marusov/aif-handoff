@@ -280,6 +280,10 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
   try {
     // Уровень репозитория: используется для fetch/push этого репозитория
     runGit(projectRoot, ["config", "credential.helper", credentialHelper]);
+    log.debug(
+      { projectId, provider, configScope: "repo" },
+      "Configured credential helper (repo scope)",
+    );
     // Глобальный уровень: наследуется git clone при init подмодулей (новые репозитории
     // не наследуют repo-конфиг). Область — контейнер, поэтому несколько
     // проектов на одном агенте делят один credential helper.
@@ -287,7 +291,10 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    log.debug({ projectId, provider }, "Configured credential helper (repo + global)");
+    log.debug(
+      { projectId, provider, configScope: "global" },
+      "Configured credential helper (global scope)",
+    );
   } catch (err) {
     throw new RepositoryPrepareError(
       "credential_failed",
@@ -305,7 +312,7 @@ export function prepareRepository(input: RepositoryPrepareInput): RepositoryPrep
       encoding: "utf8",
       stdio: ["ignore", "ignore", "pipe"],
     });
-    log.debug({ projectId, provider, projectRoot }, "Added safe.directory");
+    log.debug({ projectId, provider, projectRoot, configScope: "global" }, "Added safe.directory");
   } catch (err) {
     throw new RepositoryPrepareError(
       "safe_directory_failed",

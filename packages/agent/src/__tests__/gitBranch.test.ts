@@ -11,15 +11,12 @@ import {
   branchExists,
   isGitRepo,
 } from "../gitBranch.js";
+import { assertIsolatedGitTestRoot, initGitRepo } from "./gitTestUtils.js";
 
 function initRepo(root: string): void {
-  execFileSync("git", ["init", "--initial-branch=main"], { cwd: root, stdio: "ignore" });
-  execFileSync("git", ["config", "user.email", "test@test.local"], {
-    cwd: root,
-    stdio: "ignore",
-  });
-  execFileSync("git", ["config", "user.name", "Test"], { cwd: root, stdio: "ignore" });
-  execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, stdio: "ignore" });
+  // Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+  // reuse the shared repo setup so every suite initializes git identically.
+  initGitRepo(root);
   writeFileSync(join(root, "README.md"), "# test\n");
   execFileSync("git", ["add", "README.md"], { cwd: root, stdio: "ignore" });
   execFileSync("git", ["commit", "-m", "initial", "--no-verify"], {
@@ -46,6 +43,9 @@ describe("gitBranch helpers", () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "gitbranch-"));
+    // Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+    // assert the suite operates only inside its own unique temp root.
+    assertIsolatedGitTestRoot(root);
   });
 
   afterEach(() => {

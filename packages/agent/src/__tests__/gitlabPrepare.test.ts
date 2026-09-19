@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GitLabRepositoryConnection } from "@aif/shared";
+import {
+  assertIsolatedGitTestRoot,
+  cleanupGitTestRoots,
+  createIsolatedGitConfig,
+} from "./gitTestUtils.js";
 
 const initProjectMock = vi.fn();
 const getRuntimeRegistrySyncMock = vi.fn();
@@ -74,6 +79,26 @@ function makeConnection(
 describe("prepareGitLabRepository", () => {
   let root: string;
   let origin: string;
+  let globalConfigPath: string;
+  // Real profile config captured before the sandbox env overrides are applied, so the
+  // suite can prove it never touched the developer's ~/.gitconfig.
+  let realGlobalConfigPath: string | null;
+  let realGlobalConfigMtimeMs: number | null;
+
+  // `--show-origin` is the only reliable way to learn which file git uses for --global:
+  // homedir() heuristics differ per platform and ignore the HOME/GIT_CONFIG_GLOBAL overrides.
+  function realGlobalGitConfigPath(): string | null {
+    try {
+      const out = execFileSync("git", ["config", "--global", "--list", "--show-origin"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const fileLine = out.split("\n").find((line) => line.startsWith("file:"));
+      return fileLine ? fileLine.slice("file:".length).split("\t")[0].trim() : null;
+    } catch {
+      return null;
+    }
+  }
 
   function initLocalRepo(branch = "master"): void {
     gitQuiet(root, ["init", `--initial-branch=${branch}`]);
@@ -99,7 +124,23 @@ describe("prepareGitLabRepository", () => {
     findProjectByIdMock.mockReset();
     findGitLabRepositoryMock.mockReset();
     root = mkdtempSync(join(tmpdir(), "aif-gitlab-prepare-"));
+    // Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+    // assert the suite operates only inside its own unique temp root.
+    assertIsolatedGitTestRoot(root);
     origin = createOriginWithMain();
+    // Known issue: "`ai:validate`: флейк agent-сьюта из-за записи в глобальный git config".
+    // `prepareRepository` writes credential.helper/safe.directory at --global scope by
+    // design; sandbox the global config so those writes never touch the real profile.
+    // Capture the real config first — this git call still sees the unsandboxed env.
+    realGlobalConfigPath = realGlobalGitConfigPath();
+    realGlobalConfigMtimeMs =
+      realGlobalConfigPath && existsSync(realGlobalConfigPath)
+        ? statSync(realGlobalConfigPath).mtimeMs
+        : null;
+    const { homeDir, globalConfigPath: isolatedConfig } = createIsolatedGitConfig();
+    globalConfigPath = isolatedConfig;
+    vi.stubEnv("HOME", homeDir);
+    vi.stubEnv("GIT_CONFIG_GLOBAL", globalConfigPath);
     vi.stubEnv("GITLAB_TOKEN", "secret-token");
     // Разрешаем клоны сабмодулей по локальной ФС (по умолчанию заблокированы с Git 2.38.1)
     execFileSync("git", ["config", "--global", "protocol.file.allow", "always"], {
@@ -109,8 +150,33 @@ describe("prepareGitLabRepository", () => {
   });
 
   afterEach(() => {
+    // Acceptance: the developer's real ~/.gitconfig mtime must be unchanged after the suite.
+    if (realGlobalConfigPath && realGlobalConfigMtimeMs !== null) {
+      expect(statSync(realGlobalConfigPath).mtimeMs).toBe(realGlobalConfigMtimeMs);
+    }
+    cleanupGitTestRoots();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it("keeps global git writes inside the per-test sandbox", () => {
+    // Reproducer for known issue: "`ai:validate`: флейк agent-сьюта из-за записи в
+    // глобальный git config". Before the sandbox, prepareRepository's --global writes
+    // (credential.helper, safe.directory) targeted the developer's real ~/.gitconfig, so
+    // a permission failure there failed the suite regardless of the code under test.
+    expect(process.env.GIT_CONFIG_GLOBAL).toBe(globalConfigPath);
+    expect(globalConfigPath.startsWith(tmpdir())).toBe(true);
+
+    initLocalRepo("master");
+    const connection = makeConnection(origin);
+
+    prepareGitLabRepository({ projectRoot: root, connection });
+
+    const sandboxConfig = readFileSync(globalConfigPath, "utf8");
+    // Git writes the file in INI form (section headers), not the dotted `--get-all` form.
+    expect(sandboxConfig).toContain("[credential]");
+    expect(sandboxConfig).toContain("[safe]");
+    expect(sandboxConfig).toContain("directory = ");
   });
 
   it("adds origin when missing", () => {

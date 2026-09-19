@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { projects, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/data/db";
+import { assertIsolatedGitTestRoot } from "./gitTestUtils.js";
 
 const testDb = { current: createTestDb() };
 const executeSubagentQueryMock = vi.fn();
@@ -38,6 +39,9 @@ describe("runImprover", () => {
     logActivityMock.mockReset();
 
     projectRoot = mkdtempSync(join(tmpdir(), "aif-improver-test-"));
+    // Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+    // assert the suite operates only inside its own unique temp root.
+    assertIsolatedGitTestRoot(projectRoot);
     mkdirSync(join(projectRoot, ".ai-factory"));
     planPath = join(projectRoot, ".ai-factory", "PLAN.md");
     writeFileSync(planPath, "## Plan\n\n- [ ] Initial task");

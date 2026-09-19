@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { assertIsolatedGitTestRoot, initGitRepo } from "./gitTestUtils.js";
 import {
   githubIssues,
   projects,
@@ -61,6 +62,9 @@ describe("runImplementer rework behavior", () => {
     queryMock.mockReset();
     queryMock.mockReturnValue(streamSuccess("Implementation done"));
     projectRoot = mkdtempSync(join(tmpdir(), "aif-implementer-test-"));
+    // Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+    // assert the suite operates only inside its own unique temp root.
+    assertIsolatedGitTestRoot(projectRoot);
 
     testDb.current
       .insert(projects)
@@ -602,16 +606,10 @@ describe("runImplementer feature branch routing", () => {
     queryMock.mockReset();
     queryMock.mockReturnValue(streamSuccess("Implementation done"));
     projectRoot = mkdtempSync(join(tmpdir(), "aif-implementer-branch-"));
-    execFileSync("git", ["init", "--initial-branch=main"], { cwd: projectRoot, stdio: "ignore" });
-    execFileSync("git", ["config", "user.email", "t@t.local"], {
-      cwd: projectRoot,
-      stdio: "ignore",
-    });
-    execFileSync("git", ["config", "user.name", "T"], { cwd: projectRoot, stdio: "ignore" });
-    execFileSync("git", ["config", "commit.gpgsign", "false"], {
-      cwd: projectRoot,
-      stdio: "ignore",
-    });
+    // Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+    // reuse the shared repo setup instead of duplicating the git init/config sequence.
+    assertIsolatedGitTestRoot(projectRoot);
+    initGitRepo(projectRoot);
     writeFileSync(join(projectRoot, "README.md"), "# t\n");
     execFileSync("git", ["add", "README.md"], { cwd: projectRoot, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "init", "--no-verify"], {

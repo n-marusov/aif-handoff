@@ -1,14 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createGitTestRoot } from "./gitTestUtils.js";
+import { cleanupGitTestRoots, createGitTestRoot } from "./gitTestUtils.js";
 import {
   buildPlanCommitSubject,
   resolveBranchName,
   resolveIssueBranchName,
   resolveTargetProjectGitConventions,
 } from "../gitConventions.js";
+
+// Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+// each suite owns its temp roots and removes them so parallel files cannot interfere.
+afterEach(() => {
+  cleanupGitTestRoots();
+});
 
 describe("resolveTargetProjectGitConventions", () => {
   it("falls back to Handoff defaults when the project declares no conventions", () => {

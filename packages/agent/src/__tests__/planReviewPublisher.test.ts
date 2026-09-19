@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { githubIssues, gitlabIssues, projects, tasks, resetEnvCache } from "@aif/shared";
 import { createTestDb } from "@aif/data/db";
-import { createGitTestRoot } from "./gitTestUtils.js";
+import { cleanupGitTestRoots, createGitTestRoot } from "./gitTestUtils.js";
 
 const testDb = { current: createTestDb() };
 vi.mock("@aif/data/db", async (importOriginal) => {
@@ -110,6 +110,12 @@ beforeEach(() => {
   publishGitHubPlanTaskMock.mockReset();
   publishGitLabPlanTaskMock.mockReset();
   resetEnvCache();
+});
+
+// Known issue: "Agent: флейки git-тестов при полном параллельном прогоне (Windows)" —
+// each suite owns its temp roots and removes them so parallel files cannot interfere.
+afterEach(() => {
+  cleanupGitTestRoots();
 });
 
 describe("taskRequiresPlanReview", () => {
