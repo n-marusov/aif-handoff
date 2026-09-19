@@ -27,7 +27,7 @@ import { saveAttachment, deleteAttachment } from "./attachmentStorage.js";
 
 const log = logger("attachmentPersistence");
 
-interface IncomingAttachment {
+export interface IncomingAttachment {
   name: string;
   mimeType: string;
   size: number;

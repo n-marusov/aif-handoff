@@ -11,8 +11,17 @@
  * а маппинг код → HTTP-статус живёт в маршруте.
  */
 
-import type { AuditActor, TaskEvent, TaskStatus } from "@aif/shared";
-import type { ParticipantRole } from "@aif/shared";
+import type {
+  AuditActor,
+  ExecutionOwner,
+  ParticipantRole,
+  TaskActionContext,
+  TaskEvent,
+  TaskExecutorHistoryEntry,
+  TaskOwnership,
+  TaskStatus,
+} from "@aif/shared";
+import type { TaskFieldsUpdate } from "@aif/data";
 
 // ── applyTaskEvent ───────────────────────────────────────────────────────────
 
@@ -93,3 +102,152 @@ export interface GenerateCommitInput {
 export type GenerateCommitResult =
   | { ok: true }
   | { ok: false; code?: "ai_handoff_required"; error: string };
+
+// ── createTask ───────────────────────────────────────────────────────────────
+
+/** Вложение задачи из тела запроса (совпадает с taskAttachmentSchema). */
+export interface TaskAttachmentInput {
+  name: string;
+  mimeType: string;
+  size: number;
+  content: string | null;
+  path?: string;
+}
+
+/** Вход для создания задачи. Поля соответствуют createTaskSchema (после zod-defaults). */
+export interface CreateTaskInput {
+  projectId: string;
+  title: string;
+  description: string;
+  attachments: TaskAttachmentInput[];
+  priority?: number;
+  autoMode?: boolean;
+  executionOwner?: "ai" | "human";
+  assigneeIds: string[];
+  isFix?: boolean;
+  plannerMode: "fast" | "full";
+  planPath?: string;
+  planDocs?: boolean;
+  planTests?: boolean;
+  skipReview?: boolean;
+  useSubagents?: boolean;
+  runPlanImprove?: boolean;
+  runPostVerify?: boolean;
+  autoQa?: boolean;
+  maxReviewIterations?: number;
+  paused?: boolean;
+  runtimeProfileId?: string | null;
+  modelOverride?: string | null;
+  runtimeOptions?: Record<string, unknown> | null;
+  roadmapAlias?: string;
+  tags?: string[];
+  scheduledAt?: string | null;
+  actionContext: TaskActionContext;
+}
+
+/** Результат создания задачи: задача-строка для широковещательной рассылки и ответа. */
+export interface CreateTaskOk {
+  ok: true;
+  task: {
+    id: string;
+    projectId: string;
+    executionOwner?: string | null;
+    status: TaskStatus;
+    [key: string]: unknown;
+  };
+  /** Поле для agent:wake после создания AI-задачи. */
+  wakeAgent: boolean;
+}
+
+/** Отказ создания задачи: семантический код + детали для формирования ответа. */
+export interface CreateTaskDenied {
+  ok: false;
+  /** Семантический код отказа (не HTTP-статус). */
+  code: string;
+  error: string;
+  /** Дополнительные детали (например, fieldErrors валидации runtime). */
+  details?: Record<string, unknown>;
+}
+
+export type CreateTaskResult = CreateTaskOk | CreateTaskDenied;
+
+// ── updateTask ───────────────────────────────────────────────────────────────
+
+/** Вход для обновления задачи: id + patch-поля (после zod-парсинга). */
+export interface UpdateTaskInput {
+  taskId: string;
+  /** Поля обновления БЕЗ составных операций plan/attachments. */
+  patch: TaskFieldsUpdate;
+  /** Составная операция «записать файл плана». undefined = не трогать. */
+  plan?: string | null;
+  /** Составная операция «записать вложения». undefined = не трогать. */
+  attachments?: TaskAttachmentInput[];
+  /** Актор участника для авторизации мутации. */
+  actionContext: TaskActionContext;
+}
+
+/** Результат обновления задачи: свежая строка для ответа и broadcast. */
+export interface UpdateTaskOk {
+  ok: true;
+  task: {
+    id: string;
+    projectId: string;
+    status: TaskStatus;
+    [key: string]: unknown;
+  };
+}
+
+/** Отказ обновления: задача не найдена или участник не авторизован. */
+export interface UpdateTaskDenied {
+  ok: false;
+  code: "task_not_found" | "forbidden" | "parallel_mode_required" | "invalid_runtime_profile";
+  error: string;
+  details?: Record<string, unknown>;
+}
+
+export type UpdateTaskResult = UpdateTaskOk | UpdateTaskDenied;
+
+// ── handoffTask ─────────────────────────────────────────────────────────────
+
+/** Вход передачи исполнения: id + запрошенное владение + CAS-ожидания. */
+export interface HandoffTaskInput {
+  taskId: string;
+  executionOwner: ExecutionOwner;
+  assigneeIds: string[];
+  expectedOwnershipRevision: number;
+  expectedExecutionOwner?: ExecutionOwner;
+  expectedStatus?: TaskStatus;
+  reason?: string | null;
+  resumeAction?: TaskEvent;
+  actionContext: TaskActionContext;
+}
+
+/** Результат передачи исполнения: владение + история (строки @aif/data). */
+export interface HandoffTaskOk {
+  ok: true;
+  ownership: TaskOwnership;
+  history: TaskExecutorHistoryEntry;
+}
+
+/** Отказ передачи: CAS-конфликт, блокировка, неавторизованность и т.п. */
+export interface HandoffTaskDenied {
+  ok: false;
+  /** Коды HandoffTaskExecutionResult: not_found/locked/revision_conflict/inactive_assignee/invalid_transition. */
+  code: string;
+  error: string;
+  ownership?: TaskOwnership | null;
+}
+
+export type HandoffTaskResult = HandoffTaskOk | HandoffTaskDenied;
+
+// ── deleteTask ───────────────────────────────────────────────────────────────
+
+/** Вход удаления задачи: только id — работа с worktree полностью внутренняя. */
+export interface DeleteTaskInput {
+  taskId: string;
+  /** Вызывается сразу после удаления строки БД, до долгой уборки worktree. */
+  onTaskDeleted?: () => void;
+}
+
+/** Результат удаления: строка уже удалена; broadcast остаётся маршруту. */
+export type DeleteTaskResult = { ok: true } | { ok: false; code: "task_not_found"; error: string };

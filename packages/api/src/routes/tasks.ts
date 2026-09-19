@@ -15,14 +15,7 @@ import { Hono, type Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import {
-  logger,
-  parseAttachments,
-  getProjectConfig,
-  defaultsForMode,
-  getEnv,
-  type TaskActionContext,
-} from "@aif/shared";
+import { logger, parseAttachments, getEnv, type TaskActionContext } from "@aif/shared";
 import {
   createTaskSchema,
   updateTaskSchema,
@@ -35,18 +28,13 @@ import {
 import { broadcast } from "../ws.js";
 import { handleTaskEvent } from "../services/taskEvents.js";
 import { startQaRun as startQaRunUseCase } from "../use-cases/qaRun.js";
-import {
-  persistAttachments,
-  cleanupReplacedAttachments,
-} from "../services/attachmentPersistence.js";
+import { persistAttachments } from "../services/attachmentPersistence.js";
 import { readAttachment } from "../services/attachmentStorage.js";
 import {
   findTaskById,
   listTaskListItems,
   listTasks,
-  createTask,
   updateTask,
-  deleteTask,
   listComments,
   createComment,
   updateComment,
@@ -55,9 +43,14 @@ import {
   toCommentResponse,
   toTaskListItem,
   getTaskPlanFileStatus,
-  updateTaskPlan,
   syncTaskPlanFromFile,
 } from "../repositories/tasks.js";
+import {
+  createTaskUseCase,
+  updateTaskUseCase,
+  handoffTaskUseCase,
+  deleteTaskUseCase,
+} from "../use-cases/index.js";
 import {
   findProjectById,
   getAppDefaultRuntimeProfileId,
@@ -65,19 +58,19 @@ import {
   resolveEffectiveRuntimeProfilesForTasks,
   releaseTaskClaim,
   updateTaskPositionOnly,
-  findParticipantById,
   getTaskOwnership,
-  handoffTaskExecution,
   listTaskExecutorHistory,
   findGitHubIssueByTaskId,
   type TaskOwnershipFilters,
 } from "@aif/data";
-import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
-import { callAgentWorktreeCleanup } from "../services/agentInternal.js";
 import { getParticipantAuth, type ParticipantApiEnv } from "../middleware/participantAuth.js";
 
 const log = logger("tasks-route");
 const QA_LOCK_DURATION_MS = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
+
+// Строка задачи: выводится из findTaskById (row-типы не входят в публичный
+// контракт @aif/data); use case возвращает её же через структурный DTO.
+type PersistedTask = NonNullable<ReturnType<typeof findTaskById>>;
 
 export const tasksRouter = new Hono<ParticipantApiEnv>();
 
@@ -361,143 +354,32 @@ tasksRouter.get("/", (c) => {
   return c.json(taskList);
 });
 
-// Создание задачи: сначала авторизация и доменные инварианты,
-// затем дорогие операции (БД/файловая система).
+// Создание задачи: авторизация и доменные инварианты живут в use case,
+// здесь только парсинг входа, вызов, broadcast и форма ответа.
 tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
   const body = c.req.valid("json");
   const actionContext = requestActionContext(c);
-  const actor = actionContext.actor;
-  // Участник с ролью member не назначает human-задачу на других при создании.
-  if (
-    actionContext.participantsModeEnabled &&
-    actionContext.participantRole === "member" &&
-    body.executionOwner === "human" &&
-    (body.assigneeIds.length > 1 ||
-      (body.assigneeIds.length === 1 && body.assigneeIds[0] !== actor.id))
-  ) {
-    return c.json(
+  const result = await createTaskUseCase({ ...body, actionContext });
+  log.debug(
+    { route: "POST /tasks", useCase: "createTask", outcome: result.ok ? "ok" : result.code },
+    "Task create delegated to use case",
+  );
+  if (!result.ok) {
+    const status =
       {
-        error: "Members may create human tasks only unassigned or assigned to themselves",
-        code: "forbidden",
-      },
-      403,
-    );
-  }
-  // Задача, закреплённая за ИИ, не может содержать участников-исполнителей.
-  if (body.executionOwner === "ai" && body.assigneeIds.length > 0) {
-    return c.json(
-      { error: "AI-owned tasks cannot have participant assignees", code: "invalid_ownership" },
-      409,
-    );
-  }
-  // Каждый assignee должен существовать и быть активным.
-  for (const participantId of body.assigneeIds) {
-    const participant = findParticipantById(participantId);
-    if (!participant?.active) {
-      return c.json(
-        { error: "One or more assignees are inactive or missing", code: "inactive_assignee" },
-        409,
-      );
+        forbidden: 403,
+        invalid_ownership: 409,
+        inactive_assignee: 409,
+        invalid_runtime_profile: 400,
+      }[result.code] ?? 400;
+    log.warn({ projectId: body.projectId, code: result.code }, "Task creation rejected");
+    if (result.details) {
+      return c.json(result.details, status as ContentfulStatusCode);
     }
-  }
-  // Runtime-профиль проверяется на принадлежность проекту перед созданием задачи.
-  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
-    projectId: body.projectId,
-    selections: { runtimeProfileId: body.runtimeProfileId },
-  });
-  if (runtimeValidation) {
-    log.warn(
-      { projectId: body.projectId, fieldErrors: runtimeValidation.fieldErrors },
-      "Rejected invalid task runtime selection",
-    );
-    return c.json(runtimeValidation, 400);
+    return c.json({ error: result.error, code: result.code }, status as ContentfulStatusCode);
   }
 
-  // Дефолтный planPath берётся из project config, иначе используется fallback.
-  const project = findProjectById(body.projectId);
-  const defaultPlanPath = project
-    ? getProjectConfig(project.rootPath).paths.plan
-    : ".ai-factory/PLAN.md";
-
-  // Для parallel-enabled проекта принудительно используется plannerMode=full.
-  if (project?.parallelEnabled) {
-    body.plannerMode = "full";
-  }
-
-  // Пропущенные planner-флаги заполняются mode-default значениями.
-  const modeDefaults = defaultsForMode(body.plannerMode);
-  const resolvedSkipReview = body.skipReview ?? modeDefaults.skipReview;
-  const resolvedPlanDocs = body.planDocs ?? modeDefaults.planDocs;
-  const resolvedPlanTests = body.planTests ?? modeDefaults.planTests;
-  // Флаги runPlanImprove/runPostVerify применяются только в skills-mode.
-  const resolvedRunPlanImprove = body.useSubagents ? false : body.runPlanImprove;
-  const resolvedRunPostVerify = body.useSubagents ? false : body.runPostVerify;
-  if (
-    body.skipReview === undefined ||
-    body.planDocs === undefined ||
-    body.planTests === undefined
-  ) {
-    log.debug(
-      {
-        plannerMode: body.plannerMode,
-        filled: {
-          skipReview: body.skipReview === undefined,
-          planDocs: body.planDocs === undefined,
-          planTests: body.planTests === undefined,
-        },
-      },
-      "Applied mode-driven task flag defaults",
-    );
-  }
-
-  // Двухфазная схема вложений: сначала create task, затем persist файлов,
-  // затем update ссылок в задаче.
-  const created = createTask({
-    projectId: body.projectId,
-    title: body.title,
-    description: body.description,
-    attachments: [],
-    priority: body.priority,
-    autoMode: body.autoMode,
-    executionOwner: body.executionOwner,
-    assigneeIds: body.assigneeIds,
-    actor,
-    isFix: body.isFix,
-    plannerMode: body.plannerMode,
-    planPath: body.planPath ?? defaultPlanPath,
-    planDocs: resolvedPlanDocs,
-    planTests: resolvedPlanTests,
-    skipReview: resolvedSkipReview,
-    useSubagents: body.useSubagents,
-    runPlanImprove: resolvedRunPlanImprove,
-    runPostVerify: resolvedRunPostVerify,
-    autoQa: body.autoQa,
-    maxReviewIterations: body.maxReviewIterations,
-    paused: body.paused,
-    runtimeProfileId: body.runtimeProfileId,
-    modelOverride: body.modelOverride,
-    runtimeOptions: body.runtimeOptions,
-    roadmapAlias: body.roadmapAlias,
-    tags: body.tags,
-    scheduledAt: body.scheduledAt ?? null,
-  });
-  // null из createTask трактуется как нарушение ownership-инварианта (409).
-  if (!created) {
-    return c.json({ error: "Failed to create task ownership", code: "invalid_ownership" }, 409);
-  }
-
-  // Вложения сохраняются в файловом хранилище проекта и привязываются путями.
-  if (body.attachments.length > 0) {
-    if (project) {
-      const persisted = await persistAttachments(body.attachments, {
-        projectRoot: project.rootPath,
-        taskId: created.id,
-      });
-      updateTask(created.id, { attachments: persisted });
-    }
-  }
-
-  const final = findTaskById(created.id) ?? created;
+  const final = result.task as PersistedTask;
   log.debug(
     {
       taskId: final.id,
@@ -513,80 +395,45 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
   // чтобы WS и HTTP-ответ не расходились по составу данных.
   broadcast({
     type: "task:created",
-    payload: toTaskBroadcastPayload(final, actor),
+    payload: toTaskBroadcastPayload(final, actionContext.actor),
   });
   // Задача, закреплённая за ИИ, будит координатор для немедленной обработки.
-  if (final.executionOwner === "ai") {
+  if (result.wakeAgent) {
     broadcast({ type: "agent:wake", payload: { id: final.id } });
   }
   return c.json(toTaskRouteResponse(final, undefined, undefined, actionContext), 201);
 });
 
 // Передача исполнения атомарно меняет владельца и состав исполнителей.
-// Для участника с ролью member разрешены только узкие сценарии самосервиса.
+// Авторизация и CAS-предусловия живут в use case; здесь broadcast и форма ответа.
 tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
   const taskId = c.req.param("id");
   const body = c.req.valid("json");
-  const task = findTaskById(taskId);
-  if (!task) {
-    return c.json({ error: "Task not found", code: "task_not_found" }, 404);
-  }
-
   const actionContext = requestActionContext(c);
-  const actorId = actionContext.actor.id;
-  // Авторизация проверяется в маршруте; слой данных обеспечивает атомарность передачи.
-  if (actionContext.participantsModeEnabled && actionContext.participantRole !== "admin") {
-    const currentOwnership = getTaskOwnership(taskId);
-    const assigned =
-      actorId !== null &&
-      Boolean(
-        currentOwnership?.assignees.some(
-          (assignee) => assignee.participantId === actorId && assignee.active,
-        ),
-      );
-    // Self-assign допустим только для unassigned human-owned задачи.
-    const selfAssign =
-      task.executionOwner === "human" &&
-      (currentOwnership?.assignees.length ?? 0) === 0 &&
-      body.executionOwner === "human" &&
-      body.assigneeIds.length === 1 &&
-      body.assigneeIds[0] === actorId;
-    const assignedHumanToAi =
-      task.executionOwner === "human" &&
-      assigned &&
-      body.executionOwner === "ai" &&
-      body.assigneeIds.length === 0;
-    if (!selfAssign && !assignedHumanToAi) {
-      log.warn(
-        {
-          taskId,
-          actorId,
-          currentOwner: task.executionOwner,
-          requestedOwner: body.executionOwner,
-        },
-        "Rejected unauthorized task handoff",
-      );
-      return c.json(
-        { error: "Participant is not allowed to hand off this task", code: "forbidden" },
-        403,
-      );
-    }
-  }
-
-  // expected* поля реализуют CAS-предусловие handoff-операции.
-  const result = handoffTaskExecution({
+  const result = handoffTaskUseCase({
     taskId,
     executionOwner: body.executionOwner,
     assigneeIds: body.assigneeIds,
     expectedOwnershipRevision: body.expectedOwnershipRevision,
     expectedExecutionOwner: body.expectedExecutionOwner,
     expectedStatus: body.expectedStatus,
-    actor: actionContext.actor,
     reason: body.reason,
     resumeAction: body.resumeAction,
+    actionContext,
   });
-  // Ошибки handoff маппятся в стабильные code для клиентской логики.
+  log.debug(
+    {
+      route: "POST /tasks/:id/handoff",
+      useCase: "handoffTask",
+      outcome: result.ok ? "ok" : result.code,
+    },
+    "Task handoff delegated to use case",
+  );
   if (!result.ok) {
+    // Ошибки handoff маппятся в стабильные code для клиентской логики.
+    if (result.code === "forbidden") {
+      return c.json({ error: result.error, code: "forbidden" }, 403);
+    }
     const code = {
       not_found: "task_not_found",
       locked: "task_locked",
@@ -604,14 +451,14 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
       {
         taskId,
         code,
-        actorId,
+        actorId: actionContext.actor.id,
         requestedOwner: body.executionOwner,
       },
       "Task handoff rejected",
     );
     return c.json(
       {
-        error: "Task ownership handoff could not be applied",
+        error: result.error,
         code,
         ...(result.ownership ? { ownership: result.ownership } : {}),
       },
@@ -644,7 +491,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
   log.info(
     {
       taskId,
-      actorId,
+      actorId: actionContext.actor.id,
       executionOwner: result.ownership.executionOwner,
       ownershipRevision: result.ownership.ownershipRevision,
       assigneeCount: result.ownership.assignees.length,
@@ -821,108 +668,47 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
   return c.json(response, 201);
 });
 
-// Обновление полей. Часть правил намеренно повторяет POST /tasks (заполнение
-// флагов от plannerMode, запрет fast-режима в параллельных проектах): набор
-// правил один, а точка входа может быть любой.
-// PUT /tasks/:id — обновить поля
+// PUT /tasks/:id — обновить поля. Правила (mode-defaults, запрет fast-режима
+// в параллельных проектах, составные операции плана/вложений) живут в use case.
 tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   const { id } = c.req.param();
   const body = c.req.valid("json");
-  const existing = findTaskById(id);
-  if (!existing) {
-    return c.json({ error: "Task not found" }, 404);
-  }
-  if (!canMutateTask(c, id)) {
-    return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
-  }
-
-  // Профиль времени выполнения проверяется тем же сервисом, что и при создании:
-  // правка не должна обходить проектные ограничения на выбор runtime.
-  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
-    projectId: existing.projectId,
-    selections: { runtimeProfileId: body.runtimeProfileId },
-  });
-  if (runtimeValidation) {
-    log.warn(
-      { taskId: id, projectId: existing.projectId, fieldErrors: runtimeValidation.fieldErrors },
-      "Rejected invalid task runtime selection",
-    );
-    return c.json(runtimeValidation, 400);
-  }
-
-  // Проекты с параллельным выполнением принудительно получают полный режим
-  const project = findProjectById(existing.projectId);
-  if (project?.parallelEnabled) {
-    if (body.plannerMode === "fast") {
-      return c.json({ error: "Parallel-enabled projects require full planner mode" }, 400);
-    }
-  }
+  const actionContext = requestActionContext(c);
 
   // plan и attachments вынимаются из payload отдельно: это не колонки таблицы,
   // а составные операции (файл плана на диске, файловая система вложений).
   const { plan, attachments: incomingAttachments, ...updatePayload } = body;
-  const effectiveUseSubagents = updatePayload.useSubagents ?? existing.useSubagents;
-  if (effectiveUseSubagents) {
-    updatePayload.runPlanImprove = false;
-    updatePayload.runPostVerify = false;
-  }
-
-  // Зеркало POST /tasks: при смене plannerMode недостающие флаги берутся из значений режима.
-  if (updatePayload.plannerMode !== undefined) {
-    const modeDefaults = defaultsForMode(updatePayload.plannerMode);
-    const filled = {
-      skipReview: updatePayload.skipReview === undefined,
-      planDocs: updatePayload.planDocs === undefined,
-      planTests: updatePayload.planTests === undefined,
-    };
-    updatePayload.skipReview = updatePayload.skipReview ?? modeDefaults.skipReview;
-    updatePayload.planDocs = updatePayload.planDocs ?? modeDefaults.planDocs;
-    updatePayload.planTests = updatePayload.planTests ?? modeDefaults.planTests;
-    if (filled.skipReview || filled.planDocs || filled.planTests) {
-      log.debug(
-        { taskId: id, plannerMode: updatePayload.plannerMode, filled },
-        "Applied mode-driven task flag defaults on update",
-      );
+  const result = await updateTaskUseCase({
+    taskId: id,
+    patch: updatePayload,
+    plan,
+    attachments: incomingAttachments,
+    actionContext,
+  });
+  log.debug(
+    { route: "PUT /tasks/:id", useCase: "updateTask", outcome: result.ok ? "ok" : result.code },
+    "Task update delegated to use case",
+  );
+  if (!result.ok) {
+    if (result.code === "task_not_found") {
+      return c.json({ error: result.error }, 404);
     }
-  }
-
-  // hasOwnProperty, а не проверка на undefined: null - валидное значение,
-  // означающее "очистить план", и его нельзя спутать с "поле не прислали".
-  const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
-  if (hasPlanUpdate) {
-    try {
-      updateTaskPlan(id, plan ?? null, existing.isFix, existing.planPath);
-    } catch {
-      return c.json({ error: "Project not found for task" }, 404);
+    if (result.code === "forbidden") {
+      return c.json({ error: result.error, code: "forbidden" }, 403);
     }
-  }
-
-  // Сохраняем новые вложения в файлы проекта и убираем заменённые
-  // undefined здесь значит "не трогать вложения", а пустой массив - "удалить все".
-  // Освобождение диска от замененных файлов идет до записи новых, чтобы
-  // перезапись одноименных вложений не удалила только что сохраненное.
-  if (incomingAttachments !== undefined) {
-    const project = findProjectById(existing.projectId);
-    if (project) {
-      const oldAttachments = parseAttachments(existing.attachments);
-      cleanupReplacedAttachments(project.rootPath, oldAttachments, incomingAttachments);
-      (updatePayload as Record<string, unknown>).attachments = await persistAttachments(
-        incomingAttachments,
-        { projectRoot: project.rootPath, taskId: id },
-      );
+    if (result.details) {
+      return c.json(result.details, 400);
     }
+    return c.json({ error: result.error }, 400);
   }
 
-  // Единственная запись в таблицу: составные части (план, вложения) уже
-  // разложены выше, поэтому остаток payload - плоский набор колонок.
-  const updated = updateTask(id, updatePayload);
-  if (!updated) return c.json({ error: "Task not found after update" }, 500);
+  const updated = result.task as PersistedTask;
   log.debug({ taskId: id, fields: Object.keys(body) }, "Task updated");
 
   // Событие после ответа от репозитория: обновлять карточку нужно у всех
   // открытых окон, а не только у инициатора запроса.
   broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(updated) });
-  return c.json(toTaskRouteResponse(updated, undefined, undefined, requestActionContext(c)));
+  return c.json(toTaskRouteResponse(updated, undefined, undefined, actionContext));
 });
 
 // Ручная синхронизация: файл плана - источник правды, а БД может отстать,
@@ -958,60 +744,22 @@ tasksRouter.post("/:id/sync-plan", (c) => {
   return c.json(toTaskRouteResponse(updated, undefined, undefined, requestActionContext(c)));
 });
 
-// Удаление задачи. Порядок шагов критичен: сначала снимок git-идентичности,
-// потом удаление строки, и только затем best-effort уборка worktree. После
-// deleteTask восстановить branchName/worktreePath уже неоткуда.
-// DELETE /tasks/:id
+// DELETE /tasks/:id — снимок git-идентичности, удаление строки и best-effort
+// уборка worktree живут в use case; здесь WS-событие и форма ответа.
 tasksRouter.delete("/:id", async (c) => {
   const { id } = c.req.param();
-  const existing = findTaskById(id);
-  if (!existing) {
-    return c.json({ error: "Task not found" }, 404);
-  }
-
-  // Снимок git-идентичности ДО исчезновения строки БД: уборке нужны имена
-  // ветки/worktree плюс корень проекта, чтобы удалить правильную папку.
-  const project = findProjectById(existing.projectId);
-  const worktreeSnapshot = {
-    taskId: existing.id,
-    projectId: existing.projectId,
-    projectRoot: project?.rootPath ?? "",
-    branchName: existing.branchName ?? null,
-    worktreePath: existing.worktreePath ?? null,
-  };
-
-  // Строка удаляется в БД-транзакции, а файловые операции вынесены наружу:
-  // они не транзакционны и должны быть идемпотентными.
-  deleteTask(id);
-  log.debug({ taskId: id }, "Task deleted");
-
-  // Событие уходит сразу после удаления строки, до уборки worktree: клиенты не
-  // должны ждать медленную файловую операцию, чтобы убрать карточку с доски.
-  broadcast({ type: "task:deleted", payload: { id } });
-
-  // Уборка worktree best-effort: удаление уже состоялось, и недоступный агент
-  // не должен превращать его в ошибку. Резервный вариант — сверочный проход.
-  // Чистим worktree только когда он был заведен (обе записи непустые): у задач
-  // без отдельного дерева чистить нечего, а пустой путь увел бы удаление в
-  // корень проекта.
-  if (worktreeSnapshot.worktreePath && worktreeSnapshot.projectRoot) {
-    try {
-      const cleanupResult = await callAgentWorktreeCleanup({
-        ...worktreeSnapshot,
-        reason: "task_delete",
-      });
-      if (!cleanupResult.ok) {
-        log.warn(
-          { taskId: id, code: cleanupResult.errorCode },
-          "Worktree cleanup after delete did not complete",
-        );
-      }
-    } catch (error) {
-      log.warn(
-        { taskId: id, err: error },
-        "Worktree cleanup after delete threw; delete already succeeded",
-      );
-    }
+  // broadcast уходит сразу после удаления строки (до медленной уборки worktree),
+  // как и в исходном обработчике: колбэк вызывается use case'ом между шагами.
+  const result = await deleteTaskUseCase({
+    taskId: id,
+    onTaskDeleted: () => broadcast({ type: "task:deleted", payload: { id } }),
+  });
+  log.debug(
+    { route: "DELETE /tasks/:id", useCase: "deleteTask", outcome: result.ok ? "ok" : result.code },
+    "Task delete delegated to use case",
+  );
+  if (!result.ok) {
+    return c.json({ error: result.error, code: "task_not_found" }, 404);
   }
 
   return c.json({ success: true });
