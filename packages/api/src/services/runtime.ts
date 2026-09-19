@@ -64,7 +64,6 @@ import {
   persistRuntimeProfileLimitSnapshot,
   getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
-  type ProjectRow,
 } from "@aif/data";
 import { broadcast } from "../ws.js";
 
@@ -454,7 +453,7 @@ function parseRuntimeOptions(
  * логи и ответы API могли объяснить, почему выбран именно этот runtime.
  */
 export interface RuntimeExecutionContext {
-  project: ProjectRow;
+  project: NonNullable<ReturnType<typeof findProjectById>>;
   adapter: RuntimeAdapter;
   resolvedProfile: ResolvedRuntimeProfile;
   selectionSource: "task_override" | "project_default" | "system_default" | "none" | "profile_id";

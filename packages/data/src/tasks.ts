@@ -37,6 +37,7 @@ import {
   type AuditActor,
   type AutoReviewState,
   type ExecutionOwner,
+  type ProjectRow,
   type RuntimeLimitSnapshot,
   type TaskActiveRuntimeSelection,
   type TaskAssigneeSummary,
@@ -52,7 +53,7 @@ import {
 } from "./taskOwnership.js";
 import { transitionTaskStatus as transitionTaskStatusAtomic } from "./taskTransitions.js";
 import { createAuditEventValues } from "./audit.js";
-import { findProjectById, type ProjectRow } from "./projects.js";
+import { findProjectById } from "./projects.js";
 import {
   parseRuntimeLimitSnapshot,
   parseRuntimeObject,
@@ -66,7 +67,10 @@ const log = createLogger("data");
 const AUTO_REVIEW_STRATEGY_SET = new Set<string>(AUTO_REVIEW_STRATEGIES);
 const AUTO_REVIEW_FINDING_SOURCE_SET = new Set<string>(AUTO_REVIEW_FINDING_SOURCES);
 
-export type TaskRow = typeof tasks.$inferSelect;
+// Базовый тип строки задачи приватный для data-слоя: потребители не должны
+// зависеть от внутренней формы строки БД. Наружу отдаются гидратированные
+// проекции (HydratedTaskRow) и view-модели (@aif/shared presenters).
+type TaskRow = typeof tasks.$inferSelect;
 
 export type HydratedTaskRow = TaskRow & {
   assignees: TaskAssigneeSummary[];

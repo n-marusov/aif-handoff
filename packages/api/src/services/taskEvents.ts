@@ -32,9 +32,12 @@ import {
   getLatestHumanComment,
   persistTaskPlanForTask,
   setTaskFields,
-  type TaskRow,
 } from "@aif/data";
 import { AiHandoffRequiredError, runFastFixQuery, withTimeout } from "./fastFix.js";
+
+// Локальный псевдоним задачи-строки: выводится из findTaskById, потому что
+// row-типы задач не входят в публичный контракт @aif/data.
+type PersistedTask = NonNullable<ReturnType<typeof findTaskById>>;
 
 /**
  * Вход обработчика: событие плюс actor/role-контекст. Поля участников опциональны,
@@ -57,14 +60,14 @@ interface EventHandlerInput {
  */
 export type EventHandlerResult =
   | { ok: false; status: number; error: string; code?: string }
-  | { ok: true; task: TaskRow; broadcastType: "task:moved" | "task:updated" };
+  | { ok: true; task: PersistedTask; broadcastType: "task:moved" | "task:updated" };
 
 /**
  * Вернуть рабочее дерево на persisted-ветку задачи перед записью. null означает
  * "проверка не нужна или прошла"; при сбое возвращается готовый 409-результат.
  */
 function restoreTaskBranchForMutation(
-  task: TaskRow,
+  task: PersistedTask,
   projectRoot: string,
 ): EventHandlerResult | null {
   // У fix-задач ветка не создаётся (они работают в текущем дереве), а отсутствие
@@ -97,7 +100,10 @@ function restoreTaskBranchForMutation(
  * Проверка дрейфа ПОСЛЕ дочернего прогона: runtime мог сам переключить ветку,
  * поэтому совпадение проверяется повторно, а не только на входе.
  */
-function assertTaskBranchPostRun(task: TaskRow, projectRoot: string): EventHandlerResult | null {
+function assertTaskBranchPostRun(
+  task: PersistedTask,
+  projectRoot: string,
+): EventHandlerResult | null {
   if (!task.branchName || task.isFix) return null;
   try {
     assertCurrentBranch(projectRoot, task.branchName);

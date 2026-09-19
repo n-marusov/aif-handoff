@@ -22,7 +22,6 @@ import {
   listRuntimeProfiles,
   updateAppSettings,
   updateRuntimeProfile,
-  type RuntimeProfileRow,
 } from "@aif/data";
 
 const log = logger("profile-bootstrap");
@@ -83,7 +82,7 @@ export function seedBootstrapRuntimeProfile(): ProfileBootstrapResult {
     (profile) => profile.name === name,
   );
 
-  let profile: RuntimeProfileRow | undefined;
+  let profile: ReturnType<typeof createRuntimeProfile>;
   let action: ProfileBootstrapResult["action"];
 
   // fields собирается один раз и используется и в create, и в update: иначе

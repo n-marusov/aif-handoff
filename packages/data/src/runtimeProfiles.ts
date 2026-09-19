@@ -22,7 +22,8 @@ import {
 
 const log = createLogger("data");
 
-export type RuntimeProfileRow = typeof runtimeProfiles.$inferSelect;
+// Приватный тип строки runtime-профиля: наружу отдаются гидратированные формы.
+type RuntimeProfileRow = typeof runtimeProfiles.$inferSelect;
 
 export type RuntimeWarmupSessionRow = typeof runtimeWarmupSessions.$inferSelect;
 

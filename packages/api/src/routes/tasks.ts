@@ -71,7 +71,6 @@ import {
   handoffTaskExecution,
   listTaskExecutorHistory,
   findGitHubIssueByTaskId,
-  type TaskRow,
   type TaskOwnershipFilters,
 } from "@aif/data";
 import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
@@ -272,8 +271,10 @@ function startQaRun(
 
 // Обогащает ответ по задаче связью с GitHub и эффективным runtime-профилем.
 // Для списков допускается передача заранее вычисленных значений runtime.
+// Тип задачи выводится из updateTask (базовая строка БД) — row-типы не входят
+// в публичный контракт @aif/data; гидратированные строки сюда присваиваются.
 function toTaskRouteResponse(
-  task: TaskRow,
+  task: NonNullable<ReturnType<typeof updateTask>>,
   systemDefaultRuntimeProfileId = getAppDefaultRuntimeProfileId("task"),
   effectiveRuntime = resolveEffectiveRuntimeProfile({
     taskId: task.id,

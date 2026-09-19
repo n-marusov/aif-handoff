@@ -32,10 +32,14 @@ import {
   findProjectById,
   listProjectTaskOverviews,
   listProjects,
-  type ProjectRow,
   updateProject as updateProjectRecord,
   updateProjectOrganization as updateProjectOrganizationRecord,
 } from "@aif/data";
+
+// Локальный псевдоним строки проекта: выводится из findProjectById, потому что
+// row-типы проектов не входят в публичный контракт @aif/data.
+type PersistedProject = ReturnType<typeof findProjectById>;
+type PersistedProjectNonNull = NonNullable<PersistedProject>;
 
 const log = logger("projects-repo");
 
@@ -147,7 +151,7 @@ function normalizeProjectName(name: string): string {
 // Дубликат вычисляется в API, а не в @aif/data: решение принимается до
 // записи, чтобы вернуть nameError вместо исключения драйвера БД.
 // excludeId позволяет тому же проекту сохранить собственное имя.
-function findDuplicateProjectName(name: string, excludeId: string | null): ProjectRow | undefined {
+function findDuplicateProjectName(name: string, excludeId: string | null): PersistedProject {
   const normalized = normalizeProjectName(name);
   if (!normalized) return undefined;
   return listProjects().find(
@@ -188,7 +192,12 @@ export async function createProject(input: {
   defaultPlanRuntimeProfileId?: string | null;
   defaultReviewRuntimeProfileId?: string | null;
   defaultChatRuntimeProfileId?: string | null;
-}): Promise<{ project?: ProjectRow; nameError?: string; pathError?: string; initError?: string }> {
+}): Promise<{
+  project?: PersistedProjectNonNull;
+  nameError?: string;
+  pathError?: string;
+  initError?: string;
+}> {
   const duplicate = findDuplicateProjectName(input.name, null);
   if (duplicate) {
     return {
@@ -263,7 +272,7 @@ export function updateProject(
     defaultReviewRuntimeProfileId?: string | null;
     defaultChatRuntimeProfileId?: string | null;
   },
-): { project?: ProjectRow; nameError?: string; pathError?: string } {
+): { project?: PersistedProjectNonNull; nameError?: string; pathError?: string } {
   const existing = findProjectById(id);
   if (!existing) return { project: undefined };
 
@@ -294,7 +303,7 @@ export function deleteProject(id: string): void {
 export function updateProjectOrganization(
   id: string,
   input: UpdateProjectOrganizationInput,
-): ProjectRow | undefined {
+): PersistedProject {
   return updateProjectOrganizationRecord(id, input);
 }
 

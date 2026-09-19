@@ -9,7 +9,8 @@ import {
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 
-export type CommentRow = typeof taskComments.$inferSelect;
+// Приватный тип строки комментария: наружу отдаются гидратированные формы.
+type CommentRow = typeof taskComments.$inferSelect;
 
 export type HydratedCommentRow = CommentRow & {
   participant: ParticipantSummary | null;

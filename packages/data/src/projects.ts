@@ -15,7 +15,9 @@ import { getDb } from "@aif/shared/server";
 
 const log = createLogger("data");
 
-export type ProjectRow = typeof projects.$inferSelect;
+// Приватный тип строки проекта: потребители @aif/data не зависят от формы
+// строки БД — снаружи они получают hydrated/view-модельные формы.
+type ProjectRow = typeof projects.$inferSelect;
 
 export function listProjects(): ProjectRow[] {
   return getDb()

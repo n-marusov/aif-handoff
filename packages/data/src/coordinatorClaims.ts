@@ -33,8 +33,7 @@ import {
 import { getDb } from "@aif/shared/server";
 import { createAuditEventValues } from "./audit.js";
 import { serializeRuntimeLimitSnapshot } from "./internal.js";
-import type { ProjectRow } from "./projects.js";
-import type { TaskRow } from "./tasks.js";
+import type { ProjectRow, TaskRow } from "@aif/shared";
 
 const log = createLogger("data");
 

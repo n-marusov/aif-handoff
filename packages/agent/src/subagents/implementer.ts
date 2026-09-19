@@ -41,7 +41,6 @@ import {
   listTaskExecutorHistory,
   persistTaskPlanForTask,
   setTaskFields,
-  type TaskRow,
 } from "@aif/data";
 import {
   logger,
@@ -206,7 +205,7 @@ function getChecklistProgress(planText: string | null): {
 // потому что главный исполнитель склонен переписывать структуру плана, а здесь ее нужно
 // сохранить дословно (проверку делает вызывающий код через looksLikeFullPlanUpdate).
 async function runChecklistSyncQuery(input: {
-  task: TaskRow;
+  task: NonNullable<ReturnType<typeof findTaskById>>;
   projectRoot: string;
   planText: string;
   implementationResult: string;

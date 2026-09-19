@@ -39,8 +39,6 @@ import {
   listTaskComments as listComments,
   listTasks,
   persistTaskPlanForTask,
-  type TaskRow,
-  type CommentRow,
   updateTask,
 } from "@aif/data";
 
@@ -172,19 +170,19 @@ export {
   updateTask,
   deleteTask,
   listComments,
-  type TaskRow,
-  type CommentRow,
 };
 
 // Обертка над createTaskComment фиксирует авторство человека: агент создает
 // комментарии через свои внутренние пути, а этот вызов приходит только из
 // пользовательского API, поэтому тип автора здесь не параметр, а константа.
+// Тип результата выводится из createTaskComment — комментарий-строка не входит
+// в публичный контракт @aif/data.
 export function createComment(input: {
   taskId: string;
   participantId?: string | null;
   message: string;
   attachments?: unknown[];
-}): CommentRow | undefined {
+}): ReturnType<typeof createTaskComment> {
   return createTaskComment({
     taskId: input.taskId,
     // Участник передается отдельно от автора: автор - категория (человек или
@@ -201,6 +199,6 @@ export function createComment(input: {
 export function updateComment(
   commentId: string,
   patch: { attachments?: unknown[] },
-): CommentRow | undefined {
+): ReturnType<typeof updateTaskComment> {
   return updateTaskComment(commentId, patch);
 }

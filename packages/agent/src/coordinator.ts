@@ -43,10 +43,15 @@ import {
   resolveEffectiveRuntimeProfile,
   setTaskFields,
   type CoordinatorStage,
-  type ProjectRow,
   type TaskFieldsPatch,
-  type TaskRow,
 } from "@aif/data";
+
+// Локальные псевдонимы строк: выводится из data-функций, потому что row-типы
+// не входят в публичный контракт @aif/data. База — TaskRow (listDueScheduledTasks
+// возвращает именно её); гидратированные строки findTaskById в неё присваиваются
+// (у них больше полей).
+type PersistedTask = ReturnType<typeof listDueScheduledTasks>[number];
+type PersistedProject = NonNullable<ReturnType<typeof findProjectById>>;
 import { initProject, type RuntimeRegistry } from "@aif/runtime";
 import {
   logger,
@@ -390,7 +395,10 @@ function updateTaskStatus(
 
 // Auto-queue commit gate перед терминальным статусом.
 // Ошибка пробрасывается вверх: задача не должна закрыться с грязным worktree.
-async function ensureCommitBeforeTerminalStatus(task: TaskRow, projectRoot: string): Promise<void> {
+async function ensureCommitBeforeTerminalStatus(
+  task: PersistedTask,
+  projectRoot: string,
+): Promise<void> {
   if (!AUTO_QUEUE_COMMIT_GATE_ENABLED) {
     return;
   }
@@ -414,7 +422,7 @@ function resolveAutoQueueCommitPreparation(
 
 // Проект требует serial execution, если задачи делят один физический checkout.
 // Это защищает ветки и файлы от конкурентных мутаций.
-function projectRequiresSerialExecution(project: ProjectRow): boolean {
+function projectRequiresSerialExecution(project: PersistedProject): boolean {
   const hasSharedBranchTask = hasActiveBranchBoundTasksForProject(project.id);
   const taskWorktreesUnavailable =
     !env.AIF_TASK_WORKTREES_ENABLED || !projectSupportsTaskWorktrees(project.rootPath);
@@ -433,7 +441,7 @@ function projectRequiresSerialExecution(project: ProjectRow): boolean {
  * Branchless fix-задача работает в общем checkout проекта.
  * Её запуск всегда эксклюзивный в пределах проекта.
  */
-function branchlessFixTaskRequiresExclusiveRun(task: TaskRow): boolean {
+function branchlessFixTaskRequiresExclusiveRun(task: PersistedTask): boolean {
   return task.isFix === true && (!task.branchName || !task.worktreePath);
 }
 
@@ -443,8 +451,8 @@ export const __testBranchlessFixTaskRequiresExclusiveRun = branchlessFixTaskRequ
 // Scheduled advance не стартует на грязном worktree.
 // Иначе следующая ветка задачи создастся из несогласованного состояния.
 function scheduledTaskHasDirtyAutoQueueWorktree(
-  task: TaskRow,
-  project: ProjectRow | null | undefined,
+  task: PersistedTask,
+  project: PersistedProject | null | undefined,
 ): boolean {
   if (!AUTO_QUEUE_COMMIT_GATE_ENABLED || !project?.autoQueueMode) {
     return false;
@@ -477,17 +485,17 @@ function runtimeProfileModeForStage(stage: CoordinatorStage): "task" | "plan" | 
 
 // Improve включается только для skills-mode сценария.
 // Improve включается только для skills-mode.
-function shouldRunSkillsModeImprove(task: TaskRow): boolean {
+function shouldRunSkillsModeImprove(task: PersistedTask): boolean {
   return task.runPlanImprove && !task.useSubagents;
 }
 
 // Verify включается только для skills-mode при явном флаге runPostVerify.
-function shouldRunSkillsModeVerify(task: TaskRow): boolean {
+function shouldRunSkillsModeVerify(task: PersistedTask): boolean {
   return task.runPostVerify && !task.useSubagents;
 }
 
 // Переопределение success-переходов по флагам пайплайна.
-function getStageSuccessStatus(task: TaskRow, stage: StatusTransition): TaskStatus {
+function getStageSuccessStatus(task: PersistedTask, stage: StatusTransition): TaskStatus {
   if (stage.label === "planner" && shouldRunSkillsModeImprove(task)) {
     return "improve";
   }
@@ -570,7 +578,7 @@ function buildRuntimeGateBlockedReason(
 // Pre-start runtime gate: переводит задачу в blocked_external до вызова рантайма.
 // CAS-обновление гарантирует, что блокируется именно актуальный кандидат.
 function proactivelyBlockTaskForRuntimeGate(
-  task: TaskRow,
+  task: PersistedTask,
   stage: CoordinatorStage,
   selection: ReturnType<typeof resolveEffectiveRuntimeProfile>,
   gateDecision: ReturnType<typeof evaluateRuntimeLimitGate>,
@@ -637,7 +645,7 @@ function proactivelyBlockTaskForRuntimeGate(
 
 // Guard совместимости legacy и plan-review потоков.
 // Не допускает запуск implementer до approved плана для VCS-связанных задач.
-function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow): boolean {
+function planReviewStageIneligible(stageLabel: CoordinatorStage, task: PersistedTask): boolean {
   // Plan Publisher обрабатывает только задачи с активным Plan Review Gate.
   // Implementer отклоняется, пока planReviewState != approved.
   if (stageLabel === "plan-publisher") {
@@ -653,7 +661,7 @@ function planReviewStageIneligible(stageLabel: CoordinatorStage, task: TaskRow):
 
 // Единая pre-start проверка runtime-лимитов.
 // Может вызываться повторно после ожидания семафора, т.к. snapshot уже мог измениться.
-function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition): boolean {
+function blockCandidateIfRuntimeLimited(task: PersistedTask, stage: StatusTransition): boolean {
   // Plan Publisher не потребляет runtime-токены, поэтому usage-limit gate
   // к нему не применяется.
   if (stage.label === "plan-publisher") {
@@ -689,7 +697,7 @@ function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition):
  * Возвращает true, если текущая стадия закрыта в рамках этого тика.
  * true означает "перебирать дальше не нужно", а не только "бизнес-успех".
  */
-async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+async function processOneTask(task: PersistedTask, stage: StatusTransition): Promise<boolean> {
   // Контракт владения: AI-координатор не меняет human-owned задачу.
   if (task.executionOwner !== "ai") {
     log.warn(
@@ -1678,7 +1686,7 @@ async function runPollCycle(): Promise<void> {
           // Ожидание разрешения стоит после всех дешёвых проверок: занимать слот семафора
           // под кандидата, который всё равно не пройдёт фильтр, нельзя.
           await stageSemaphore.acquire(stageKey, projectMax, globalMaxTasks);
-          let claimedTask: TaskRow | undefined;
+          let claimedTask: PersistedTask | undefined;
           let claimOutcomeUncertain = false;
           let cleanupOwnedByTaskPromise = false;
 
