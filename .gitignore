@@ -60,6 +60,11 @@ test-results/
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/pr-review/
+!\.claude/agents/
+.claude/agents/*
+!.claude/agents/plan-coordinator.md
+!.claude/agents/implement-coordinator.md
+!.claude/agents/plan-polisher.md
 
 # Codex and other agent
 /.codex/

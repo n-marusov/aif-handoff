@@ -79,7 +79,7 @@ import {
 } from "@aif/shared";
 import { logActivity } from "./hooks.js";
 import { WorkspaceToolExecutor, WORKSPACE_TOOL_DEFINITIONS } from "./workspaceTools.js";
-import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
+import { getAgentScopeRules } from "./agentScopeRules.js";
 import { createStderrCollector } from "./stderrCollector.js";
 import { LoopGuard } from "./loopGuard.js";
 import { writeQueryAudit } from "./queryAudit.js";
@@ -672,7 +672,7 @@ function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
     agentDefinitionName: options.agent,
     fallbackSlashCommand: options.fallbackSlashCommand,
     sessionReusePolicy: options.sessionReusePolicy ?? "resume_if_available",
-    systemPromptAppend: options.systemPromptAppend ?? PROJECT_SCOPE_SYSTEM_APPEND,
+    systemPromptAppend: options.systemPromptAppend ?? getAgentScopeRules().projectScope,
   });
 }
 
@@ -943,7 +943,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   // здесь, чтобы его получил каждый review-запрос независимо от файла agent definition.
   const effectiveSystemPromptAppend =
     (options.profileMode ?? "task") === "review"
-      ? `${promptPolicy.systemPromptAppend}\n\n${REVIEW_DIFF_SCOPE_SYSTEM_APPEND}`.trim()
+      ? `${promptPolicy.systemPromptAppend}\n\n${getAgentScopeRules().reviewScope}`.trim()
       : promptPolicy.systemPromptAppend;
 
   // Резюм - это и экономия контекста, и источник утечек: стратегии изолированной

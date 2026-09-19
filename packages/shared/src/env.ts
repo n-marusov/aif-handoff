@@ -244,6 +244,9 @@ const envSchema = z.object({
       return value;
     }, z.boolean())
     .default(false),
+  // Каталог .claude/agents, из которого читаются scope-правила (Task 25).
+  // По умолчанию — <cwd>/.claude/agents; переопределение нужно для docker/тестов.
+  AIF_AGENT_DEFINITIONS_DIR: z.string().optional(),
   AIF_USAGE_LIMITS_ENABLED: z
     .preprocess((value) => {
       if (typeof value === "string") {
