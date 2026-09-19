@@ -41,9 +41,10 @@ import {
   type TaskActiveRuntimeSelection,
   type TaskAssigneeSummary,
   type TaskCurrentTool,
+  type TaskListItemRow,
   type TaskStatus,
+  type TaskSummaryRow,
 } from "@aif/shared";
-export { parseTaskCurrentTool } from "@aif/shared";
 import { getDb } from "./db.js";
 import { persistTaskPlan } from "./taskPlan.js";
 import {
@@ -355,19 +356,8 @@ export function listTasks(
   return hydrateTaskRows(rows);
 }
 
-type TaskListItemRow = Pick<TaskRow,
-  | "id" | "projectId" | "title" | "description" | "status" | "priority" | "position"
-  | "autoMode" | "executionOwner" | "ownershipRevision"
-  | "skipReview" | "runPostVerify"
-  | "isFix" | "paused" | "roadmapAlias" | "tags"
-  | "runtimeProfileId" | "modelOverride"
-  | "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount"
-  | "reworkRequested" | "reviewIterationCount" | "maxReviewIterations" | "manualReviewRequired"
-  | "runtimeLimitSnapshotJson" | "runtimeLimitUpdatedAt"
-  | "tokenInput" | "tokenOutput" | "tokenTotal" | "costUsd"
-  | "lastSyncedAt" | "lastHeartbeatAt" | "lastActivityAt" | "currentToolJson"
-  | "scheduledAt" | "createdAt" | "updatedAt"
-> & { hasPlan: boolean | number };
+// TaskListItemRow импортируется из @aif/shared: единое определение проекции списка
+// (известная проблема «Дублирование типов-проекций строк…»), data не переобъявляет Pick.
 
 const TASK_LIST_COLUMNS = {
   id: tasks.id,
@@ -473,17 +463,8 @@ export function getMaxBacklogPosition(projectId: string): number | null {
   return row?.maxPos == null ? null : Number(row.maxPos);
 }
 
-export type TaskSummaryRow = Pick<TaskRow,
-  | "id" | "projectId" | "title" | "status" | "priority" | "position"
-  | "autoMode" | "executionOwner" | "ownershipRevision"
-  | "skipReview" | "runPostVerify"
-  | "isFix" | "paused" | "roadmapAlias" | "tags"
-  | "runtimeProfileId" | "modelOverride"
-  | "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount"
-  | "reworkRequested" | "reviewIterationCount" | "maxReviewIterations" | "manualReviewRequired"
-  | "runtimeLimitSnapshotJson" | "runtimeLimitUpdatedAt"
-  | "tokenTotal" | "costUsd" | "lastSyncedAt" | "createdAt" | "updatedAt"
-> & { assignees?: TaskAssigneeSummary[] };
+// TaskSummaryRow определён в @aif/shared и реэкспортируется как result-shape data-слоя.
+export type { TaskSummaryRow };
 
 const SUMMARY_COLUMNS = {
   id: tasks.id,

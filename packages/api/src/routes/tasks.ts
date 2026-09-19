@@ -72,7 +72,6 @@ import { getParticipantAuth, type ParticipantApiEnv } from "../middleware/partic
 import { canMutateTask } from "../use-cases/taskPolicy.js";
 
 const log = logger("tasks-route");
-const QA_LOCK_DURATION_MS = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
 
 // Строка задачи: выводится из findTaskById (row-типы не входят в публичный
 // контракт @aif/data); use case возвращает её же через структурный DTO.
@@ -231,7 +230,6 @@ function beginQaRun(
     projectId,
     taskId,
     executionRoot,
-    lockDurationMs: QA_LOCK_DURATION_MS,
   });
   if (!result.started) {
     return { started: false, code: result.code };

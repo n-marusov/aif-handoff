@@ -190,6 +190,15 @@ interface HydratedTaskRow {
 }
 ```
 
+### Projection types — single source in `@aif/shared`
+
+`TaskListItemRow`, `TaskSummaryRow` и `RuntimeProfileUsageState` определены один раз в
+`@aif/shared/presenters.ts`. `@aif/data` импортирует их и реэкспортирует как result-shapes
+(`TaskSummaryRow`; `ListTaskListItemRow = TaskListItemRow & { assignees }`), но больше не
+переобъявляет `Pick<TaskRow, ...>`-проекции. Это устраняет риск молчаливого расхождения формы
+ответа между слоями (known-issue: «Дублирование типов-проекций строк между
+`@aif/shared/presenters.ts` и `@aif/data`»).
+
 ### PaginatedResult
 
 ```typescript

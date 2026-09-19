@@ -67,8 +67,6 @@ export interface StartQaRunInput {
   projectId: string;
   taskId: string;
   executionRoot: string;
-  /** Длительность QA-лока; передаётся маршрутом из env-конфигурации. */
-  lockDurationMs?: number;
 }
 
 export type StartQaRunResult =

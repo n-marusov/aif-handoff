@@ -68,6 +68,18 @@ describe("use-cases: startQaRun", () => {
     }
   });
 
+  it("derives the QA lock duration from env config (single source of truth)", async () => {
+    // Known issue: "`startQaRun` (use case): дефолт `lockDurationMs = 60s` расходится с
+    // маршрутным значением". The use case owns the formula; the route no longer passes a value.
+    const { resolveQaLockDurationMs } = await import("../use-cases/qaRun.js");
+    const { getEnv } = await import("@aif/shared");
+    const expected = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
+    expect(typeof resolveQaLockDurationMs).toBe("function");
+    expect(resolveQaLockDurationMs()).toBe(expected);
+    // The old hidden default must never win again.
+    expect(resolveQaLockDurationMs()).not.toBe(60_000);
+  });
+
   it("denies with a bounded code set", () => {
     const denied = startQaRun({ projectId: "p-1", taskId: "task-1", executionRoot: "/tmp/p1" });
     if (!denied.started) {

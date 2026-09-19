@@ -11,18 +11,34 @@
  * Коды отказа семантические (без HTTP): маршрут сам решает, какой статус отдать.
  */
 import { findTaskById, claimTask, releaseTaskClaim, tryStartQaRun } from "@aif/data";
-import { logger } from "@aif/shared";
+import { getEnv, logger } from "@aif/shared";
 import type { StartQaRunInput, StartQaRunResult } from "./types.js";
 
 const log = logger("use-case:qa-run");
+
+/**
+ * Единственный источник формулы длительности QA-лока.
+ *
+ * Known issue: "`startQaRun` (use case): дефолт `lockDurationMs = 60s` расходится с
+ * маршрутным значением". Раньше формула жила и в маршруте, и как скрытый дефолт use case —
+ * теперь её владеет use case, а маршрут значение не передаёт.
+ */
+export function resolveQaLockDurationMs(): number {
+  return Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
+}
 
 /**
  * Атомарный старт QA (manual + auto trigger).
  * CAS по qaStatus предотвращает двойной запуск конкурирующих запросов.
  */
 export function startQaRun(input: StartQaRunInput): StartQaRunResult & { lockId?: string } {
-  const { projectId, taskId, executionRoot, lockDurationMs = 60 * 1000 } = input;
+  const { projectId, taskId, executionRoot } = input;
+  const lockDurationMs = resolveQaLockDurationMs();
   log.debug({ useCase: "startQaRun", taskId, projectId, executionRoot }, "use case entry");
+  log.debug(
+    { useCase: "startQaRun", taskId, lockDurationMs, source: "env" },
+    "resolved QA lock duration",
+  );
 
   const task = findTaskById(taskId);
   if (task?.executionOwner !== "ai") {

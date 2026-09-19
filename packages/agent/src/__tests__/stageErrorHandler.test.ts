@@ -15,7 +15,6 @@ const { mockWarn, mockError } = vi.hoisted(() => ({
 vi.mock("@aif/data", () => ({
   appendTaskActivityLog: vi.fn(),
   findTaskById: vi.fn(() => null),
-  parseTaskCurrentTool: vi.fn(() => null),
 }));
 
 // Стабильный backoff для детерминированных проверок

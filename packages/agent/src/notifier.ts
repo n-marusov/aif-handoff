@@ -14,8 +14,14 @@
  * - Заголовки собираются на каждый запрос, а не кешируются: токен читается из env
  *   динамически, чтобы работали тесты и переопределение конфигурации.
  */
-import { findProjectByTaskId, findTaskById, parseTaskCurrentTool } from "@aif/data";
-import { logger, getEnv, sendTelegramNotification, type TaskCurrentTool } from "@aif/shared";
+import { findProjectByTaskId, findTaskById } from "@aif/data";
+import {
+  logger,
+  getEnv,
+  parseTaskCurrentTool,
+  sendTelegramNotification,
+  type TaskCurrentTool,
+} from "@aif/shared";
 
 const log = logger("agent-notifier");
 

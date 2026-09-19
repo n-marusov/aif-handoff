@@ -11,6 +11,7 @@ import {
   tasks,
   usageEvents,
   type RuntimeProfileUsage,
+  type RuntimeProfileUsageState,
 } from "@aif/shared";
 import { getDb } from "./db.js";
 
@@ -209,10 +210,9 @@ export function createDbUsageSink(options: CreateDbUsageSinkOptions = {}): DbUsa
   };
 }
 
-export interface RuntimeProfileUsageState {
-  lastUsage: RuntimeProfileUsage;
-  lastUsageAt: string;
-}
+// RuntimeProfileUsageState определён в @aif/shared и реэкспортируется для sibling-модулей
+// data-слоя (runtimeProfiles.ts) как result-shape (известная проблема дублирования проекций).
+export type { RuntimeProfileUsageState };
 
 function toRuntimeProfileUsage(row: {
   inputTokens: number;
