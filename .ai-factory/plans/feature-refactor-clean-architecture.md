@@ -180,11 +180,13 @@ Open questions: none carried over.
 
 ### Phase 4: Application Use-Case Layer
 
-- [ ] Task 18: Define use-case contracts (tests first)
+- [x] Task 18: Define use-case contracts (tests first)
   - Deliverable: Failing tests describing input/output DTOs and error codes for the use cases extracted next: `applyTaskEvent`, `startQaRun`, `syncTaskPlanFile`, `updateTaskPlan`, `generateCommit`.
   - Files: new `packages/api/src/use-cases/` module (or a new workspace if the architecture decision favours one) plus its `__tests__` and DTO types.
   - Logging: DEBUG use-case entry and exit with `{ useCase, taskId, actor, outcome }`.
   - Acceptance: tests fail against the current code (no use cases yet) and pass after Task 19.
+  - **Location DECISION:** use cases live in `packages/api/src/use-cases/` (no new workspace): the refactor's own Task 20/22 constraints expect `routes/*` to delegate there, api→data/shared deps already exist, and a new workspace would add Docker/turbo/coverage churn for five functions that stay inside the api package boundary.
+  - Completed (2026-09-19): added `packages/api/src/use-cases/types.ts` (transport-free DTO contracts: `ApplyTaskEventInput/Result`, `StartQaRunInput/Result`, `UpdateTaskPlanInput/Result`, `SyncTaskPlanFileInput/Result`, `GenerateCommitInput/Result`) and `packages/api/src/__tests__/useCases.contract.test.ts` (5 describe blocks asserting function surface + result shapes + bounded denial codes). Contract test is RED: imports `../use-cases/index.js` which does not exist yet (ERR_MODULE_NOT_FOUND observed). Sync/async alignment with underlying impls: `applyTaskEvent`/`generateCommit` await; `startQaRun`/`updateTaskPlan`/`syncTaskPlanFile` sync.
 
 - [ ] Task 19: Implement the use cases and move logic out of `api/src/services`
   - Deliverable: `handleTaskEvent` (currently `packages/api/src/services/taskEvents.ts:345-409`), the QA start/claim protocol (`packages/api/src/routes/tasks.ts:240-270`), and plan-file sync (`packages/api/src/repositories/tasks.ts:75-156`) become use cases with no HTTP knowledge.
