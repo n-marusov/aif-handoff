@@ -60,7 +60,18 @@ packages/
 │       ├── taskOwnership.ts # Atomic handoff, assignments, executor history
 │       ├── taskTransitions.ts # Actor-aware atomic task transitions
 │       ├── audit.ts         # Immutable audit persistence
-│       └── index.ts         # Public repository API
+│       ├── tasks.ts         # Task repository (CRUD, lists, sessions, heartbeat)
+│       ├── comments.ts      # Task comment repository
+│       ├── projects.ts      # Project repository (CRUD, overviews)
+│       ├── settings.ts      # App settings singleton repository
+│       ├── chat.ts          # Chat session/message repository
+│       ├── runtimeProfiles.ts  # Runtime profile + warmup session repository
+│       ├── runtimeLimits.ts    # Runtime-limit gate policy + profile resolution
+│       ├── codexIndex.ts    # Codex session/limit index repository
+│       ├── usage.ts         # Usage events, sinks, aggregate increments
+│       ├── coordinatorClaims.ts # Coordinator claims, auto-queue, worktree/VCS sync
+│       ├── internal.ts      # Shared private parsers (not exported from barrel)
+│       └── index.ts         # Public re-export barrel (surface = tasks/comments/...)
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
 │       ├── index.ts         # Server entry point
@@ -115,19 +126,19 @@ data/                    # SQLite database files (gitignored)
 
 ## Key Entry Points
 
-| File                                    | Purpose                                |
-| --------------------------------------- | -------------------------------------- |
-| `packages/api/src/index.ts`             | API server entry (Hono, port 3009)     |
-| `packages/web/src/main.tsx`             | Web app entry (React, port 5180)       |
-| `packages/agent/src/index.ts`           | Agent coordinator entry                |
-| `packages/agent/src/autoQueueCommit.ts` | Auto-queue completion commit gate      |
-| `packages/agent/src/subagentQuery.ts`   | Runtime-aware subagent execution path  |
-| `packages/runtime/src/index.ts`         | Shared runtime/provider contracts      |
-| `packages/data/src/index.ts`            | Centralized data-access API            |
-| `packages/shared/src/schema.ts`         | Database schema (drizzle-orm)          |
-| `packages/shared/src/stateMachine.ts`   | Task state transitions                 |
-| `Makefile`                              | Build automation (Linux/macOS/Windows) |
-| `turbo.json`                            | Turborepo task definitions             |
+| File                                    | Purpose                                 |
+| --------------------------------------- | --------------------------------------- |
+| `packages/api/src/index.ts`             | API server entry (Hono, port 3009)      |
+| `packages/web/src/main.tsx`             | Web app entry (React, port 5180)        |
+| `packages/agent/src/index.ts`           | Agent coordinator entry                 |
+| `packages/agent/src/autoQueueCommit.ts` | Auto-queue completion commit gate       |
+| `packages/agent/src/subagentQuery.ts`   | Runtime-aware subagent execution path   |
+| `packages/runtime/src/index.ts`         | Shared runtime/provider contracts       |
+| `packages/data/src/index.ts`            | Data-access barrel (topic repositories) |
+| `packages/shared/src/schema.ts`         | Database schema (drizzle-orm)           |
+| `packages/shared/src/stateMachine.ts`   | Task state transitions                  |
+| `Makefile`                              | Build automation (Linux/macOS/Windows)  |
+| `turbo.json`                            | Turborepo task definitions              |
 
 ## Documentation
 

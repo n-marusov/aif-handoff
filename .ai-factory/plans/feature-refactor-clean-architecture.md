@@ -137,12 +137,13 @@ Open questions: none carried over.
 
 ### Phase 3: Data Layer Decomposition
 
-- [ ] Task 13: Split `data/src/index.ts` into topic modules
+- [x] Task 13: Split `data/src/index.ts` into topic modules
   - Deliverable: The 5,469-line module becomes topic repositories (`tasks.ts`, `comments.ts`, `projects.ts`, `settings.ts`, `chat.ts`, `runtimeProfiles.ts`, `runtimeLimits.ts`, `codexIndex.ts`, `usage.ts`, `coordinatorClaims.ts`) with `index.ts` reduced to a re-export barrel.
   - Files: `packages/data/src/index.ts` and new sibling modules.
   - Constraint: file moves only — no behaviour change; run the Task 7 suite after every move. Preserve the public export surface so `api`, `agent`, and `mcp` compile unchanged.
   - Logging: keep existing log call sites and their `component` names unchanged to preserve operational parity.
   - Acceptance: Task 7 suite green; `packages/data` builds; no consumer import changes required.
+  - Completed (2026-09-19): split the 5,471-line `index.ts` into 10 topic modules + `internal.ts` (shared private parsers: `parseRuntimeLimitSnapshot`, `parseRuntimeLimitWindow`, `readStoredOptional*`, `isObjectRecord`, `hasOwnProperty`, `parseRuntimeObject`, `serializeRuntimeLimitSnapshot` — not re-exported). `index.ts` is now a pure re-export barrel (268-export surface verified identical to baseline: 0 removed, 0 added). Cross-module edges: `tasks.ts`→`projects.ts` (`findProjectById`); cycle between `createTask`→`findProjectById` and `findProjectByTaskId`→`findTaskById` broken by moving `findProjectByTaskId` into `tasks.ts`; `runtimeProfiles.ts`→`usage.ts` (`findLatestRuntimeProfileUsageByIds` + `RuntimeProfileUsageState` exported from usage.ts but NOT re-exported by the barrel); `settings.ts`→`runtimeProfiles.ts`; `runtimeLimits.ts`→`tasks/projects/runtimeProfiles/usage` (single direction, no cycles). Validation: data suite 293/293 green (baseline 288), coverage 85.75/76.14/92.18/87.77 (≥70); api 571, agent 512, mcp 118 green; lint clean; consumers type-check with zero new errors (the 3 pre-existing `TaskPolicyView` errors in index.ts now live in tasks.ts; `splitContract.contract.test.ts` has 3 pre-existing type errors unrelated to the split). Note: `npm run build` for data still fails on the pre-existing `TaskPolicyView`/`splitContract` type errors that existed at HEAD (ebe0fad) — no new errors introduced.
 
 - [ ] Task 14: Move presentation mappers out of the data layer
   - Deliverable: `toTaskResponse`, `toCommentResponse`, `toTaskListItem`, `toTaskSummary`, `toAppSettingsResponse`, `toRuntimeProfileResponse`, `toChatSessionResponse`, `toChatMessageResponse` move to a presenter module owned by the delivery side; `@aif/data` stops returning view models.

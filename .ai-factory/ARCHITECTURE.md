@@ -53,7 +53,18 @@ packages/
 │       ├── taskOwnership.ts # Atomic handoff, assignment, executor history
 │       ├── taskTransitions.ts # Actor-aware atomic task transitions
 │       ├── audit.ts         # Immutable audit writes
-│       └── index.ts         # Public repository API
+│       ├── tasks.ts         # Task repository (CRUD, lists, sessions, heartbeat)
+│       ├── comments.ts      # Task comment repository
+│       ├── projects.ts      # Project repository (CRUD, overviews)
+│       ├── settings.ts      # App settings singleton repository
+│       ├── chat.ts          # Chat session/message repository
+│       ├── runtimeProfiles.ts  # Runtime profile + warmup session repository
+│       ├── runtimeLimits.ts    # Runtime-limit gate policy + profile resolution
+│       ├── codexIndex.ts    # Codex session/limit index repository
+│       ├── usage.ts         # Usage events, sinks, aggregate increments
+│       ├── coordinatorClaims.ts # Coordinator claims, auto-queue, worktree/VCS sync
+│       ├── internal.ts      # Shared private parsers (not re-exported)
+│       └── index.ts         # Public re-export barrel (surface = topic repositories)
 │
 ├── api/                 # @aif/api — HTTP + WebSocket server module
 │   └── src/
