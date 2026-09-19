@@ -9,7 +9,6 @@ const persistRuntimeProfileLimitSnapshotMock = vi.fn();
 const clearRuntimeProfileLimitSnapshotMock = vi.fn();
 const notifyProjectRuntimeLimitBroadcastMock = vi.fn();
 const notifyTaskHeartbeatMock = vi.fn();
-const notifyTaskUsageBroadcastMock = vi.fn();
 const broadcastTaskActivityProgressMock = vi.fn();
 const setTaskInFlightToolMock = vi.fn();
 const updateTaskHeartbeatMock = vi.fn<() => string>(() => "2026-08-16T02:00:00.000Z");
@@ -207,15 +206,16 @@ vi.mock("../notifier.js", () => ({
   notifyProjectRuntimeLimitBroadcast: (...args: unknown[]) =>
     notifyProjectRuntimeLimitBroadcastMock(...args),
   notifyTaskHeartbeat: (...args: unknown[]) => notifyTaskHeartbeatMock(...args),
-  notifyTaskUsageBroadcast: (...args: unknown[]) => notifyTaskUsageBroadcastMock(...args),
   broadcastTaskActivityProgress: (...args: unknown[]) => broadcastTaskActivityProgressMock(...args),
 }));
 
 const { RuntimeExecutionError, createRuntimeWorkflowSpec } = await import("@aif/runtime");
 const { executeSubagentQuery, resolveAdapterForTask, startHeartbeat } =
   await import("../subagentQuery.js");
+const { injectTestRuntimeRegistry } = await import("./utils/injectTestRuntimeRegistry.js");
 
-beforeEach(() => {
+beforeEach(async () => {
+  await injectTestRuntimeRegistry();
   for (const key of Object.keys(mockEnvOverrides)) {
     delete mockEnvOverrides[key];
   }
@@ -246,46 +246,6 @@ describe("startHeartbeat", () => {
 
     expect(updateTaskHeartbeatMock).toHaveBeenCalledWith("task-1");
     expect(notifyTaskHeartbeatMock).toHaveBeenCalledWith("task-1", "2026-08-16T02:00:00.000Z");
-  });
-});
-
-describe("task usage broadcast", () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 503,
-        json: vi.fn().mockResolvedValue({}),
-      }),
-    );
-    notifyTaskUsageBroadcastMock.mockReset();
-    notifyTaskUsageBroadcastMock.mockResolvedValue(undefined);
-    findTaskByIdMock.mockReturnValue({
-      id: "task-usage",
-      projectId: "project-usage",
-      runtimeOptionsJson: null,
-      modelOverride: null,
-    });
-    queryMock.mockImplementation(
-      makeSuccessWithUsage("done", { input_tokens: 5, output_tokens: 3, total_tokens: 8 }),
-    );
-  });
-
-  it("broadcasts task:usage_updated for task-scoped usage", async () => {
-    await executeSubagentQuery({
-      taskId: "task-usage",
-      projectRoot: "/tmp/project",
-      agentName: "implement-coordinator",
-      prompt: "run",
-      workflowKind: "implementer",
-    });
-
-    expect(notifyTaskUsageBroadcastMock).toHaveBeenCalledWith(
-      "task-usage",
-      "project-usage",
-      expect.objectContaining({ inputTokens: 5, outputTokens: 3, totalTokens: 8 }),
-    );
   });
 });
 
@@ -356,21 +316,6 @@ function makeSuccessWithSession(sessionId: string, result: string) {
       result,
       usage: {},
       total_cost_usd: 0,
-    };
-  };
-}
-
-function makeSuccessWithUsage(
-  result: string,
-  usage: { input_tokens: number; output_tokens: number; total_tokens: number },
-) {
-  return async function* () {
-    yield {
-      type: "result",
-      subtype: "success",
-      result,
-      usage,
-      total_cost_usd: 0.01,
     };
   };
 }

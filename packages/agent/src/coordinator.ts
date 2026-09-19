@@ -51,7 +51,7 @@ import {
 // (у них больше полей).
 type PersistedTask = ReturnType<typeof listDueScheduledTasks>[number];
 type PersistedProject = NonNullable<ReturnType<typeof findProjectById>>;
-import { initProject, type RuntimeRegistry } from "@aif/runtime";
+import { initProject } from "@aif/runtime";
 import {
   logger,
   getEnv,
@@ -115,15 +115,11 @@ const CLAIM_LOCK_DURATION_MS = STAGE_RUN_TIMEOUT_MS + 5 * 60 * 1000; // тайм
 // Это ключ для корректного сравнения владельца в БД.
 export const COORDINATOR_ID = crypto.randomUUID();
 
-// RuntimeRegistry внедряется извне.
-// Так coordinator не зависит от bootstrap и проще тестируется.
-let _runtimeRegistry: RuntimeRegistry | null = null;
-export function setRuntimeRegistry(registry: RuntimeRegistry): void {
-  _runtimeRegistry = registry;
-}
-export function getRuntimeRegistrySync(): RuntimeRegistry | null {
-  return _runtimeRegistry;
-}
+// RuntimeRegistry внедряется извне (композиционным корнем агента).
+// Холдер вынесен в runtimeRegistry.ts, чтобы subagentQuery мог читать тот же
+// реестр без циклической зависимости на coordinator.
+export { setRuntimeRegistry, getRuntimeRegistrySync } from "./runtimeRegistry.js";
+import { getRuntimeRegistrySync } from "./runtimeRegistry.js";
 setCoordinatorId(COORDINATOR_ID);
 
 // In-memory метрики координатора за life-cycle процесса.
@@ -676,10 +672,11 @@ async function processOneTask(task: PersistedTask, stage: StatusTransition): Pro
 
   // Инициализация .ai-factory перед запуском субагента.
   // Без RuntimeRegistry шаг пропускается (например, в unit-тестах).
-  if (_runtimeRegistry) {
+  const injectedRegistry = getRuntimeRegistrySync();
+  if (injectedRegistry) {
     const initResult = initProject({
       projectRoot: task.worktreePath ?? project.rootPath,
-      registry: _runtimeRegistry,
+      registry: injectedRegistry,
     });
     if (!initResult.ok) {
       log.error(

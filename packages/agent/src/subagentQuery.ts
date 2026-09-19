@@ -19,7 +19,6 @@
 
 import {
   clearRuntimeProfileLimitSnapshot,
-  createDbUsageSink,
   expireStaleRuntimeWarmupSessions,
   findActiveReadyRuntimeWarmupSession,
   findRuntimeProfileById,
@@ -41,7 +40,6 @@ import {
   assertRuntimeCapabilities,
   buildRuntimeLimitBroadcastCacheKey,
   buildRuntimeLimitCacheSignature,
-  bootstrapRuntimeRegistry,
   checkRuntimeSessionForkSupport,
   createRuntimeMemoryCache,
   createRuntimeWorkflowSpec,
@@ -68,7 +66,6 @@ import {
   type RuntimeCapabilityName,
   type ResolvedRuntimeProfile,
   type RuntimeRegistry,
-  type RuntimeRegistryLogger,
   type RuntimeLimitSnapshot,
   type RuntimeSessionReusePolicy,
   type RuntimeWorkflowSpec,
@@ -91,8 +88,8 @@ import {
   broadcastTaskActivityProgress,
   notifyProjectRuntimeLimitBroadcast,
   notifyTaskHeartbeat,
-  notifyTaskUsageBroadcast,
 } from "./notifier.js";
+import { requireRuntimeRegistry } from "./runtimeRegistry.js";
 
 // Именованный логгер модуля: сообщения субагента нужно легко вычленять из
 // общего потока координатора при разборе инцидентов.
@@ -143,30 +140,9 @@ const FIRST_ACTIVITY_MAX_RETRIES = 2;
 const runtimeLimitStateCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 const runtimeLimitBroadcastCache = createRuntimeMemoryCache<string>({ defaultTtlMs: 30_000 });
 
-// Единая точка оповещения после записи usage: сначала адресное событие по
-// задаче, затем сброс лимитов на уровне проекта. Оба уведомления
-// fire-and-forget - сбой рассылки не должен ломать уже успешный запрос.
-function notifyRuntimeUsageRefresh(input: {
-  projectId?: string | null;
-  runtimeProfileId?: string | null;
-  taskId?: string | null;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    costUsd?: number;
-  } | null;
-}): void {
-  if (input.taskId && input.projectId && input.usage) {
-    void notifyTaskUsageBroadcast(input.taskId, input.projectId, input.usage);
-  }
-  if (!input.projectId || !input.runtimeProfileId) {
-    return;
-  }
-  void notifyProjectRuntimeLimitBroadcast(input.projectId, input.runtimeProfileId, {
-    taskId: input.taskId ?? null,
-  });
-}
+// Уведомление о записи usage делается sink'ом реестра (createDbUsageSink),
+// который создаёт composition root при bootstrapRuntimeRegistry — subagent
+// больше не владеет ни реестром, ни sink'ом (Task 24).
 
 // Ошибки адаптеров часто оборачиваются по пути, поэтому причина ищется по
 // цепочке cause. Возвращается именно RuntimeExecutionError: только у него есть
@@ -448,10 +424,6 @@ function createFirstActivityWatchdog(
   };
 }
 
-// Синглтон в виде промиса, а не готового значения: параллельные стадии должны
-// разделить один bootstrap, а не поднять по реестру на каждую.
-let runtimeRegistryPromise: Promise<RuntimeRegistry> | null = null;
-
 export interface SubagentQueryOptions {
   taskId: string;
   projectRoot: string;
@@ -627,49 +599,11 @@ function hydratePinnedRuntimeProfile(
   };
 }
 
-// Логгер реестра выносит контекст отдельным объектом, а не склеивает его в
-// строку: pino должен сохранить структурные поля для фильтрации по логам.
-function createRuntimeRegistryLogger(): RuntimeRegistryLogger {
-  return {
-    debug(context, message) {
-      log.debug({ ...context }, `[runtime-registry] ${message}`);
-    },
-    warn(context, message) {
-      log.warn({ ...context }, `WARN [runtime-module] ${message}`);
-    },
-    error(context, message) {
-      log.error({ ...context }, `ERROR [runtime-registry] ${message}`);
-    },
-  };
-}
-
-async function getRuntimeRegistry(): Promise<RuntimeRegistry> {
-  if (runtimeRegistryPromise) return runtimeRegistryPromise;
-
-  const env = getEnv();
-  runtimeRegistryPromise = bootstrapRuntimeRegistry({
-    logger: createRuntimeRegistryLogger(),
-    runtimeModules: env.AIF_RUNTIME_MODULES,
-    modelEffortDiscoveryEnabled: env.AIF_RUNTIME_MODEL_EFFORT_DISCOVERY_ENABLED,
-    usageSink: createDbUsageSink({
-      onRecorded: (event) => {
-        notifyRuntimeUsageRefresh({
-          projectId: event.context.projectId ?? null,
-          runtimeProfileId: event.profileId ?? null,
-          taskId: event.context.taskId ?? null,
-          usage: event.usage ?? null,
-        });
-      },
-    }),
-    // Сброс синглтона при ошибке: иначе единственный сбой инициализации
-    // закэшировался бы навсегда и каждая следующая стадия падала бы с той же
-    // ошибкой, даже когда причина уже исчезла.
-  }).catch((error) => {
-    runtimeRegistryPromise = null;
-    throw error;
-  });
-
-  return runtimeRegistryPromise;
+// Реестр рантаймов един на процесс и внедряется композиционным корнем агента
+// (см. runtimeRegistry.ts + packages/agent/src/index.ts). Subagent запускает
+// только чтение; создание реестра тут не дублируется.
+function getRuntimeRegistry(): RuntimeRegistry {
+  return requireRuntimeRegistry();
 }
 
 /**

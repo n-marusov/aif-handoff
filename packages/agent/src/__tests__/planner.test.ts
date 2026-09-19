@@ -32,6 +32,12 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 const { runPlanner, shouldProvisionWorktree } = await import("../subagents/planner.js");
+const { injectTestRuntimeRegistry } = await import("./utils/injectTestRuntimeRegistry.js");
+
+// Реестр рантаймов внедряется композиционным корнем; тесты повторяют это через хелпер.
+beforeEach(async () => {
+  await injectTestRuntimeRegistry();
+});
 
 function streamSuccess(result: string): AsyncIterable<{
   type: "result";

@@ -30,6 +30,12 @@ const {
   convertBulletsToCheckboxes,
   isPlanAlreadyChecklist,
 } = await import("../subagents/planChecker.js");
+const { injectTestRuntimeRegistry } = await import("./utils/injectTestRuntimeRegistry.js");
+
+// Реестр рантаймов внедряется композиционным корнем; тесты повторяют это через хелпер.
+beforeEach(async () => {
+  await injectTestRuntimeRegistry();
+});
 
 function streamSuccess(result: string): AsyncIterable<{
   type: "result";
