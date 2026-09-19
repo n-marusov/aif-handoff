@@ -39,7 +39,7 @@ export interface RunQaQueryResult {
 export interface RunQaQueryInput {
   projectId: string;
   taskId: string;
-  /** Корень с учётом worktree (task.worktreePath ?? project.rootPath). */
+  /** Корень с учётом worktree — см. taskExecutionRoot в @aif/shared. */
   executionRoot: string;
 }
 

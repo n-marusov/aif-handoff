@@ -14,4 +14,5 @@ export { updateTaskUseCase } from "./updateTask.js";
 export { handoffTaskUseCase } from "./handoffTask.js";
 export { deleteTaskUseCase } from "./deleteTask.js";
 export { runChatTurn, abortChatRun } from "./runChatTurn.js";
+export { canMutateTask } from "./taskPolicy.js";
 export type * from "./types.js";

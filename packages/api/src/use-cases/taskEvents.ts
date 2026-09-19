@@ -22,6 +22,7 @@ import {
   looksLikeFullPlanUpdate,
   resolveTaskAction,
   restorePersistedBranch,
+  taskExecutionRoot,
 } from "@aif/shared";
 import {
   applyTaskAction,
@@ -154,7 +155,10 @@ async function handleFastFix(input: ApplyTaskEventInput): Promise<ApplyTaskEvent
   if (!project) {
     return denied("not_found", "Project not found for task");
   }
-  const executionRoot = task.worktreePath ?? project.rootPath;
+  const executionRoot = taskExecutionRoot({
+    worktreePath: task.worktreePath,
+    rootPath: project.rootPath,
+  });
 
   const branchError = restoreTaskBranchForMutation(task, executionRoot);
   if (branchError) return branchError;
@@ -272,7 +276,10 @@ function handleRegularTransition(input: ApplyTaskEventInput): ApplyTaskEventResu
     if (!project) {
       return denied("not_found", "Project not found for task");
     }
-    const executionRoot = task.worktreePath ?? project.rootPath;
+    const executionRoot = taskExecutionRoot({
+      worktreePath: task.worktreePath,
+      rootPath: project.rootPath,
+    });
 
     const branchError = restoreTaskBranchForMutation(task, executionRoot);
     if (branchError) return branchError;

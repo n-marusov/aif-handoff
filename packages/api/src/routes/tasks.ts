@@ -15,7 +15,13 @@ import { Hono, type Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { logger, parseAttachments, getEnv, type TaskActionContext } from "@aif/shared";
+import {
+  logger,
+  parseAttachments,
+  getEnv,
+  taskExecutionRoot,
+  type TaskActionContext,
+} from "@aif/shared";
 import {
   createTaskSchema,
   updateTaskSchema,
@@ -58,12 +64,12 @@ import {
   resolveEffectiveRuntimeProfilesForTasks,
   releaseTaskClaim,
   updateTaskPositionOnly,
-  getTaskOwnership,
   listTaskExecutorHistory,
   findGitHubIssueByTaskId,
   type TaskOwnershipFilters,
 } from "@aif/data";
 import { getParticipantAuth, type ParticipantApiEnv } from "../middleware/participantAuth.js";
+import { canMutateTask } from "../use-cases/taskPolicy.js";
 
 const log = logger("tasks-route");
 const QA_LOCK_DURATION_MS = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
@@ -116,40 +122,24 @@ function requestActionContext(c: Context<ParticipantApiEnv>): TaskActionContext 
   };
 }
 
-// Мутации разрешены admin или активному assignee.
-// Проверка ownership выполняется по актуальному состоянию БД.
-function canMutateTask(c: Context<ParticipantApiEnv>, taskId: string): boolean {
-  const context = requestActionContext(c);
-  if (!context.participantsModeEnabled || context.participantRole === "admin") return true;
+// Мутации разрешены admin или активному assignee — единая политика в
+// use-cases/taskPolicy.ts (транспортно-нейтральна, использует TaskActionContext).
 
-  const actorId = context.actor.id;
-  const assigned = Boolean(
-    actorId &&
-    getTaskOwnership(taskId)?.assignees.some(
-      (assignee) => assignee.participantId === actorId && assignee.active,
-    ),
-  );
-  const details = { taskId, actorId, method: c.req.method, path: c.req.path };
-  if (assigned) {
-    log.debug(details, "Authorized assigned participant task mutation");
-  } else {
-    log.warn(details, "Rejected unauthorized task mutation");
-  }
-  return assigned;
-}
+/** Минимальная форма чтения query-параметров; совпадает с Hono-c.req структурно. */
+type QueryReader = { query: (name: string) => string | undefined };
 
 // Парсит ownership-фильтры списка задач и валидирует комбинации параметров.
 // assigneeId=me разрешается на уровне роута, где известен текущий актор.
 function parseTaskOwnershipFilters(
-  c: Context<ParticipantApiEnv>,
+  query: QueryReader,
   context: TaskActionContext,
 ): { ok: true; filters: TaskOwnershipFilters } | { ok: false; error: string } {
-  const owner = c.req.query("owner") ?? c.req.query("executionOwner");
+  const owner = query.query("owner") ?? query.query("executionOwner");
   if (owner !== undefined && owner !== "ai" && owner !== "human") {
     return { ok: false, error: "owner must be ai or human" };
   }
-  const assignee = c.req.query("assigneeId");
-  const unassignedRaw = c.req.query("unassigned");
+  const assignee = query.query("assigneeId");
+  const unassignedRaw = query.query("unassigned");
   if (unassignedRaw !== undefined && unassignedRaw !== "true" && unassignedRaw !== "false") {
     return { ok: false, error: "unassigned must be true or false" };
   }
@@ -313,7 +303,7 @@ tasksRouter.post(
 tasksRouter.get("/", (c) => {
   const projectId = c.req.query("projectId") || undefined;
   const actionContext = requestActionContext(c);
-  const ownershipFilters = parseTaskOwnershipFilters(c, actionContext);
+  const ownershipFilters = parseTaskOwnershipFilters(c.req, actionContext);
   if (!ownershipFilters.ok) {
     return c.json({ error: ownershipFilters.error, code: "invalid_task_filter" }, 400);
   }
@@ -720,7 +710,7 @@ tasksRouter.post("/:id/sync-plan", (c) => {
   if (!existing) {
     return c.json({ error: "Task or project not found" }, 404);
   }
-  if (!canMutateTask(c, id)) {
+  if (!canMutateTask(requestActionContext(c), id, { method: c.req.method, path: c.req.path })) {
     return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
   }
   // Различаем "нет задачи или проекта" и "нет файла плана": клиенту важно
@@ -872,7 +862,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       if (!project) {
         log.error({ taskId, projectId }, "Auto QA skipped — project not found");
       } else {
-        const executionRoot = worktreePath ?? project.rootPath;
+        const executionRoot = taskExecutionRoot({ worktreePath, rootPath: project.rootPath });
         log.info({ taskId }, "Auto QA triggered (autoQa=true)");
         // Старт QA атомарен: при проигранной гонке (ручной запуск параллельно)
         // получаем started=false и просто пишем предупреждение.
@@ -900,7 +890,7 @@ tasksRouter.post("/:id/run-qa", (c) => {
     return c.json({ error: "Task not found" }, 404);
   }
   // Ручной запуск - мутация: доступен админу или исполнителю задачи.
-  if (!canMutateTask(c, id)) {
+  if (!canMutateTask(requestActionContext(c), id, { method: c.req.method, path: c.req.path })) {
     return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
   }
   // В отличие от авто-ветки, здесь выключенный пайплайн - явная ошибка
@@ -917,7 +907,10 @@ tasksRouter.post("/:id/run-qa", (c) => {
 
   // Тот же выбор корня, что и в авто-ветке: QA прогоняется по коду worktree,
   // если задача изолирована в отдельном дереве.
-  const executionRoot = task.worktreePath ?? project.rootPath;
+  const executionRoot = taskExecutionRoot({
+    worktreePath: task.worktreePath,
+    rootPath: project.rootPath,
+  });
   log.info({ taskId: id, branchName: task.branchName }, "run-qa requested for task");
   // Атомарный захват слота «выполняется»: второй параллельный POST проигрывает
   // compare-and-set и получает 409 вместо дублирующего запуска runtime.
@@ -960,7 +953,7 @@ tasksRouter.patch("/:id/position", jsonValidator(reorderTaskSchema), async (c) =
   if (!existing) {
     return c.json({ error: "Task not found" }, 404);
   }
-  if (!canMutateTask(c, id)) {
+  if (!canMutateTask(requestActionContext(c), id, { method: c.req.method, path: c.req.path })) {
     return c.json({ error: "Task assignment or admin role required", code: "forbidden" }, 403);
   }
 

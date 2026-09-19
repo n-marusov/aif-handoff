@@ -335,6 +335,9 @@ export {
   type AifProjectLanguage,
 } from "./projectConfig.js";
 
+// Единое правило корня исполнения задачи (worktree ?? project.rootPath).
+export { taskExecutionRoot, type TaskExecutionRootFields } from "./taskExecutionRoot.js";
+
 // Уведомления Telegram
 export {
   escapeMarkdown,

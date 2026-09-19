@@ -26,6 +26,7 @@ import {
   isBranchIsolationError,
   logger,
   restorePersistedBranch,
+  taskExecutionRoot,
 } from "@aif/shared";
 import { findProjectById, findTaskById } from "@aif/data";
 import { UsageSource } from "@aif/runtime";
@@ -72,7 +73,10 @@ export async function generateCommit(input: GenerateCommitInput): Promise<Genera
   }
   // Работаем в worktree задачи, если он есть: коммит должен лечь в изолированное
   // дерево, а не в общий клон проекта, который могут смотреть другие процессы.
-  const executionRoot = task?.worktreePath ?? project.rootPath;
+  const executionRoot = taskExecutionRoot({
+    worktreePath: task?.worktreePath,
+    rootPath: project.rootPath,
+  });
   // isFix-задачи живут без собственной ветки, поэтому проверка изоляции
   // применяется только к обычным задачам с зафиксированным branchName.
   if (task?.branchName && !task.isFix) {

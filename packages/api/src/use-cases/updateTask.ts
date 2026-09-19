@@ -9,35 +9,17 @@
  * MCP-инструменты.
  */
 import { parseAttachments } from "@aif/shared";
-import type { TaskActionContext } from "@aif/shared";
-import { findProjectById, findTaskById, getTaskOwnership, updateTaskManaged } from "@aif/data";
+import { findProjectById, findTaskById, updateTaskManaged } from "@aif/data";
 import {
   cleanupReplacedAttachments,
   persistAttachments,
 } from "../services/attachmentPersistence.js";
+import { canMutateTask } from "./taskPolicy.js";
 import { updateTaskPlan as updateTaskPlanUseCase } from "./taskPlan.js";
 import type { UpdateTaskInput, UpdateTaskResult } from "./types.js";
 
 /** Строка задачи: выводится из findTaskById (row-типы не входят в публичный контракт). */
 export type PersistedTask = NonNullable<ReturnType<typeof findTaskById>>;
-
-/**
- * Авторизация мутации: admin всегда разрешён, обычный участник — только для
- * активного assignee. Ownership читается по актуальному состоянию БД.
- */
-function canMutateTask(actionContext: TaskActionContext, taskId: string): boolean {
-  if (!actionContext.participantsModeEnabled || actionContext.participantRole === "admin") {
-    return true;
-  }
-  const actorId = actionContext.actor.id;
-  const assigned = Boolean(
-    actorId &&
-    getTaskOwnership(taskId)?.assignees.some(
-      (assignee) => assignee.participantId === actorId && assignee.active,
-    ),
-  );
-  return assigned;
-}
 
 /**
  * Единственная точка входа: применяет авторизацию, зовёт составные операции

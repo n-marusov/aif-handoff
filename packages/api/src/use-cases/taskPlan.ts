@@ -15,7 +15,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { findProjectByTaskId, findTaskById, persistTaskPlanForTask } from "@aif/data";
-import { getCanonicalPlanPath, logger } from "@aif/shared";
+import { getCanonicalPlanPath, logger, taskExecutionRoot } from "@aif/shared";
 import type { SyncTaskPlanFileInput, UpdateTaskPlanInput, UpdateTaskPlanResult } from "./types.js";
 
 const log = logger("use-case:task-plan");
@@ -29,7 +29,10 @@ function executionRootFor(
   const project = findProjectByTaskId(taskId);
   if (!project) return null;
   return {
-    projectRoot: task.worktreePath ?? project.rootPath,
+    projectRoot: taskExecutionRoot({
+      worktreePath: task.worktreePath,
+      rootPath: project.rootPath,
+    }),
     isFix: task.isFix,
     planPath: task.planPath,
   };
@@ -51,7 +54,10 @@ export function updateTaskPlan(input: UpdateTaskPlanInput): UpdateTaskPlanResult
   if (!task) return { ok: false, code: "task_or_project_not_found" };
   const project = findProjectByTaskId(input.taskId);
   if (!project) return { ok: false, code: "task_or_project_not_found" };
-  const executionRoot = task.worktreePath ?? project.rootPath;
+  const executionRoot = taskExecutionRoot({
+    worktreePath: task.worktreePath,
+    rootPath: project.rootPath,
+  });
 
   persistTaskPlanForTask({
     taskId: input.taskId,
@@ -76,7 +82,10 @@ export function getTaskPlanFileStatus(taskId: string) {
 
   const project = findProjectByTaskId(taskId);
   if (!project) return null;
-  const executionRoot = task.worktreePath ?? project.rootPath;
+  const executionRoot = taskExecutionRoot({
+    worktreePath: task.worktreePath,
+    rootPath: project.rootPath,
+  });
 
   const canonicalPlanPath = getCanonicalPlanPath({
     projectRoot: executionRoot,
