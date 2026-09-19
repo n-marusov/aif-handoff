@@ -1,11 +1,15 @@
 /**
  * Репозиторий задач уровня API.
  *
- * Назначение: дополнить слой @aif/data тем, что относится именно к HTTP API -
+ * Назначение: дополнить слой @aif/data тем, что относится именно к HTTP API —
  * синхронизацией плана между БД и файлом, формой полезной нагрузки для
  * WebSocket и удобными обертками для комментариев. Прямой доступ к БД из
- * пакета api запрещен линтером, поэтому все мутации делегируются в @aif/data,
- * а здесь остаются только правила и вычисления.
+ * пакета api запрещен линтером, поэтому все мутации делегируются в @aif/data.
+ *
+ * При clean-architecture refactoring операции с планом (updateTaskPlan,
+ * getTaskPlanFileStatus, syncTaskPlanFromFile) переехали в application use-case
+ * слой (packages/api/src/use-cases/taskPlan.ts); здесь сохранены прежние
+ * подписи, чтобы маршруты и тесты не менялись.
  *
  * Ключевые инварианты:
  *
@@ -20,7 +24,6 @@
  *    бы затереть поля владения, уже известные UI.
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import {
   getCanonicalPlanPath,
   toCommentResponse,
@@ -41,6 +44,11 @@ import {
   persistTaskPlanForTask,
   updateTask,
 } from "@aif/data";
+import {
+  getTaskPlanFileStatus as useCaseGetTaskPlanFileStatus,
+  syncTaskPlanFile as useCaseSyncTaskPlanFile,
+  updateTaskPlan as useCaseUpdateTaskPlan,
+} from "../use-cases/taskPlan.js";
 
 // Урезанная форма задачи для широковещательной рассылки. Полный ответ
 // строится отдельно (toTaskResponse) и содержит тяжелые поля, которые незачем
@@ -79,98 +87,30 @@ export function updateTaskPlan(
   isFix: boolean,
   planPath?: string,
 ): void {
-  const project = findProjectByTaskId(taskId);
-  if (!project) throw new Error("Project not found for task");
-  const task = findTaskById(taskId);
-  // Задача может исчезнуть между запросами, поэтому обращение безопасное.
-  // Пустой worktreePath трактуется как его отсутствие.
-  const executionRoot = task?.worktreePath ?? project.rootPath;
-
-  persistTaskPlanForTask({
-    taskId,
-    planText,
-    projectRoot: executionRoot,
-    isFix,
-    planPath,
-    updatedAt: new Date().toISOString(),
-  });
+  const result = useCaseUpdateTaskPlan({ taskId, planText, isFix, planPath });
+  // Исторический контракт: прежний код бросал исключение, когда задача или
+  // проект не найдены. Маршруты рассчитывают на throw, поэтому отказ
+  // конвертируется в ту же ошибку.
+  if (!result.ok) {
+    throw new Error("Task not found");
+  }
 }
 
 // Состояние файла плана нужно UI, чтобы показать расхождение между БД и
 // диском. Отсутствие задачи или проекта - не ошибка, а "нет данных":
 // возвращается null, и клиент просто скрывает индикатор.
 export function getTaskPlanFileStatus(taskId: string) {
-  const task = findTaskById(taskId);
-  if (!task) return null;
-
-  const project = findProjectByTaskId(taskId);
-  if (!project) return null;
-  const executionRoot = task.worktreePath ?? project.rootPath;
-
-  const canonicalPlanPath = getCanonicalPlanPath({
-    projectRoot: executionRoot,
-    isFix: task.isFix,
-    planPath: task.planPath,
-  });
-
-  return {
-    exists: existsSync(canonicalPlanPath),
-    path: canonicalPlanPath,
-  };
+  return useCaseGetTaskPlanFileStatus(taskId);
 }
 
 // Обратная синхронизация: файл плана перечитывается и переносится в БД.
 // Нужна после правок, сделанных агентом или человеком прямо в репозитории.
 // Отсутствие файла - штатная ситуация (synced: false), а не исключение.
 export function syncTaskPlanFromFile(taskId: string): { synced: boolean } | null {
-  const task = findTaskById(taskId);
-  if (!task) return null;
-
-  const project = findProjectByTaskId(taskId);
-  if (!project) return null;
-  const executionRoot = task.worktreePath ?? project.rootPath;
-
-  const canonicalPlanPath = getCanonicalPlanPath({
-    projectRoot: executionRoot,
-    isFix: task.isFix,
-    planPath: task.planPath,
-  });
-  if (!existsSync(canonicalPlanPath)) {
-    return { synced: false };
-  }
-
-  const filePlan = readFileSync(canonicalPlanPath, "utf8");
-  // Пустой или состоящий из пробелов файл приводится к null: в БД нет смысла
-  // хранить строку, которую UI отобразит как пустой план.
-  const normalizedPlan = filePlan.trim().length > 0 ? filePlan : null;
-
-  persistTaskPlanForTask({
-    taskId,
-    planText: normalizedPlan,
-    projectRoot: executionRoot,
-    isFix: task.isFix,
-    planPath: task.planPath,
-    updatedAt: new Date().toISOString(),
-  });
-
-  return { synced: true };
+  const result = useCaseSyncTaskPlanFile({ taskId });
+  if (!result) return null;
+  return { synced: result.synced };
 }
-
-// Сквозной реэкспорт: маршруты импортируют чтение и мутации задач из одного
-// модуля, чтобы HTTP-слой не разбирался, где заканчивается API и начинается
-// слой данных.
-export {
-  toTaskResponse,
-  toCommentResponse,
-  toTaskListItem,
-  findTaskById,
-  listTaskListItems,
-  listTasks,
-  createTask,
-  updateTask,
-  deleteTask,
-  listComments,
-};
 
 // Обертка над createTaskComment фиксирует авторство человека: агент создает
 // комментарии через свои внутренние пути, а этот вызов приходит только из
@@ -202,3 +142,25 @@ export function updateComment(
 ): ReturnType<typeof updateTaskComment> {
   return updateTaskComment(commentId, patch);
 }
+
+// Сквозной реэкспорт: маршруты импортируют чтение и мутации задач из одного
+// модуля, чтобы HTTP-слой не разбирался, где заканчивается API и начинается
+// слой данных.
+export {
+  toTaskResponse,
+  toCommentResponse,
+  toTaskListItem,
+  findTaskById,
+  listTaskListItems,
+  listTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  createTaskComment,
+  updateTaskComment,
+  findProjectByTaskId,
+  listComments,
+  persistTaskPlanForTask,
+};
+// getCanonicalPlanPath оставлен для совместимости импортов старого репозитория.
+export { getCanonicalPlanPath };

@@ -31,8 +31,15 @@ export interface ApplyTaskEventInput {
 /** Успешный результат применения события. */
 export interface ApplyTaskEventOk {
   ok: true;
-  task: { id: string; status: TaskStatus; [key: string]: unknown };
-  broadcastType: string;
+  task: {
+    id: string;
+    projectId: string;
+    status: TaskStatus;
+    autoQa?: boolean | null;
+    worktreePath?: string | null;
+    [key: string]: unknown;
+  };
+  broadcastType: "task:moved" | "task:updated";
 }
 
 /** Бизнес-отказ применения события без транспортного статуса. */
@@ -51,6 +58,8 @@ export interface StartQaRunInput {
   projectId: string;
   taskId: string;
   executionRoot: string;
+  /** Длительность QA-лока; передаётся маршрутом из env-конфигурации. */
+  lockDurationMs?: number;
 }
 
 export type StartQaRunResult =

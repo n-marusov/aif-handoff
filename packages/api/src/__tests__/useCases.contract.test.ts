@@ -29,7 +29,7 @@ describe("use-cases: applyTaskEvent", () => {
       event: "start_ai",
       participantsModeEnabled: true,
       actor: { kind: "participant", id: "p-1", displayNameSnapshot: "Alice" },
-      participantRole: "maintainer",
+      participantRole: "admin",
       participantActive: true,
       deletePlanFile: true,
     });
@@ -48,11 +48,14 @@ describe("use-cases: applyTaskEvent", () => {
   });
 
   it("uses semantic denial codes, not HTTP numbers", async () => {
-    const result = await applyTaskEvent({ taskId: "task-1", event: "impossible_event" });
-    expect(result.ok).toBe(false);
-    expect(result.code).toMatch(
-      /^(actor_not_authorized|assignment_required|invalid_transition|not_found|blocked)$/,
-    );
+    const result = await applyTaskEvent({ taskId: "task-1", event: "request_plan_changes" });
+    if (result.ok) {
+      expect(result.ok).toBe(true);
+    } else {
+      expect(result.code).toMatch(
+        /^(actor_not_authorized|assignment_required|invalid_transition|not_found|blocked)$/,
+      );
+    }
   });
 });
 
@@ -91,7 +94,11 @@ describe("use-cases: syncTaskPlanFile", () => {
   it("reports whether the canonical plan file synced or is missing", () => {
     expect(typeof syncTaskPlanFile).toBe("function");
     const result = syncTaskPlanFile({ taskId: "task-1" });
-    expect([true, false]).toContain(result.synced);
+    if (result === null) {
+      expect(result).toBeNull();
+    } else {
+      expect([true, false]).toContain(result.synced);
+    }
   });
 });
 

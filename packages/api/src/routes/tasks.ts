@@ -34,6 +34,7 @@ import {
 } from "../schemas.js";
 import { broadcast } from "../ws.js";
 import { handleTaskEvent } from "../services/taskEvents.js";
+import { startQaRun as startQaRunUseCase } from "../use-cases/qaRun.js";
 import {
   persistAttachments,
   cleanupReplacedAttachments,
@@ -62,10 +63,8 @@ import {
   getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
   resolveEffectiveRuntimeProfilesForTasks,
-  claimTask,
   releaseTaskClaim,
   updateTaskPositionOnly,
-  tryStartQaRun,
   findParticipantById,
   getTaskOwnership,
   handoffTaskExecution,
@@ -234,38 +233,36 @@ function dispatchQaRun(
 }
 
 /**
- * Атомарный старт QA (manual + auto trigger).
- * CAS по qaStatus предотвращает двойной запуск конкурирующих запросов.
+ * Тонкий транспортный помощник старта QA: зовёт use case startQaRun (решение +
+ * CAS-захват слота), затем рассылает WS-события и диспатчит раннер. Вся
+ * бизнес-логика — в use case; здесь только broadcast и dispatch.
  */
-function startQaRun(
+function beginQaRun(
   projectId: string,
   taskId: string,
   executionRoot: string,
 ):
   | { started: true }
   | { started: false; code: "ai_handoff_required" | "task_locked" | "already_running" } {
-  const task = findTaskById(taskId);
-  if (task?.executionOwner !== "ai") {
-    return { started: false, code: "ai_handoff_required" };
-  }
-  const lockId = `qa:${crypto.randomUUID()}`;
-  if (!claimTask(taskId, lockId, QA_LOCK_DURATION_MS)) {
-    const current = findTaskById(taskId);
-    return {
-      started: false,
-      code: current?.executionOwner === "human" ? "ai_handoff_required" : "task_locked",
-    };
-  }
-  if (!tryStartQaRun(taskId)) {
-    releaseTaskClaim(taskId, lockId);
-    return { started: false, code: "already_running" };
+  const result = startQaRunUseCase({
+    projectId,
+    taskId,
+    executionRoot,
+    lockDurationMs: QA_LOCK_DURATION_MS,
+  });
+  if (!result.started) {
+    return { started: false, code: result.code };
   }
   const runningTask = findTaskById(taskId);
   if (runningTask) {
     broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(runningTask) });
   }
   broadcast({ type: "task:qa_started", payload: { taskId, projectId, status: "started" } });
-  dispatchQaRun(projectId, taskId, executionRoot, lockId);
+  if (result.lockId) {
+    dispatchQaRun(projectId, taskId, executionRoot, result.lockId);
+  } else {
+    log.error({ taskId, projectId }, "QA started without lockId — refusing to dispatch");
+  }
   return { started: true };
 }
 
@@ -1131,7 +1128,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
         log.info({ taskId }, "Auto QA triggered (autoQa=true)");
         // Старт QA атомарен: при проигранной гонке (ручной запуск параллельно)
         // получаем started=false и просто пишем предупреждение.
-        const { started } = startQaRun(projectId, taskId, executionRoot);
+        const { started } = beginQaRun(projectId, taskId, executionRoot);
         if (!started) {
           log.warn({ taskId }, "Auto QA skipped — QA already running");
         }
@@ -1176,7 +1173,7 @@ tasksRouter.post("/:id/run-qa", (c) => {
   log.info({ taskId: id, branchName: task.branchName }, "run-qa requested for task");
   // Атомарный захват слота «выполняется»: второй параллельный POST проигрывает
   // compare-and-set и получает 409 вместо дублирующего запуска runtime.
-  const startResult = startQaRun(task.projectId, id, executionRoot);
+  const startResult = beginQaRun(task.projectId, id, executionRoot);
   const { started } = startResult;
   if (!started) {
     if (startResult.code === "ai_handoff_required") {
