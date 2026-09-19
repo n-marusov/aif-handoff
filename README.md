@@ -410,6 +410,7 @@ AGENT_BYPASS_PERMISSIONS=true
 | [GitHub Demo](docs/github-demo.md)         | GitHub.com + router.ai runbook (Plan Review PR Gate) |
 | [GitLab Demo](docs/gitlab-demo.md)         | End-to-end GitLab.com + router.ai demo runbook       |
 | [Dev GUI Demo](docs/dev-gui-demo.md)       | Local dev + Web UI GitLab/router.ai runbook          |
+| [Known Issues](docs/known-issues.md)       | Known problems, workarounds, and deferred fixes      |
 
 ![ui-light](https://github.com/lee-to/aif-handoff/blob/main/art/ui-light.png)
 ![ui-dark](https://github.com/lee-to/aif-handoff/blob/main/art/ui-dark.png)
