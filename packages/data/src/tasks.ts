@@ -193,6 +193,7 @@ export function toTaskResponse(
     assignees,
     permissions: resolveTaskPermissions(
       {
+        id: task.id,
         status: task.status,
         autoMode: task.autoMode,
         executionOwner: task.executionOwner,
@@ -521,6 +522,7 @@ export function toTaskListItem(
     assignees,
     permissions: resolveTaskPermissions(
       {
+        id: row.id,
         status: row.status,
         autoMode: row.autoMode,
         executionOwner: row.executionOwner,
@@ -748,6 +750,7 @@ export function toTaskSummary(
     assignees,
     permissions: resolveTaskPermissions(
       {
+        id: row.id,
         status: row.status,
         autoMode: row.autoMode,
         executionOwner: row.executionOwner,

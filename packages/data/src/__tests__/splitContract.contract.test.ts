@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { projects, resetEnvCache } from "@aif/shared";
+import { projects, resetEnvCache, type RuntimeLimitSnapshot } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 import {
   createTask,
@@ -44,7 +44,7 @@ function seedProject(): void {
     .run();
 }
 
-function makeLimitSnapshot(): Record<string, unknown> {
+function makeLimitSnapshot(): RuntimeLimitSnapshot {
   return {
     source: "sdk_event",
     status: "blocked",
@@ -149,7 +149,7 @@ describe("runtime limit gate policy (contract)", () => {
 
   it("blocks when the snapshot is provider-blocked and the reset hint is in the future", () => {
     const id = seedGatedProfile();
-    const profile = toRuntimeProfileResponse(findRuntimeProfileById(id)!);
+    const profile = toRuntimeProfileResponse(findRuntimeProfileById(id!)!);
     const decision = evaluateRuntimeLimitGate(profile, Date.parse("2026-04-17T12:00:00.000Z"));
     expect(decision.blocked).toBe(true);
     expect(decision.reason).toBe("provider_blocked");
@@ -161,7 +161,7 @@ describe("runtime limit gate policy (contract)", () => {
     const id = seedGatedProfile();
     process.env.AIF_USAGE_LIMITS_ENABLED = "false";
     resetEnvCache();
-    const profile = toRuntimeProfileResponse(findRuntimeProfileById(id)!);
+    const profile = toRuntimeProfileResponse(findRuntimeProfileById(id!)!);
     const decision = evaluateRuntimeLimitGate(profile, Date.parse("2026-04-17T12:00:00.000Z"));
     expect(decision.blocked).toBe(false);
     expect(decision.reason).toBe("none");

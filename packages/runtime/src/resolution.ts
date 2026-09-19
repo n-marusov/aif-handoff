@@ -566,6 +566,7 @@ export function resolveRuntimeProfile(input: ResolveRuntimeProfileInput): Resolv
   if (
     !apiKey &&
     explicitApiKeyEnvVar &&
+    defaultApiKeyEnvVar &&
     apiKeyEnvVar !== defaultApiKeyEnvVar &&
     !isCodexLocalTransport
   ) {

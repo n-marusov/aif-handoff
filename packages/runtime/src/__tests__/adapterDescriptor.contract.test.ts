@@ -45,7 +45,7 @@ describe("adapter-declared resolution metadata (contract)", () => {
     expect(d.claude.apiKeyEnvCandidates).toEqual(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]);
     expect(d.codex.apiKeyEnvCandidates).toContain("OPENAI_API_KEY");
     expect(d.openrouter.apiKeyEnvCandidates).toContain("OPENROUTER_API_KEY");
-    expect(d.opencode.apiKeyEnvCandidates.length).toBeGreaterThan(0);
+    expect(d.opencode.apiKeyEnvCandidates!.length).toBeGreaterThan(0);
   });
 
   it("declares a default base URL (or null when the provider library decides)", () => {
@@ -69,17 +69,17 @@ describe("adapter-declared resolution metadata (contract)", () => {
 
   it("declares the effort option key per adapter", () => {
     const d = descriptors();
-    expect(d.claude.effort.optionKey).toBe("effort");
-    expect(d.codex.effort.optionKey).toBe("modelReasoningEffort");
-    expect(d.opencode.effort.optionKey).toBe("reasoningEffort");
-    expect(d.openrouter.effort.optionKey).toBe("effort");
+    expect(d.claude.effort!.optionKey).toBe("effort");
+    expect(d.codex.effort!.optionKey).toBe("modelReasoningEffort");
+    expect(d.opencode.effort!.optionKey).toBe("reasoningEffort");
+    expect(d.openrouter.effort!.optionKey).toBe("effort");
   });
 
   it("declares the fallback effort level sets per adapter", () => {
     const d = descriptors();
-    expect(d.claude.effort.fallbackLevels).toEqual([...CLAUDE_MODEL_EFFORT_LEVELS]);
-    expect(d.codex.effort.fallbackLevels).toEqual([...CODEX_MODEL_EFFORT_LEVELS]);
-    expect(d.opencode.effort.fallbackLevels).toEqual([...OPENCODE_MODEL_EFFORT_LEVELS]);
-    expect(d.openrouter.effort.fallbackLevels).toEqual([...OPENROUTER_MODEL_EFFORT_LEVELS]);
+    expect(d.claude.effort!.fallbackLevels).toEqual([...CLAUDE_MODEL_EFFORT_LEVELS]);
+    expect(d.codex.effort!.fallbackLevels).toEqual([...CODEX_MODEL_EFFORT_LEVELS]);
+    expect(d.opencode.effort!.fallbackLevels).toEqual([...OPENCODE_MODEL_EFFORT_LEVELS]);
+    expect(d.openrouter.effort!.fallbackLevels).toEqual([...OPENROUTER_MODEL_EFFORT_LEVELS]);
   });
 });
