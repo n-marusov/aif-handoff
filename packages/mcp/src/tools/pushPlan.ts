@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logger, parsePlanAnnotations, toTaskResponse } from "@aif/shared";
-import { findTaskById, setTaskFields } from "@aif/data";
+import { findTaskById, setTaskPlanContentManaged } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
 import { compactTaskResponse } from "../utils/compactResponse.js";
@@ -66,9 +66,14 @@ export function register(server: McpServer, context: ToolContext): void {
           };
         });
 
-        // Обновляет поле плана задачи
-        setTaskFields(args.taskId, { plan: args.planContent, updatedAt: new Date().toISOString() });
-        const updatedRow = findTaskById(args.taskId);
+        // Обновляет поле плана задачи через общий контракт
+        const planResult = setTaskPlanContentManaged(args.taskId, args.planContent);
+        if (!planResult.ok) {
+          throw validationError(`Task not found: ${args.taskId}`, {
+            taskId: ["Task does not exist"],
+          });
+        }
+        const updatedRow = planResult.task;
         const task = updatedRow ? toTaskResponse(updatedRow) : toTaskResponse(row);
 
         log.info(

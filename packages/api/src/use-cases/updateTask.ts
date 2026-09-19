@@ -1,27 +1,22 @@
 /**
  * Application use case «обновить задачу».
  *
- * Вся бизнес-логика правки задачи: авторизация участника (canMutateTask),
- * валидация runtime-профиля, запрет fast-режима в параллельных проектах,
- * заполнение mode-default флагов при смене plannerMode, составные операции
- * «файл плана» и «вложения». Маршрут остаётся тонким контроллером: парсит
- * вход, зовёт use case, рассылает WS и формирует ответ.
- *
- * Никаких транспортных понятий (Hono, HTTP-статусы) здесь нет — код отказа
- * семантический, маппинг код → статус делает маршрут.
+ * Оркестратор поверх общего контракта `updateTaskManaged` (@aif/data):
+ * участковая авторизация (canMutateTask), составные операции «файл плана» и
+ * «вложения» остаются здесь, а общие правила (отказ полей владения, валидация
+ * runtime-профиля, запрет fast-режима в параллельных проектах, заполнение
+ * mode-default флагов) делегированы в слой данных — туда же обращаются
+ * MCP-инструменты.
  */
-import { defaultsForMode, parseAttachments, logger } from "@aif/shared";
+import { parseAttachments } from "@aif/shared";
 import type { TaskActionContext } from "@aif/shared";
-import { findProjectById, findTaskById, getTaskOwnership, updateTask } from "@aif/data";
+import { findProjectById, findTaskById, getTaskOwnership, updateTaskManaged } from "@aif/data";
 import {
   cleanupReplacedAttachments,
   persistAttachments,
 } from "../services/attachmentPersistence.js";
-import { validateProjectScopedRuntimeProfileSelections } from "../services/runtimeProfileScope.js";
 import { updateTaskPlan as updateTaskPlanUseCase } from "./taskPlan.js";
 import type { UpdateTaskInput, UpdateTaskResult } from "./types.js";
-
-const log = logger("update-task-use-case");
 
 /** Строка задачи: выводится из findTaskById (row-типы не входят в публичный контракт). */
 export type PersistedTask = NonNullable<ReturnType<typeof findTaskById>>;
@@ -45,8 +40,9 @@ function canMutateTask(actionContext: TaskActionContext, taskId: string): boolea
 }
 
 /**
- * Единственная точка входа: применяет все доменные правила правки и возвращает
- * свежую строку задачи либо семантический код отказа.
+ * Единственная точка входа: применяет авторизацию, зовёт составные операции
+ * плана и вложений, затем единый общий контракт обновления. Возвращает свежую
+ * строку задачи либо семантический код отказа.
  */
 export async function updateTaskUseCase(input: UpdateTaskInput): Promise<UpdateTaskResult> {
   const { taskId, patch, actionContext } = input;
@@ -58,61 +54,11 @@ export async function updateTaskUseCase(input: UpdateTaskInput): Promise<UpdateT
     return { ok: false, code: "forbidden", error: "Task assignment or admin role required" };
   }
 
-  // Профиль времени выполнения проверяется тем же сервисом, что и при создании:
-  // правка не должна обходить проектные ограничения на выбор runtime.
-  const runtimeValidation = validateProjectScopedRuntimeProfileSelections({
-    projectId: existing.projectId,
-    selections: { runtimeProfileId: patch.runtimeProfileId },
-  });
-  if (runtimeValidation) {
-    return {
-      ok: false,
-      code: "invalid_runtime_profile",
-      error: runtimeValidation.error,
-      details: runtimeValidation as Record<string, unknown>,
-    };
-  }
-
-  // Проекты с параллельным выполнением принудительно получают полный режим.
   const project = findProjectById(existing.projectId);
-  if (project?.parallelEnabled && patch.plannerMode === "fast") {
-    return {
-      ok: false,
-      code: "parallel_mode_required",
-      error: "Parallel-enabled projects require full planner mode",
-    };
-  }
 
-  const effectiveUseSubagents = patch.useSubagents ?? existing.useSubagents;
-  if (effectiveUseSubagents) {
-    patch.runPlanImprove = false;
-    patch.runPostVerify = false;
-  }
-
-  // Зеркало POST /tasks: при смене plannerMode недостающие флаги берутся из значений режима.
-  if (patch.plannerMode !== undefined) {
-    const modeDefaults = defaultsForMode(patch.plannerMode as "fast" | "full");
-    const filled = {
-      skipReview: patch.skipReview === undefined,
-      planDocs: patch.planDocs === undefined,
-      planTests: patch.planTests === undefined,
-    };
-    patch.skipReview = patch.skipReview ?? modeDefaults.skipReview;
-    patch.planDocs = patch.planDocs ?? modeDefaults.planDocs;
-    patch.planTests = patch.planTests ?? modeDefaults.planTests;
-    if (filled.skipReview || filled.planDocs || filled.planTests) {
-      log.debug(
-        { taskId, plannerMode: patch.plannerMode, filled },
-        "Applied mode-driven task flag defaults on update",
-      );
-    }
-  }
-
-  // Составная операция «план»: hasOwnProperty, а не проверка на undefined —
-  // null это валидное значение "очистить план". Здесь решение принимается по
-  // присутствию поля в DTO-входе (маршрут вынимает plan из body до вызова).
-  // planPath берётся из текущей строки задачи, как и в исходном обработчике:
-  // правка planPath попадает в updateTask ниже отдельным полем.
+  // Составная операция «план»: присутствие поля в DTO-входе (маршрут вынимает
+  // plan из body до вызова). planPath берётся из текущей строки задачи, как и в
+  // исходном обработчике: правка planPath попадает в updateTask отдельным полем.
   if (input.plan !== undefined) {
     const planUpdate = updateTaskPlanUseCase({
       taskId,
@@ -125,19 +71,50 @@ export async function updateTaskUseCase(input: UpdateTaskInput): Promise<UpdateT
     }
   }
 
-  // Составная операция «вложения»: сохраняем новые в файлы проекта и убираем заменённые.
+  // Составная операция «вложения»: сохраняем новые в файлы проекта и убираем
+  // заменённые; persisted-список подмешивается в единый финальный патч.
+  let finalPatch: Record<string, unknown> = { ...(patch as Record<string, unknown>) };
   if (input.attachments !== undefined) {
     if (project) {
       const oldAttachments = parseAttachments(existing.attachments);
       cleanupReplacedAttachments(project.rootPath, oldAttachments, input.attachments);
-      patch.attachments = await persistAttachments(input.attachments, {
+      finalPatch.attachments = await persistAttachments(input.attachments, {
         projectRoot: project.rootPath,
         taskId,
       });
     }
   }
 
-  const updated = updateTask(taskId, patch);
+  // Единственная запись в таблицу: общий контракт применяет правила и пишет
+  // плоский набор колонок (план и вложения уже разложены выше).
+  const result = updateTaskManaged({
+    taskId,
+    patch: finalPatch,
+    plannerMode: patch.plannerMode,
+    useSubagents: patch.useSubagents,
+    skipReview: patch.skipReview,
+    planDocs: patch.planDocs,
+    planTests: patch.planTests,
+    runPlanImprove: patch.runPlanImprove,
+    runPostVerify: patch.runPostVerify,
+  });
+  if (!result.ok) {
+    if (result.code === "invalid_runtime_profile") {
+      return {
+        ok: false,
+        code: "invalid_runtime_profile",
+        error: result.error,
+        details: result.validation as unknown as Record<string, unknown>,
+      };
+    }
+    return {
+      ok: false,
+      code: result.code === "forbidden_fields" ? "forbidden" : result.code,
+      error: result.error,
+    };
+  }
+
+  const updated = findTaskById(taskId);
   if (!updated) {
     return { ok: false, code: "task_not_found", error: "Task not found after update" };
   }

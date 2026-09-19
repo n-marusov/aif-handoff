@@ -103,7 +103,11 @@ describe("MCP task tools runtime contract", () => {
         title: "Cross Project Runtime",
         runtimeProfileId: foreignProfile!.id,
       }),
-    ).rejects.toThrow(/does not belong to project/);
+    ).rejects.toMatchObject({
+      // Контракт: невалидный выбор профиля → валидационная ошибка MCP.
+      code: -32602,
+      message: expect.stringContaining("Invalid runtime profile selection"),
+    });
   });
 
   it("returns effectiveRuntime metadata on create", async () => {
@@ -191,7 +195,10 @@ describe("MCP task tools runtime contract", () => {
         taskId: task!.id,
         runtimeProfileId: disabledProfile!.id,
       }),
-    ).rejects.toThrow(/disabled/);
+    ).rejects.toMatchObject({
+      code: -32602,
+      message: expect.stringContaining("Invalid runtime profile selection"),
+    });
   });
 
   it("rejects ownership and participant fields in the generic update tool", async () => {

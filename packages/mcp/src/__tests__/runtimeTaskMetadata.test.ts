@@ -13,8 +13,8 @@ vi.mock("@aif/data/db", async (importOriginal) => {
 
 const { createRuntimeProfile, createTask, updateProjectRuntimeDefaults } =
   await import("@aif/data");
-const { assertRuntimeProfileSelection, buildEffectiveTaskRuntimeMetadata } =
-  await import("../tools/runtimeTaskMetadata.js");
+const { validateProjectScopedRuntimeProfileSelections } = await import("@aif/data");
+const { buildEffectiveTaskRuntimeMetadata } = await import("../tools/runtimeTaskMetadata.js");
 
 function seedProject(id = "proj-1") {
   testDb.current
@@ -44,25 +44,19 @@ describe("runtimeTaskMetadata", () => {
       providerId: "openai",
       enabled: true,
     });
-    const log = { warn: vi.fn() };
 
-    expect(() =>
-      assertRuntimeProfileSelection({
-        toolName: "handoff_create_task",
+    expect(
+      validateProjectScopedRuntimeProfileSelections({
         projectId: "proj-1",
-        runtimeProfileId: sameProjectProfile!.id,
-        log,
+        selections: { runtimeProfileId: sameProjectProfile!.id },
       }),
-    ).not.toThrow();
-    expect(() =>
-      assertRuntimeProfileSelection({
-        toolName: "handoff_create_task",
+    ).toBeNull();
+    expect(
+      validateProjectScopedRuntimeProfileSelections({
         projectId: "proj-1",
-        runtimeProfileId: globalProfile!.id,
-        log,
+        selections: { runtimeProfileId: globalProfile!.id },
       }),
-    ).not.toThrow();
-    expect(log.warn).not.toHaveBeenCalled();
+    ).toBeNull();
   });
 
   it("rejects cross-project runtime profile selections", () => {
@@ -74,17 +68,15 @@ describe("runtimeTaskMetadata", () => {
       providerId: "anthropic",
       enabled: true,
     });
-    const log = { warn: vi.fn() };
 
-    expect(() =>
-      assertRuntimeProfileSelection({
-        toolName: "handoff_update_task",
-        projectId: "proj-1",
-        runtimeProfileId: profile!.id,
-        log,
-      }),
-    ).toThrow(/does not belong to project/);
-    expect(log.warn).toHaveBeenCalledTimes(1);
+    const failure = validateProjectScopedRuntimeProfileSelections({
+      projectId: "proj-1",
+      selections: { runtimeProfileId: profile!.id },
+    });
+    expect(failure).not.toBeNull();
+    expect(failure!.fieldErrors.runtimeProfileId).toContain(
+      "Must reference an enabled global or same-project runtime profile",
+    );
   });
 
   it("rejects disabled runtime profiles", () => {
@@ -95,17 +87,15 @@ describe("runtimeTaskMetadata", () => {
       providerId: "anthropic",
       enabled: false,
     });
-    const log = { warn: vi.fn() };
 
-    expect(() =>
-      assertRuntimeProfileSelection({
-        toolName: "handoff_update_task",
-        projectId: "proj-1",
-        runtimeProfileId: profile!.id,
-        log,
-      }),
-    ).toThrow(/disabled/);
-    expect(log.warn).toHaveBeenCalledTimes(1);
+    const failure = validateProjectScopedRuntimeProfileSelections({
+      projectId: "proj-1",
+      selections: { runtimeProfileId: profile!.id },
+    });
+    expect(failure).not.toBeNull();
+    expect(failure!.fieldErrors.runtimeProfileId).toContain(
+      "Must reference an enabled global or same-project runtime profile",
+    );
   });
 
   it("builds effective runtime metadata for task-level override", () => {

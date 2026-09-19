@@ -72,6 +72,33 @@ vi.mock("@aif/data", () => ({
   updateChatSessionTimestamp: vi.fn(),
   findRuntimeProfileById: (id: string) => mockFindRuntimeProfileById(id),
   createDbUsageSink: () => ({ record: vi.fn() }),
+  // Общее правило видимости профиля живёт в @aif/data; тест воспроизводит его
+  // через мок, чтобы chat-роуты видели то же поведение, что и реальный пакет.
+  validateProjectScopedRuntimeProfileSelections: (input: {
+    projectId?: string | null;
+    selections: Record<string, string | null | undefined>;
+  }): { error: string; fieldErrors: Record<string, string[]> } | null => {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const [field, runtimeProfileId] of Object.entries(input.selections)) {
+      if (runtimeProfileId === undefined || runtimeProfileId === null) continue;
+      const profile = mockFindRuntimeProfileById(runtimeProfileId);
+      const isEnabled = profile != null && profile.enabled !== false;
+      const isVisible =
+        profile != null &&
+        (profile.projectId == null ||
+          (input.projectId != null && profile.projectId === input.projectId));
+      if (!isVisible || !isEnabled) {
+        fieldErrors[field] = [
+          input.projectId == null
+            ? "Must reference an enabled global runtime profile"
+            : "Must reference an enabled global or same-project runtime profile",
+        ];
+      }
+    }
+    return Object.keys(fieldErrors).length === 0
+      ? null
+      : { error: "Invalid runtime profile selection", fieldErrors };
+  },
 }));
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();

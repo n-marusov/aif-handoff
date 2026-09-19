@@ -94,6 +94,8 @@ export * from "./runtimeProfiles.js";
 export * from "./runtimeLimits.js";
 export * from "./codexIndex.js";
 export * from "./coordinatorClaims.js";
+// Общие управляемые операции задачи: контракт, общий для API use-cases и MCP.
+export * from "./taskOperations.js";
 // usage.ts дополнительно экспортирует внутренние помощники для sibling-модулей
 // (findLatestRuntimeProfileUsageByIds, RuntimeProfileUsageState) — они не входят
 // в публичную поверхность и потому перечисляются здесь явно.

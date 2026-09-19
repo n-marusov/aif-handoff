@@ -1,16 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logger, toTaskResponse } from "@aif/shared";
-import { createTask, findProjectById } from "@aif/data";
+import { createTaskManaged, findProjectById } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, validationError } from "../middleware/errorHandler.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { compactTaskResponse } from "../utils/compactResponse.js";
 import { broadcastTaskChange } from "../utils/broadcast.js";
-import {
-  assertRuntimeProfileSelection,
-  buildEffectiveTaskRuntimeMetadata,
-} from "./runtimeTaskMetadata.js";
+import { buildEffectiveTaskRuntimeMetadata } from "./runtimeTaskMetadata.js";
 
 const log = logger("mcp:tool:create-task");
 const createTaskInputSchema: Record<string, z.ZodTypeAny> = {
@@ -100,7 +97,7 @@ export function register(server: McpServer, context: ToolContext): void {
         "DEBUG [mcp:tool:*] handoff_create_task called with runtime metadata",
       );
 
-      // Проверяет, что проект существует
+      // Проверяет, что проект существует (контракт инструмента — понятная 404-ошибка).
       const project = findProjectById(args.projectId);
       if (!project) {
         log.error({ projectId: args.projectId }, "Project not found for task creation");
@@ -109,14 +106,8 @@ export function register(server: McpServer, context: ToolContext): void {
         });
       }
 
-      assertRuntimeProfileSelection({
-        toolName: "handoff_create_task",
-        projectId: args.projectId,
-        runtimeProfileId: args.runtimeProfileId,
-        log,
-      });
-
-      const row = createTask({
+      // Общий контракт применяет валидацию runtime-профиля и планировочные дефолты.
+      const result = createTaskManaged({
         projectId: args.projectId,
         title: args.title,
         description: args.description ?? "",
@@ -144,12 +135,20 @@ export function register(server: McpServer, context: ToolContext): void {
         runtimeOptions: args.runtimeOptions,
       });
 
-      if (!row) {
-        log.error({ projectId: args.projectId }, "Task creation returned undefined");
+      if (!result.ok) {
+        if (result.code === "invalid_runtime_profile") {
+          const fieldErrors = result.validation?.fieldErrors ?? {};
+          log.warn(
+            { projectId: args.projectId, runtimeProfileId: args.runtimeProfileId ?? null },
+            "Rejected invalid runtime profile in MCP task creation",
+          );
+          throw validationError("Invalid runtime profile selection", fieldErrors);
+        }
+        log.error({ projectId: args.projectId, code: result.code }, "Task creation rejected");
         throw new McpError(ErrorCode.InternalError, "Failed to create task");
       }
 
-      const full = toTaskResponse(row);
+      const full = toTaskResponse(result.task);
       const effectiveRuntime = buildEffectiveTaskRuntimeMetadata(full.id, full.projectId);
       const compact = compactTaskResponse({ ...full, effectiveRuntime });
 

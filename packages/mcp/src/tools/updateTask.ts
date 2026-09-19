@@ -1,15 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logger, toTaskResponse } from "@aif/shared";
-import { findTaskById, updateTask } from "@aif/data";
+import { updateTaskManaged } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
 import { compactTaskResponse } from "../utils/compactResponse.js";
 import { broadcastTaskChange } from "../utils/broadcast.js";
-import {
-  assertRuntimeProfileSelection,
-  buildEffectiveTaskRuntimeMetadata,
-} from "./runtimeTaskMetadata.js";
+import { buildEffectiveTaskRuntimeMetadata } from "./runtimeTaskMetadata.js";
 
 const log = logger("mcp:tool:update-task");
 const updateTaskInputSchema: Record<string, z.ZodTypeAny> = {
@@ -94,18 +91,6 @@ export function register(server: McpServer, context: ToolContext): void {
         if (!context.rateLimiter.check("handoff_update_task", "write")) {
           throw rateLimitError("handoff_update_task");
         }
-        if (
-          rawArgs &&
-          typeof rawArgs === "object" &&
-          ["executionOwner", "ownershipRevision", "assigneeIds", "participantId"].some((field) =>
-            Object.prototype.hasOwnProperty.call(rawArgs, field),
-          )
-        ) {
-          log.warn({ taskId: args.taskId }, "Rejected ownership fields in generic MCP task update");
-          throw validationError("Task ownership cannot be changed through handoff_update_task", {
-            ownership: ["Use the authenticated Handoff API for ownership changes"],
-          });
-        }
 
         log.debug(
           {
@@ -117,38 +102,52 @@ export function register(server: McpServer, context: ToolContext): void {
           "DEBUG [mcp:tool:*] handoff_update_task called with runtime metadata",
         );
 
-        // Проверяет, что задача существует
-        const existing = findTaskById(args.taskId);
-        if (!existing) {
-          log.error({ taskId: args.taskId }, "Task not found for update");
-          throw validationError(`Task not found: ${args.taskId}`, {
+        // Извлекает taskId, остальные поля передаёт в общий контракт.
+        const { taskId, ...fields } = args;
+
+        // Общий контракт сам отклоняет поля владения/жизненного цикла и
+        // валидирует runtime-профиль — локальных проверок больше нет.
+        const result = updateTaskManaged({
+          taskId,
+          patch: fields as Record<string, unknown>,
+          plannerMode: args.plannerMode,
+          useSubagents: args.useSubagents,
+          skipReview: args.skipReview,
+          planDocs: args.planDocs,
+          planTests: args.planTests,
+        });
+
+        if (!result.ok) {
+          if (result.code === "forbidden_fields") {
+            log.warn({ taskId }, "Rejected ownership fields in generic MCP task update");
+            throw validationError("Task ownership cannot be changed through handoff_update_task", {
+              ownership: ["Use the authenticated Handoff API for ownership changes"],
+            });
+          }
+          if (result.code === "invalid_runtime_profile") {
+            const fieldErrors = result.validation?.fieldErrors ?? {};
+            log.warn(
+              { taskId, runtimeProfileId: args.runtimeProfileId ?? null },
+              "Rejected invalid runtime profile in MCP task update",
+            );
+            throw validationError("Invalid runtime profile selection", fieldErrors);
+          }
+          if (result.code === "parallel_mode_required") {
+            throw validationError(result.error, {
+              plannerMode: [result.error],
+            });
+          }
+          log.error({ taskId, code: result.code }, "MCP task update rejected");
+          throw validationError(`Task not found: ${taskId}`, {
             taskId: ["Task does not exist"],
           });
         }
 
-        assertRuntimeProfileSelection({
-          toolName: "handoff_update_task",
-          projectId: existing.projectId,
-          runtimeProfileId: args.runtimeProfileId,
-          log,
-        });
-
-        // Извлекает taskId, остальные поля передаёт в updateTask
-        const { taskId, ...fields } = args;
-
+        const row = result.task;
         // Готовит сводку изменённых полей для логирования
         const changedFields = Object.keys(fields).filter(
           (key) => fields[key as keyof typeof fields] !== undefined,
         );
-
-        const row = updateTask(taskId, fields);
-
-        if (!row) {
-          log.error({ taskId }, "Task update returned undefined");
-          throw validationError(`Task not found after update: ${taskId}`, {
-            taskId: ["Task disappeared during update"],
-          });
-        }
 
         const full = toTaskResponse(row);
         const effectiveRuntime = buildEffectiveTaskRuntimeMetadata(full.id, full.projectId);

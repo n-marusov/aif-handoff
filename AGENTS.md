@@ -72,6 +72,7 @@ packages/
 │       ├── runtimeLimits.ts    # Runtime-limit gate policy + profile resolution
 │       ├── codexIndex.ts    # Codex session/limit index repository
 │       ├── usage.ts         # Usage events, sinks, aggregate increments
+│       ├── taskOperations.ts # Shared managed task operations (create/update/plan-field + profile rule) — common contract for API use cases and MCP tools
 │       ├── coordinatorClaims.ts # Coordinator claims, auto-queue, worktree/VCS sync
 │       ├── internal.ts      # Shared private parsers (not re-exported)
 │       └── index.ts         # Public re-export barrel (surface = topic repositories)
