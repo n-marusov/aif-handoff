@@ -111,6 +111,14 @@
   (таблицы/колонки через drizzle-метаданные без драйвера). Пока не требуется: гейт 70% соблюдён,
   реальное поведение схемы проверяется в data.
 
+## E2E perf-гейт (`ai:perf`) капризен на локальных машинах (Windows)
+
+- **Статус:** открыто (не связано с clean-architecture рефакторингом; web/ не менялся)
+- **Симптом:** `npm run ai:perf` (Playwright E2E против живых dev-серверов, `packages/web/e2e/perf/*`) иногда падает на бюджетах: `dashboard-load` («renders kanban shell within LCP/DOM-ready budgets») и `chat-sessions-endpoint` («cold and warm reads stay under budgets»). Типичная ошибка — `waitForSelector` не находит `Backlog|Planning|Implementing|Projects overview|No projects yet` в 30s или `domContentLoadedMs/LCP` превышают `PERF_BUDGETS`. При этом на повторном прогоне тот же/другой spec может пройти — набор падающих тестов между прогонами меняется.
+- **Причина:** измерение времени против cold-start dev-серверов на локальном железе: пустая база perf-окружения, прогретость Vite/API, загрузка машины, кеша браузера. Бюджеты жёсткие (LCP/DOM-ready), а budget-тесты недетерминированны по определению.
+- **Проверка:** перезапустить `npm run perf --workspace=@aif/web`; прогон обычно проходит целиком на следующем запуске.
+- **Действие:** не трактовать красный perf-гейт как поломку `web/` кода; для CI рассматривать soft-fail на бюджетные прогоны или усреднение по нескольким запускам.
+
 ## Общие операции задач живут в `@aif/data`, а не в use-case фреймворке API
 
 - **Статус:** принято (архитектурное решение Task 21, Variant A)

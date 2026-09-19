@@ -140,11 +140,13 @@ export default tseslint.config(
           patterns: [
             {
               group: ["\\.\\.?/adapters/.*"],
-              message: "Runtime core must not import adapters directly; reach the port through the registry/bootstrap.",
+              message:
+                "Runtime core must not import adapters directly; reach the port through the registry/bootstrap.",
             },
             {
               group: ["@aif/runtime/adapters.*"],
-              message: "Runtime core must not import adapters directly; reach the port through the registry/bootstrap.",
+              message:
+                "Runtime core must not import adapters directly; reach the port through the registry/bootstrap.",
             },
           ],
         },
