@@ -254,11 +254,12 @@ Open questions: none carried over.
 
 ### Phase 6: Guardrails and Documentation
 
-- [ ] Task 27: Encode the layer boundaries in ESLint
+- [x] Task 27: Encode the layer boundaries in ESLint
   - Deliverable: Restricted-import rules that forbid inner-to-outer dependencies with clear messages: no `adapters/**` imports from runtime core; no `hono` in use cases; no `node:fs` or `node:child_process` in orchestration and use-case layers; `web` limited to `@aif/shared/browser`; existing DB rules extended to any new persistence module.
   - Files: `eslint.config.mjs`.
   - Logging: not applicable — lint rule messages must name the target layer and the reason.
   - Acceptance: `npm run lint` passes; a deliberately wrong import fails the rule.
+  - Completed (2026-09-19): added four new layer-boundary blocks in `eslint.config.mjs`: (1) **runtime core** (explicit core file list: index/types/registry/bootstrap/resolution/capabilities/readiness/promptPolicy/workflowSpec/modelDiscovery/cache/errors/trust/module/timeouts) — bans `adapters/**` via regex patterns (relative `./`/`../` and `@aif/runtime/adapters`), message: "Runtime core must not import adapters directly; reach the port through the registry/bootstrap."; (2) **orchestration** (`packages/agent/src/coordinator.ts`) — bans `node:fs`, `node:path`, `node:child_process`, `node:url` via patterns, message names the port adapters; (3) **use-case layer** (`packages/api/src/use-cases/**`) — bans `hono`/`@hono/node-server` (paths) + `node:child_process`/`node:fs`/`node:path` (patterns); (4) **documented exception** for `taskEvents.ts`/`taskPlan.ts` (plan-FILE artifact legitimately reads/deletes the canonical plan file) — re-allows `node:fs`/`node:path` while keeping `hono`+`node:child_process` banned. The existing DB-boundary, runtime-layer, shared-layer, and web(`@aif/shared/browser`) blocks remain (they already span api/agent/mcp/runtime and web + new persistence modules via `packages/data/src/**`). Acceptance verified: `npm run lint` passes (10/10 tasks, 0 errors — only pre-existing unused-var warnings), and two probe files confirmed the rules fire (use-cases importing `hono`/`node:fs` → 3 errors; coordinator/runtime-core patterns validated by regex unit check). Probe files removed after verification.
 
 - [ ] Task 28: Update architecture documentation
   - Deliverable: `AGENTS.md`, `.ai-factory/ARCHITECTURE.md`, `docs/architecture.md`, `docs/contracts/README.md`, `docs/providers.md`, and the Docker sync note reflect the new layers (domain, application, adapters, frameworks), the new packages or modules, and the removed concerns.

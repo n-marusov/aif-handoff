@@ -113,6 +113,111 @@ export default tseslint.config(
       ],
     },
   },
+  // Runtime CORE (вне adapters/**) не должен знать про конкретные адаптеры:
+  // адаптеры-порты подключаются через registry/bootstrap, а не импортом.
+  {
+    files: [
+      "packages/runtime/src/index.ts",
+      "packages/runtime/src/types.ts",
+      "packages/runtime/src/registry.ts",
+      "packages/runtime/src/bootstrap.ts",
+      "packages/runtime/src/resolution.ts",
+      "packages/runtime/src/capabilities.ts",
+      "packages/runtime/src/readiness.ts",
+      "packages/runtime/src/promptPolicy.ts",
+      "packages/runtime/src/workflowSpec.ts",
+      "packages/runtime/src/modelDiscovery.ts",
+      "packages/runtime/src/cache.ts",
+      "packages/runtime/src/errors.ts",
+      "packages/runtime/src/trust.ts",
+      "packages/runtime/src/module.ts",
+      "packages/runtime/src/timeouts.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["\\.\\.?/adapters/.*"],
+              message: "Runtime core must not import adapters directly; reach the port through the registry/bootstrap.",
+            },
+            {
+              group: ["@aif/runtime/adapters.*"],
+              message: "Runtime core must not import adapters directly; reach the port through the registry/bootstrap.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // ОРХЕСТРАЦИЯ (coordinator) — только порты: никаких прямых fs/child_process.
+  {
+    files: ["packages/agent/src/coordinator.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["node:fs", "node:fs/.*", "node:path", "node:child_process", "node:url"],
+              message:
+                "Orchestration must delegate fs/git/process work to port adapters (worktreeLifecycle, repositoryPrepare, planFileValidation, gitBranch), not touch the FS or spawn processes directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Application use-case слой API: транспортно-нейтрален.
+  // Никаких hono/http-фреймворков и никакого прямого работы с файлами/процессами.
+  {
+    files: ["packages/api/src/use-cases/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "hono", message: "Use cases must not depend on the HTTP framework." },
+            { name: "@hono/node-server", message: "Use cases must not depend on the HTTP server." },
+          ],
+          patterns: [
+            {
+              group: ["node:child_process"],
+              message: "Use cases must not spawn processes; delegate to the runtime/data layer.",
+            },
+            {
+              group: ["node:fs", "node:fs/.*", "node:path"],
+              message:
+                "Use cases must not touch the filesystem directly (plan-file artifacts live in taskEvents/taskPlan which have a documented exception).",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Документированное исключение: операции с файлом плана (taskEvents/taskPlan)
+  // обязаны читать/удалять канонический план-файл — это артефакт, а не HTTP.
+  {
+    files: ["packages/api/src/use-cases/taskEvents.ts", "packages/api/src/use-cases/taskPlan.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "hono", message: "Use cases must not depend on the HTTP framework." },
+            { name: "@hono/node-server", message: "Use cases must not depend on the HTTP server." },
+          ],
+          patterns: [
+            {
+              group: ["node:child_process"],
+              message: "Use cases must not spawn processes; delegate to the runtime/data layer.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     files: ["packages/shared/src/**/*.ts"],
     rules: {
