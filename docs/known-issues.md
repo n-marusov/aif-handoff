@@ -162,3 +162,42 @@
   `invalid_runtime_profile` в валидационную ошибку MCP.
 - **Действие:** если MCP-клиенты парсят текст ошибок — обновить ожидания; рекомендуемый контракт —
   матчинг по структурному полю `code`, а не по тексту.
+
+## Usage-broadcast после Task 24 привязан к внедрённому реестру (consequence)
+
+- **Статус:** предложение от /aif-review (Task 24; не блокирует)
+- **Симптом:** субагентские фазы, исполняемые вне штатного entry point агента (например, будущие
+  встраиваемые вызовы `executeSubagentQuery`), больше не рассылают `task:usage_updated`/лимитные
+  broadcast, если не внедрён реестр с usage-sink'ом. Раньше subagentQuery поднимал свой собственный
+  sink с `notifyRuntimeUsageRefresh`; после Task 24 уведомления об usage делает исключительно sink
+  композиционного корня (`packages/agent/src/index.ts`) при `bootstrapRuntimeRegistry`.
+- **Причина:** единый владелец порта (Task 24): реестр + `createDbUsageSink` создаются один раз в
+  composition root и внедряются через `setRuntimeRegistry`; `subagentQuery` читает только
+  `requireRuntimeRegistry()`. Для штатного пути это поведение-эквивалентно, но любой обходной запуск
+  без инъекции молча теряет broadcast'и usage/лимитов.
+- **Действие:** при добавлении новых точек запуска субагентов вне координатора — либо внедрять
+  реестр с sink'ом явно, либо документировать отсутствие broadcast'ов как ожидаемое поведение.
+
+## Загрузчик scope-правил зависит от cwd (Task 25)
+
+- **Статус:** предложение от /aif-review (Task 25; не блокирует)
+- **Симптом:** `packages/agent/src/agentScopeRules.ts` ищет `.claude/agents/plan-coordinator.md`
+  по `AIF_AGENT_DEFINITIONS_DIR` иначе по `<cwd>/.claude/agents`. При запуске агента не из корня
+  репозитория (например, `node dist/index.js` из `packages/agent/`) дефолт не найдёт файл, и
+  scope-правила деградируют в пустые строки (правило опционально, запуск не ломается).
+- **Причина:** cwd не зафиксирован контрактом; в docker агент стартует из `/app`, в turbo dev — из
+  корня репозитория, но это не гарантировано для будущих деплойментов.
+- **Действие:** при появлении такого запуска — задавать `AIF_AGENT_DEFINITIONS_DIR` явно или
+  заменить cwd-резолв на `import.meta`-якорь от модуля.
+
+## ESLint runtime-core: запрет adapters завязан на явный список файлов (Task 27)
+
+- **Статус:** предложение от /aif-review (Task 27; не блокирует)
+- **Симптом:** правило «runtime core не импортирует adapters/\*\*» применяется к явному списку ядра
+  (`index/types/registry/bootstrap/resolution/capabilities/readiness/promptPolicy/workflowSpec/
+modelDiscovery/cache/errors/trust/module/timeouts.ts`). Новый файл ядра без добавления в этот
+  список не получит проверку.
+- **Причина:** ESLint не умеет «исключить поддерево» в flat-config `files`, поэтому выбран точный
+  список вместо glob-выражения, которое зацепило бы и сами adapters/.
+- **Действие:** при добавлении нового файла в ядро runtime — дописать его в `files` блока
+  «Runtime CORE» в `eslint.config.mjs` (шаблон комментария в конфиге уже объясняет правило).
