@@ -57,7 +57,6 @@ import {
   getEnv,
   CLEAN_STATE_RESET,
   getHeadCommitSha,
-  getProjectConfig,
   withTimeout,
   TASK_STAGE_LIFECYCLE,
   COORDINATOR_STAGE_ORDER,
@@ -79,8 +78,7 @@ import {
   projectSupportsTaskWorktrees,
   projectUsesSharedBranchIsolation,
 } from "./gitBranch.js";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { isPlanFileValid } from "./planFileValidation.js";
 import { flushActivityQueue, logActivity } from "./hooks.js";
 import {
   notifyTaskBroadcast,
@@ -747,22 +745,13 @@ async function processOneTask(task: PersistedTask, stage: StatusTransition): Pro
       // чтобы следующий цикл опроса повторил planner.
       if (planGateApplies) {
         const plannedTask = findTaskById(task.id);
-        let planValid = false;
-        if (plannedTask) {
-          try {
-            const cfg = getProjectConfig(executionRoot);
-            const planRelPath = task.isFix
-              ? cfg.paths.fix_plan
-              : plannedTask.planPath || cfg.paths.plan;
-            const planAbsPath = resolve(executionRoot, planRelPath);
-            if (existsSync(planAbsPath)) {
-              const content = readFileSync(planAbsPath, "utf8").trim();
-              planValid = content.length > 0;
-            }
-          } catch {
-            planValid = false;
-          }
-        }
+        const planValid =
+          plannedTask &&
+          isPlanFileValid({
+            executionRoot,
+            isFix: task.isFix,
+            planPath: plannedTask.planPath ?? null,
+          });
         if (!planValid) {
           log.warn(
             { taskId: task.id, reason: "plan_file_missing_or_empty" },
@@ -787,22 +776,13 @@ async function processOneTask(task: PersistedTask, stage: StatusTransition): Pro
       // перегенерировал его — не оставляем задачу циклиться в improve.
       if (planGateApplies) {
         const improvedTask = findTaskById(task.id);
-        let planValid = false;
-        if (improvedTask) {
-          try {
-            const cfg = getProjectConfig(executionRoot);
-            const planRelPath = task.isFix
-              ? cfg.paths.fix_plan
-              : improvedTask.planPath || cfg.paths.plan;
-            const planAbsPath = resolve(executionRoot, planRelPath);
-            if (existsSync(planAbsPath)) {
-              const content = readFileSync(planAbsPath, "utf8").trim();
-              planValid = content.length > 0;
-            }
-          } catch {
-            planValid = false;
-          }
-        }
+        const planValid =
+          improvedTask &&
+          isPlanFileValid({
+            executionRoot,
+            isFix: task.isFix,
+            planPath: improvedTask.planPath ?? null,
+          });
         if (!planValid) {
           log.warn(
             { taskId: task.id, reason: "plan_file_missing_or_empty" },
