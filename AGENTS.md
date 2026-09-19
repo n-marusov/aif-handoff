@@ -27,6 +27,10 @@ packages/
 │       ├── schema.ts        # Drizzle ORM schema (SQLite; subpath @aif/shared/schema)
 │       ├── types.ts         # Shared TypeScript types + RuntimeTransport enum
 │       ├── stateMachine.ts  # Task stage transitions
+│       ├── taskLifecycle.ts # Single coordinator stage topology (from/inProgress/onSuccess)
+│       ├── taskExecutionRoot.ts # worktree ?? project-root rule (single helper)
+│       ├── runtimeLimitGate.ts # Runtime-limit gate decision (pure, env-driven)
+│       ├── plannerDefaults.ts  # defaultsForMode (mode-driven flag defaults)
 │       ├── constants.ts     # App constants
 │       ├── env.ts           # Environment validation
 │       ├── logger.ts        # Pino logger setup
@@ -82,7 +86,10 @@ packages/
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
 │       ├── index.ts         # Server entry point
-│       ├── routes/          # tasks/projects/chat/runtime profiles plus auth/participants
+│       ├── routes/          # Thin controllers: tasks/projects/chat/runtime profiles + auth/participants
+│       ├── use-cases/       # Application layer (transport-free): createTask, updateTask, handoffTask,
+│       │                    # deleteTask, taskEvents (applyTaskEvent), qaRun, taskPlan, commitGeneration,
+│       │                    # runChatTurn (WS ports injected), taskPolicy (canMutateTask)
 │       ├── services/        # runtime.ts, codexIndex.ts, fastFix.ts, roadmapGeneration.ts
 │       │                    # agentInternal.ts bridges API → agent internal HTTP (worktree cleanup)
 │       │                    # github.ts + gitlab.ts provide the GitHub/GitLab REST clients
@@ -105,13 +112,16 @@ packages/
 │       └── lib/             # api.ts, notifications.ts, utils.ts
 └── agent/               # @aif/agent — Coordinator + runtime-driven subagent orchestration
     └── src/
-        ├── index.ts         # Agent entry point
-        ├── coordinator.ts   # Polling coordinator (node-cron)
+        ├── index.ts         # Agent entry point (composition root: builds + injects runtime registry)
+        ├── runtimeRegistry.ts # Single registry holder (set/get/require) — injected by index.ts
+        ├── coordinator.ts   # Polling coordinator (node-cron); derives stage pipeline from @aif/shared taskLifecycle
         ├── autoQueueCommit.ts # Awaited Git commit gate before auto-queue terminal states
         ├── planReviewCommit.ts # Deterministic plan-only commit gate (plan review flow)
         ├── planReviewPublisher.ts # Commits + pushes plan and publishes plan PR/MR (plan_review gate)
         ├── gitConventions.ts   # Target-project branch/commit convention resolver
-        ├── subagentQuery.ts # Universal runtime-backed query execution
+        ├── subagentQuery.ts # Universal runtime-backed query execution (reads injected registry)
+        ├── agentScopeRules.ts # Scope rules loaded from .claude/agents definitions (project/review)
+        ├── planFileValidation.ts # Infra adapter: plan-file gate (fs delegated — coordinator is fs-free)
         ├── reviewGate.ts    # Auto-review gate using adapter lightModel
         ├── hooks.ts         # Activity logging, project root
         ├── stderrCollector.ts # Generic stderr ring-buffer
@@ -125,7 +135,7 @@ packages/
         ├── codex/           # Codex login broker (OAuth-in-Docker bridge)
         └── subagents/       # planner.ts, implementer.ts, reviewer.ts
 
-.claude/agents/          # Agent definitions (loaded by runtimes that support them)
+.claude/agents/          # Agent definitions (loaded by runtimes that support them; scope rules live here)
 .docker/                 # Dockerfile, entrypoint, Angie configs
 data/                    # SQLite database files (gitignored)
 .ai-factory/             # AI Factory context and references

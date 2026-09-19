@@ -36,15 +36,15 @@ AIF Handoff is a Turborepo monorepo with seven packages. The system automates ta
 
 ## Packages
 
-| Package            | Name           | Purpose                                                       |
-| ------------------ | -------------- | ------------------------------------------------------------- |
-| `packages/shared`  | `@aif/shared`  | Types, schema, state machine, constants, env, logger          |
-| `packages/runtime` | `@aif/runtime` | Runtime/provider contracts, registry, adapters, module loader |
-| `packages/data`    | `@aif/data`    | Centralized DB access layer (all SQL/repository operations)   |
-| `packages/api`     | `@aif/api`     | Hono REST + WebSocket server (port 3009)                      |
-| `packages/web`     | `@aif/web`     | React Kanban UI (port 5180)                                   |
-| `packages/agent`   | `@aif/agent`   | Coordinator + runtime-driven subagent orchestration           |
-| `packages/mcp`     | `@aif/mcp`     | MCP task read/write tools and HTTP/stdio transports           |
+| Package            | Name           | Purpose                                                                                                                          |
+| ------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/shared`  | `@aif/shared`  | Domain contracts: types, schema, state machine, stage lifecycle map, execution-root rule, mode defaults, env, logger, presenters |
+| `packages/runtime` | `@aif/runtime` | Runtime/provider contracts, registry, bootstrap, adapters, module loader                                                         |
+| `packages/data`    | `@aif/data`    | Centralized DB access (driver, topic repositories, managed task operations)                                                      |
+| `packages/api`     | `@aif/api`     | Hono REST + WebSocket (port 3009); routes delegate to use-cases                                                                  |
+| `packages/web`     | `@aif/web`     | React Kanban UI (port 5180)                                                                                                      |
+| `packages/agent`   | `@aif/agent`   | Coordinator + runtime subagent orchestration; registry injected by composition root                                              |
+| `packages/mcp`     | `@aif/mcp`     | MCP task read/write tools (on shared task operations) + HTTP/stdio transports                                                    |
 
 ### Dependency Graph
 
@@ -66,6 +66,28 @@ No cross-dependencies between `api`, `web`, and `agent`. Runtime integration is:
 - `api`/`agent` → SQLite via `@aif/data`
 - `agent` → `api` via HTTP for best-effort broadcast notifications
 - Lint guard enforces this boundary: `api` and `agent` cannot import DB helpers from `@aif/shared` or SQL builders directly.
+
+### Application Layer (Use Cases)
+
+Since the clean-architecture refactor, the API package distinguishes a transport-free
+application layer from its HTTP/WebSocket delivery:
+
+- `packages/api/src/use-cases/` holds the business operations (`createTask`, `updateTask`,
+  `handoffTask`, `deleteTask`, `applyTaskEvent`, `startQaRun`, plan file read/write/sync,
+  `generateCommit`, `runChatTurn`, `canMutateTask`). Routes only parse input, invoke a use
+  case, and shape the HTTP/WS response.
+- Operations shared with the independently-deployed MCP server live in
+  `packages/data/src/taskOperations.ts` (`createTaskManaged`, `updateTaskManaged`,
+  `setTaskPlanContentManaged`, `validateProjectScopedRuntimeProfileSelections`) — both
+  delivery surfaces consume the same contract.
+- Domain rules that both `api` and `agent` need live in `@aif/shared` (stage lifecycle map,
+  execution-root helper, runtime-limit gate).
+- Orchestration (the agent coordinator) is framework-free at the filesystem/process layer:
+  git/worktree/file work is delegated to port adapters, and the runtime registry is injected
+  by the composition root rather than created inside consumers.
+- ESLint enforces the boundaries: no `hono` in use cases, no `node:fs`/`node:child_process`
+  in orchestration (except documented plan-file modules), no `adapters/**` imports from
+  runtime core, `web` limited to `@aif/shared/browser`.
 
 ## Runtime Registry and Profile Resolution
 
