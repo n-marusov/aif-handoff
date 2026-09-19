@@ -19,7 +19,7 @@
 // пережить даже частично сломанную сборку адаптера.
 import { spawn } from "node:child_process";
 import type { RuntimeDiagnoseErrorInput } from "../../types.js";
-import { RuntimeExecutionError } from "../../errors.js";
+import { diagnoseRuntimeFailure } from "../diagnostics.js";
 
 // Локальный двойник хелпера из errors.ts, оставленный намеренно: диагностический
 // модуль должен быть самостоятельным и не тянуть за собой иерархию ошибок — его
@@ -32,39 +32,34 @@ function messageFromUnknown(err: unknown): string {
 function explainFailure(err: unknown, stderrTail: string): string {
   const baseMessage = messageFromUnknown(err);
   const stderr = stderrTail.trim();
-  // stderr приоритетнее сообщения об ошибке: там обычно лежит настоящая причина
-  // (принт CLI), тогда как message часто бывает общим («process exited...»).
   const detail = stderr || baseMessage;
 
-  // Основной путь: развилка по структурной category, когда она доступна
-  if (err instanceof RuntimeExecutionError && err.category !== "unknown") {
-    // Проверка на "unknown" — не формальность: это как раз случай, когда
-    // структуры нет и говорить нечего, поэтому его обрабатывает текстовый
-    // fallback ниже. Для всех остальных категорий текст уже известен по смыслу.
-    switch (err.category) {
-      // Все ветки возвращают текст сразу: каждая описывает одну типовую беду и
-      // что с ней делать, и продолжение разбора ниже уже не нужно.
-      case "auth":
-        return `Runtime not logged in or authentication failed. Run claude /login. ${detail}`;
-      case "rate_limit":
-        return `Runtime usage limit reached. ${detail}`;
-      case "stream":
-        return `Runtime stream interrupted during execution. ${detail}`;
-      case "timeout":
-        return `Runtime request timed out. ${detail}`;
-      case "permission":
-        return `Runtime permission denied. ${detail}`;
-      case "transport":
-        return `Runtime connection failed. ${detail}`;
-    }
-  }
+  // Общий шаблон диагностики (category-развилка + textRules) покрывает категории;
+  // уникальная строковая эвристика Claude живёт в whenUnmatched.
+  return diagnoseRuntimeFailure(
+    { error: err instanceof Error ? err : new Error(String(err)), stderrTail },
+    {
+      providerLabel: "Claude",
+      categoryMap: {},
+      rawTailCategories: {
+        auth: "Runtime not logged in or authentication failed. Run claude /login.",
+        rate_limit: "Runtime usage limit reached.",
+        stream: "Runtime stream interrupted during execution.",
+        timeout: "Runtime request timed out.",
+        permission: "Runtime permission denied.",
+        transport: "Runtime connection failed.",
+      },
+      textRules: [],
+      whenUnmatched: (fallbackMessage, stderrPart) =>
+        explainUnmatchedClaude(fallbackMessage, stderrPart.trim()),
+    },
+  );
+}
 
-  // Резерв: сопоставление строк для неклассифицированных ошибок или plain Error
-  // (например, вывод CLI в stderr, исключения вне RuntimeExecutionError)
-  // Спуск к тексту разрешён именно здесь, потому что ничего лучшего не осталось:
-  // у неклассифицированной ошибки нет ни category, ни adapterCode. Проверки
-  // только пополняют текст и не меняют управление; всё это в одном месте, чтобы
-  // новые догадки не расползались по коду угадываний.
+// Строковая эвристика Claude для неклассифицированных ошибок: живёт отдельной
+// функцией, чтобы общий шаблон диагностики оставался читаемым.
+function explainUnmatchedClaude(baseMessage: string, stderr: string): string {
+  const detail = stderr || baseMessage;
   const combinedLower = `${baseMessage} ${stderr}`.toLowerCase();
 
   if (combinedLower.includes("not logged in") || combinedLower.includes("/login")) {
@@ -73,9 +68,6 @@ function explainFailure(err: unknown, stderrTail: string): string {
 
   if (
     combinedLower.includes("rate limit") ||
-    // Столько синонимов потому, что «лимит» в разных сборках CLI называется по-разному
-    // (usage/quota/credits/extra usage) и формулировки меняются без предупреждения;
-    // перечень здесь — единственное место, где это приходится знать.
     combinedLower.includes("usage limit") ||
     combinedLower.includes("extra usage") ||
     combinedLower.includes("out of extra usage") ||
@@ -86,31 +78,17 @@ function explainFailure(err: unknown, stderrTail: string): string {
   }
 
   if (combinedLower.includes("stream closed") || combinedLower.includes("error in hook callback")) {
-    // Сорванный поток чаще всего — следствие исключения внутри хука: SDK не
-    // переживает throw из колбэка и обрывает итерацию. Поэтому сюда полезно
-    // смотреть после правок в hooks.ts.
     return `Runtime stream interrupted during execution. ${detail}`;
   }
 
   if (stderr) {
-    // Есть stderr, но он не узнан — самое честное: показать его как есть после
-    // общего сообщения. Подсказок тут нет намеренно: выдуманная гипотеза при
-    // наличии точных данных только сбивает с толку.
     return `${baseMessage}. Runtime stderr: ${stderr}`;
   }
 
   if (baseMessage.toLowerCase().includes("exited with code 1")) {
-    // Самая дорогая в отладке ситуация: процесс умер, но ничего не сказал ни в
-    // stderr, ни в stdout. Это ветка-памятка: перечислить самые частые причины
-    // (логин, лимит, отказ настроек) и напомнить про версионного стража, чтобы
-    // человек не искал причину в самом таске. Проверка про версию идёт последней —
-    // именно её чаще всего упускают.
     return `${baseMessage}. No stderr/stdout captured from the SDK. Likely causes: auth or usage-limit, or Claude Code rejected a settings value — e.g. a build older than 2.1.191 rejects the empty attribution strings used to suppress Co-Authored-By trailers. The adapter pre-checks the Claude Code version (>= 2.1.191) before each run, reading the exact binary \`query()\` launches (an explicit override or the one bundled with @anthropic-ai/claude-agent-sdk). If this still fires, upgrade @anthropic-ai/claude-agent-sdk (SDK transport) or run \`npm i -g @anthropic-ai/claude-code@latest\` (CLI/explicit-binary transport).`;
   }
 
-  // Ничего не совпало — отдаём сырое сообщение: лучше необъяснённый, но точный
-  // исходный текст, чем выдуманная интерпретация, которая уведёт от реальной
-  // причины.
   return baseMessage;
 }
 

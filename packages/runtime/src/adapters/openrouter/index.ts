@@ -35,6 +35,7 @@ import {
 import { classifyOpenRouterRuntimeError } from "./errors.js";
 import { RuntimeExecutionError } from "../../errors.js";
 import { OPENROUTER_MODEL_EFFORT_LEVELS } from "../../modelEffort.js";
+import { diagnoseRuntimeFailure, type AdapterDiagnosticMessages } from "../diagnostics.js";
 
 // Логгер адаптера расширяет логгер API опциональным error: сам транспорт ошибки не логирует,
 // а верхнему уровню полезно видеть их через тот же канал.
@@ -117,66 +118,59 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-// Человекочитаемая диагностика по ошибке: сначала по структурной категории, и только затем -
-// по тексту. Строковый fallback существует для чужих и неклассифицированных ошибок
-// (например, обычный Error из сети) и никогда не влияет на управляющую логику.
+// Формулировки диагностики OpenRouter вынесены в декларативную таблицу: сам каркас
+// (category-развилка + строковый fallback) общий для всех адаптеров (см. diagnostics.ts),
+// здесь только содержимое подсказок.
+const OPENROUTER_DIAGNOSTIC_MESSAGES: AdapterDiagnosticMessages = {
+  providerLabel: "OpenRouter",
+  categoryMap: {
+    auth: "OpenRouter API key is missing or invalid. Check OPENROUTER_API_KEY environment variable.",
+    rate_limit:
+      "OpenRouter rate limit or quota exceeded. Wait and retry, or check your plan limits at openrouter.ai.",
+    model_not_found:
+      "The requested model is not available on OpenRouter. Check the model ID format (provider/model).",
+    context_length:
+      "The prompt exceeds the model's maximum context length. Reduce the input or choose a model with a larger context window.",
+    content_filter:
+      "OpenRouter blocked the request due to content policy. Review the prompt content.",
+    transport: "Cannot reach OpenRouter API. Check network connectivity and OPENROUTER_BASE_URL.",
+  },
+  rawTailCategories: {
+    timeout: "OpenRouter request timed out.",
+    permission: "OpenRouter permission denied.",
+    stream: "OpenRouter stream interrupted.",
+  },
+  textRules: [
+    {
+      pattern: /unauthorized|invalid api key|401/,
+      message:
+        "OpenRouter API key is missing or invalid. Check OPENROUTER_API_KEY environment variable.",
+    },
+    {
+      pattern: /rate limit|429|quota/,
+      message:
+        "OpenRouter rate limit or quota exceeded. Wait and retry, or check your plan limits at openrouter.ai.",
+    },
+    {
+      pattern: /model not found|no endpoints found/,
+      message:
+        "The requested model is not available on OpenRouter. Check the model ID format (provider/model).",
+    },
+    {
+      pattern: /context_length_exceeded/,
+      message:
+        "The prompt exceeds the model's maximum context length. Reduce the input or choose a model with a larger context window.",
+    },
+    {
+      pattern: /connection refused|fetch failed/,
+      message: "Cannot reach OpenRouter API. Check network connectivity and OPENROUTER_BASE_URL.",
+    },
+  ],
+};
+
+// Человекочитаемая диагностика: общий шаблон + таблица формулировок OpenRouter.
 function diagnoseErrorMessage(input: RuntimeDiagnoseErrorInput): string {
-  const message = input.error instanceof Error ? input.error.message : String(input.error);
-
-  // Основной путь: развилка по структурной category, когда она доступна
-  // Категория unknown означает, что классификатор не смог ничего определить: switch всё равно
-  // нечего было бы показать, поэтому сразу переходим к текстовому разбору ниже.
-  if (input.error instanceof RuntimeExecutionError && input.error.category !== "unknown") {
-    // Формулировки объясняют, что делать пользователю: диагностика - это подсказка по починке,
-    // а не пересказ кода ошибки.
-    switch (input.error.category) {
-      case "auth":
-        return "OpenRouter API key is missing or invalid. Check OPENROUTER_API_KEY environment variable.";
-      case "rate_limit":
-        return "OpenRouter rate limit or quota exceeded. Wait and retry, or check your plan limits at openrouter.ai.";
-      case "model_not_found":
-        return "The requested model is not available on OpenRouter. Check the model ID format (provider/model).";
-      case "context_length":
-        return "The prompt exceeds the model's maximum context length. Reduce the input or choose a model with a larger context window.";
-      case "content_filter":
-        return "OpenRouter blocked the request due to content policy. Review the prompt content.";
-      case "transport":
-        return "Cannot reach OpenRouter API. Check network connectivity and OPENROUTER_BASE_URL.";
-      case "timeout":
-        return `OpenRouter request timed out. ${message}`;
-      case "permission":
-        return `OpenRouter permission denied. ${message}`;
-      case "stream":
-        return `OpenRouter stream interrupted. ${message}`;
-    }
-  }
-
-  // Резерв: сопоставление строк для неклассифицированных ошибок или plain Error
-  // stderrTail добавляется к сообщению: полезная часть причины иногда остаётся только в выводе
-  // процесса. Регистр приводится к нижнему, потому что провайдеры нестабильны в написании.
-  const combined = `${message} ${input.stderrTail ?? ""}`.toLowerCase();
-
-  if (
-    combined.includes("unauthorized") ||
-    combined.includes("invalid api key") ||
-    combined.includes("401")
-  ) {
-    return "OpenRouter API key is missing or invalid. Check OPENROUTER_API_KEY environment variable.";
-  }
-  if (combined.includes("rate limit") || combined.includes("429") || combined.includes("quota")) {
-    return "OpenRouter rate limit or quota exceeded. Wait and retry, or check your plan limits at openrouter.ai.";
-  }
-  if (combined.includes("model not found") || combined.includes("no endpoints found")) {
-    return "The requested model is not available on OpenRouter. Check the model ID format (provider/model).";
-  }
-  if (combined.includes("context_length_exceeded")) {
-    return "The prompt exceeds the model's maximum context length. Reduce the input or choose a model with a larger context window.";
-  }
-  if (combined.includes("connection refused") || combined.includes("fetch failed")) {
-    return "Cannot reach OpenRouter API. Check network connectivity and OPENROUTER_BASE_URL.";
-  }
-
-  return `OpenRouter error: ${message}`;
+  return diagnoseRuntimeFailure(input, OPENROUTER_DIAGNOSTIC_MESSAGES);
 }
 
 // Фабрика адаптера. Дефолты применяются один раз, на этапе создания: объект адаптера

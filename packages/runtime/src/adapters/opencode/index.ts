@@ -40,8 +40,8 @@ import {
   type OpenCodeApiLogger,
 } from "./api.js";
 import { classifyOpenCodeRuntimeError } from "./errors.js";
-import { RuntimeExecutionError } from "../../errors.js";
 import { OPENCODE_MODEL_EFFORT_LEVELS } from "../../modelEffort.js";
+import { diagnoseRuntimeFailure, type AdapterDiagnosticMessages } from "../diagnostics.js";
 
 // Адаптер принимает ровно тот же структурный интерфейс логгера, что и api.ts:
 // отдельный тип нужен лишь как точка расширения, а не как прослойка-адаптер.
@@ -126,77 +126,51 @@ function createFallbackLogger(): OpenCodeRuntimeAdapterLogger {
   };
 }
 
-// Диагностика - единственное место модуля, где текст ошибки превращается в текст
-// подсказки: этот результат идёт в UI человеку, а не в ветвления логики, поэтому
-// здесь допустимо и сопоставление по строкам. Начинаем со структурной категории, а
-// строковый разбор оставляем только для сбоев, не прошедших классификатор.
+// Диагностика - общий шаблон (diagnostics.ts) + таблица формулировок OpenCode.
 function diagnoseErrorMessage(input: RuntimeDiagnoseErrorInput): string {
-  // Текст исходной ошибки нужен только как хвост подсказки (category permission и
-  // stream передают его дальше); решений по нему не принимается.
-  const message = input.error instanceof Error ? input.error.message : String(input.error);
-
-  // Основной путь: развилка по структурной category, когда доступна
-  // Ветвление идёт по category, а не по тексту: формулировки сервера меняются от
-  // релиза к релизу, а категория - стабильный контракт. unknown исключён намеренно:
-  // он означает, что структуры нет и надо пробовать текстовый fallback ниже.
-  if (input.error instanceof RuntimeExecutionError && input.error.category !== "unknown") {
-    switch (input.error.category) {
-      case "auth":
-        return "OpenCode server authentication failed. Verify OPENCODE_SERVER_PASSWORD (and OPENCODE_SERVER_USERNAME if customized).";
-      case "rate_limit":
-        return "OpenCode request was rate-limited. Retry with backoff or reduce request frequency.";
-      case "timeout":
-        return "OpenCode request timed out. Increase timeoutMs or check server responsiveness.";
-      case "transport":
-        return "Cannot reach OpenCode server. Start opencode serve and verify baseUrl/port.";
-      case "model_not_found":
-        return "OpenCode provider/model is not available. Check GET /config/providers and use an exact providerID/modelID pair from that response.";
-      case "permission":
-        return `OpenCode permission denied. ${message}`;
-      case "stream":
-        return `OpenCode stream interrupted. ${message}`;
-    }
-  }
-
-  // Резерв: сопоставление строк для неклассифицированных ошибок или plain Error
-  // Здесь остаются только ошибки без распознанной категории, поэтому строки - не
-  // замена структуре, а единственный доступный сигнал. Хвост stderr добавляется,
-  // потому что при падении соединения полезная причина часто остаётся именно там.
-  const combined = `${message} ${input.stderrTail ?? ""}`.toLowerCase();
-
-  if (
-    combined.includes("unauthorized") ||
-    combined.includes("invalid password") ||
-    combined.includes("401") ||
-    combined.includes("403")
-  ) {
-    return "OpenCode server authentication failed. Verify OPENCODE_SERVER_PASSWORD (and OPENCODE_SERVER_USERNAME if customized).";
-  }
-  if (combined.includes("rate") || combined.includes("429") || combined.includes("quota")) {
-    return "OpenCode request was rate-limited. Retry with backoff or reduce request frequency.";
-  }
-  if (
-    combined.includes("connection refused") ||
-    combined.includes("econnrefused") ||
-    combined.includes("fetch failed") ||
-    combined.includes("network")
-  ) {
-    return "Cannot reach OpenCode server. Start opencode serve and verify baseUrl/port.";
-  }
-  if (combined.includes("session") && combined.includes("not found")) {
-    return "OpenCode session not found. Create a new session or provide a valid sessionId.";
-  }
-  if (
-    combined.includes("providermodelnotfounderror") ||
-    combined.includes("modelnotfounderror") ||
-    combined.includes("provider not found") ||
-    combined.includes("model not found")
-  ) {
-    return "OpenCode provider/model is not available. Check GET /config/providers and use an exact providerID/modelID pair from that response.";
-  }
-
-  return `OpenCode error: ${message}`;
+  return diagnoseRuntimeFailure(input, OPENCODE_DIAGNOSTIC_MESSAGES);
 }
+
+const OPENCODE_DIAGNOSTIC_MESSAGES: AdapterDiagnosticMessages = {
+  providerLabel: "OpenCode",
+  categoryMap: {
+    auth: "OpenCode server authentication failed. Verify OPENCODE_SERVER_PASSWORD (and OPENCODE_SERVER_USERNAME if customized).",
+    rate_limit:
+      "OpenCode request was rate-limited. Retry with backoff or reduce request frequency.",
+    timeout: "OpenCode request timed out. Increase timeoutMs or check server responsiveness.",
+    transport: "Cannot reach OpenCode server. Start opencode serve and verify baseUrl/port.",
+    model_not_found:
+      "OpenCode provider/model is not available. Check GET /config/providers and use an exact providerID/modelID pair from that response.",
+  },
+  rawTailCategories: {
+    permission: "OpenCode permission denied.",
+    stream: "OpenCode stream interrupted.",
+  },
+  textRules: [
+    {
+      pattern: /unauthorized|invalid password|401|403/,
+      message:
+        "OpenCode server authentication failed. Verify OPENCODE_SERVER_PASSWORD (and OPENCODE_SERVER_USERNAME if customized).",
+    },
+    {
+      pattern: /rate|429|quota/,
+      message: "OpenCode request was rate-limited. Retry with backoff or reduce request frequency.",
+    },
+    {
+      pattern: /connection refused|econnrefused|fetch failed|network/,
+      message: "Cannot reach OpenCode server. Start opencode serve and verify baseUrl/port.",
+    },
+    {
+      pattern: /session.*not found/,
+      message: "OpenCode session not found. Create a new session or provide a valid sessionId.",
+    },
+    {
+      pattern: /providermodelnotfounderror|modelnotfounderror|provider not found|model not found/,
+      message:
+        "OpenCode provider/model is not available. Check GET /config/providers and use an exact providerID/modelID pair from that response.",
+    },
+  ],
+};
 
 /**
  * Фабрика, а не класс: реестр и bootstrap работают с обычным объектом-значением

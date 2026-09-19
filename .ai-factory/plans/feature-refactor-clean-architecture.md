@@ -127,12 +127,13 @@ Open questions: none carried over.
   - Acceptance: no `adapters/**` import remains in non-adapter runtime files.
   - Completed (2026-09-19): added `RuntimeSubagentStrategyPort` + `RuntimeSubagentStrategyResolution` + `RuntimeSubagentReadiness` to types.ts and optional `adapter.subagentStrategy` on RuntimeAdapter; codex adapter exposes the port (wrap of subagentStrategy.ts); promptPolicy reads `input.adapterSubagentStrategy`, falling back to non-codex defaults (no adapters/ import — grep-verified); registry/subagentQuery pass the port from the resolved adapter; workflowSpec.test.ts updated to inject the real codex adapter port. Runtime 862/863, agent subagent suites 87/87, lint clean.
 
-- [ ] Task 12: Extract a shared adapter error-diagnosis template
+- [x] Task 12: Extract a shared adapter error-diagnosis template
   - Deliverable: The duplicated `instanceof RuntimeExecutionError && category !== "unknown"` switch is replaced by one shared helper parameterised by the adapter's message map.
   - Files: `packages/runtime/src/adapters/{claude,codex,opencode,openrouter}/*`, new `packages/runtime/src/adapters/diagnostics.ts`.
   - Constraint: keep structured classification (`category`, `adapterCode`); never branch on message text.
   - Logging: DEBUG with `{ adapterId, category, adapterCode }` on diagnosis.
   - Acceptance: all four adapters use the shared helper; their suites stay green.
+  - Completed (2026-09-19): added `packages/runtime/src/adapters/diagnostics.ts` (`diagnoseRuntimeFailure` + `AdapterDiagnosticMessages` with categoryMap/rawTailCategories/textRules/whenUnmatched). Refactored openrouter + opencode `diagnoseErrorMessage` and claude `explainFailure` to declare message tables and delegate to the shared helper (Claude keeps its unique stderr/"exited with code 1" heuristic in `whenUnmatched`). Codex has no diagnosis switch (no describe/explain path) — the three adapters that had the duplicated switch now use the helper. Runtime suite 862 passed / 1 skipped; diagnostics tests 40/40; lint clean.
 
 ### Phase 3: Data Layer Decomposition
 
