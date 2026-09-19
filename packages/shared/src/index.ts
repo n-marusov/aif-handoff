@@ -383,6 +383,15 @@ export {
 import { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS } from "./loopDetection.js";
 export { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS };
 
+// Доменная политика runtime-limit gate и приоритетов runtime-профиля (только Node)
+// Чистые решения без доступа к БД: применяются data/api/agent через импорт.
+export {
+  evaluateRuntimeLimitGate,
+  getProjectRuntimeProfileId,
+  isRuntimeLimitAwarenessEnabled,
+  type RuntimeLimitGateDecision,
+} from "./runtimeLimitGate.js";
+
 // Презентационные мапперы (только Node)
 // Преобразование строк БД в view-модели для HTTP/WebSocket/MCP. Модуль серверный:
 // использует pino и не входит в браузерный вход @aif/shared/browser.

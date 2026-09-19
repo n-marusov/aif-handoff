@@ -3,7 +3,7 @@
  */
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
 import {
-  getEnv,
+  isRuntimeLimitAwarenessEnabled,
   logger as createLogger,
   normalizeRuntimeLimitSnapshot,
   runtimeProfiles,
@@ -369,7 +369,7 @@ export function persistRuntimeProfileLimitSnapshot(
   snapshot: RuntimeLimitSnapshot,
   persistedAt = new Date().toISOString(),
 ): RuntimeProfileRow | undefined {
-  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) {
+  if (!isRuntimeLimitAwarenessEnabled()) {
     return findRuntimeProfileById(runtimeProfileId);
   }
 
@@ -400,7 +400,7 @@ export function clearRuntimeProfileLimitSnapshot(
   runtimeProfileId: string,
   persistedAt = new Date().toISOString(),
 ): RuntimeProfileRow | undefined {
-  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) {
+  if (!isRuntimeLimitAwarenessEnabled()) {
     return findRuntimeProfileById(runtimeProfileId);
   }
 

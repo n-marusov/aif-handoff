@@ -1,142 +1,33 @@
 /**
- * Политика runtime-limit gate и разрешение эффективного runtime-профиля
- * (чистые решения поверх строк БД; гейт-решения читают getEnv()).
+ * Разрешение эффективного runtime-профиля (композиция над строками БД).
+ *
+ * Чистые доменные правила (порядок приоритетов кандидатов, runtime-limit gate)
+ * вынесены в @aif/shared/src/runtimeLimitGate.ts и только применяются отсюда.
+ * Оставшийся код — это чтение строк из БД, пакетная загрузка проектов/профилей
+ * и подтягивание последних событий расходов: data-слой не содержит политики.
  */
 import { inArray } from "drizzle-orm";
 import {
-  buildRuntimeLimitSignature,
-  getEnv,
+  getProjectRuntimeProfileId,
   logger as createLogger,
   projects,
-  resolveRuntimeLimitFutureHint,
   runtimeProfiles,
-  selectViolatedWindowForExactThreshold,
+  toRuntimeProfileResponse,
   type EffectiveRuntimeProfileSelection,
-  type RuntimeLimitFutureHint,
-  type RuntimeLimitSnapshot,
-  type RuntimeLimitWindow,
-  type RuntimeProfile,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { findTaskById, type TaskRow } from "./tasks.js";
 import { findProjectById, type ProjectRow } from "./projects.js";
 import { findRuntimeProfileById } from "./runtimeProfiles.js";
-import { toRuntimeProfileResponse } from "@aif/shared";
 import { findLatestRuntimeProfileUsageByIds } from "./usage.js";
 
+// Реэкспорт доменных правил: существующие потребители (api, agent, mcp)
+// продолжают импортировать их из @aif/data без правки мест вызова. Сами правила
+// объявлены в @aif/shared, data лишь публикует их поверх.
+export { evaluateRuntimeLimitGate, getProjectRuntimeProfileId } from "@aif/shared";
+export type { RuntimeLimitGateDecision } from "@aif/shared";
+
 const log = createLogger("data");
-
-export interface RuntimeLimitGateDecision {
-  blocked: boolean;
-  reason: "none" | "provider_blocked" | "exact_threshold";
-  runtimeProfileId: string | null;
-  snapshot: RuntimeLimitSnapshot | null;
-  futureHint: RuntimeLimitFutureHint;
-  violatedWindow: RuntimeLimitWindow | null;
-  signature: string | null;
-}
-
-export function evaluateRuntimeLimitGate(
-  profile: RuntimeProfile | null | undefined,
-  nowMs = Date.now(),
-): RuntimeLimitGateDecision {
-  const runtimeProfileId = profile?.id ?? null;
-  if (!getEnv().AIF_USAGE_LIMITS_ENABLED) {
-    return {
-      blocked: false,
-      reason: "none",
-      runtimeProfileId,
-      snapshot: null,
-      futureHint: resolveRuntimeLimitFutureHint(null, { nowMs }),
-      violatedWindow: null,
-      signature: null,
-    };
-  }
-
-  const snapshot = profile?.runtimeLimitSnapshot ?? null;
-  if (!snapshot) {
-    return {
-      blocked: false,
-      reason: "none",
-      runtimeProfileId,
-      snapshot: null,
-      futureHint: resolveRuntimeLimitFutureHint(null, { nowMs }),
-      violatedWindow: null,
-      signature: null,
-    };
-  }
-
-  const signature = buildRuntimeLimitSignature(snapshot);
-  const providerBlockedHint = resolveRuntimeLimitFutureHint(snapshot, { nowMs });
-
-  if (snapshot.status === "blocked" && providerBlockedHint.source === "none") {
-    log.debug(
-      {
-        runtimeProfileId,
-        status: snapshot.status,
-        precision: snapshot.precision,
-        checkedAt: snapshot.checkedAt,
-        signature,
-      },
-      "Skipping proactive runtime gate because the persisted snapshot has no reset hint",
-    );
-  }
-  if (snapshot.status === "blocked" && providerBlockedHint.isFuture) {
-    return {
-      blocked: true,
-      reason: "provider_blocked",
-      runtimeProfileId,
-      snapshot,
-      futureHint: providerBlockedHint,
-      violatedWindow: null,
-      signature,
-    };
-  }
-
-  const violatedWindow = selectViolatedWindowForExactThreshold(snapshot, null, nowMs);
-  const exactThresholdReached =
-    snapshot.precision === "exact" && snapshot.status === "warning" && violatedWindow != null;
-  const exactThresholdHint = resolveRuntimeLimitFutureHint(snapshot, {
-    nowMs,
-    preferredWindow: violatedWindow,
-    windowFirst: true,
-  });
-
-  if (exactThresholdReached && exactThresholdHint.source === "none") {
-    log.debug(
-      {
-        runtimeProfileId,
-        status: snapshot.status,
-        precision: snapshot.precision,
-        checkedAt: snapshot.checkedAt,
-        signature,
-      },
-      "Skipping proactive exact-threshold gate because the violated window has no reset hint",
-    );
-  }
-
-  if (exactThresholdReached && exactThresholdHint.isFuture) {
-    return {
-      blocked: true,
-      reason: "exact_threshold",
-      runtimeProfileId,
-      snapshot,
-      futureHint: exactThresholdHint,
-      violatedWindow,
-      signature,
-    };
-  }
-
-  return {
-    blocked: false,
-    reason: "none",
-    runtimeProfileId,
-    snapshot,
-    futureHint: providerBlockedHint,
-    violatedWindow: violatedWindow ?? null,
-    signature,
-  };
-}
 
 export function resolveEffectiveRuntimeProfile(input: {
   taskId?: string;
@@ -362,20 +253,4 @@ export function resolveEffectiveRuntimeProfilesForTasks(
   );
 
   return results;
-}
-
-function getProjectRuntimeProfileId(
-  project: ProjectRow | undefined,
-  mode: "task" | "plan" | "review" | "chat",
-): string | null {
-  if (mode === "chat") {
-    return project?.defaultChatRuntimeProfileId ?? null;
-  }
-  if (mode === "plan") {
-    return project?.defaultPlanRuntimeProfileId ?? project?.defaultTaskRuntimeProfileId ?? null;
-  }
-  if (mode === "review") {
-    return project?.defaultReviewRuntimeProfileId ?? project?.defaultTaskRuntimeProfileId ?? null;
-  }
-  return project?.defaultTaskRuntimeProfileId ?? null;
 }
