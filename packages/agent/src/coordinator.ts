@@ -42,7 +42,6 @@ import {
   persistTaskRuntimeLimitSnapshot,
   resolveEffectiveRuntimeProfile,
   setTaskFields,
-  type CoordinatorStage,
   type TaskFieldsPatch,
 } from "@aif/data";
 
@@ -60,6 +59,9 @@ import {
   getHeadCommitSha,
   getProjectConfig,
   withTimeout,
+  TASK_STAGE_LIFECYCLE,
+  COORDINATOR_STAGE_ORDER,
+  type CoordinatorStage,
   type TaskStatus,
 } from "@aif/shared";
 import { runPlanner } from "./subagents/planner.js";
@@ -132,92 +134,48 @@ const runtimeCounters = {
 
 // Контракт стадии конвейера: входные статусы, рабочий статус, целевой статус и runner.
 // Пока runner выполняется, задача удерживается в inProgress-колонке Kanban.
+// from/inProgress/onSuccess берутся из единого графа жизненного цикла
+// (@aif/shared TASK_STAGE_LIFECYCLE); runner'ы — поведение стадии здесь.
 interface StatusTransition {
-  from: TaskStatus[];
+  from: readonly TaskStatus[];
   inProgress: TaskStatus;
   onSuccess: TaskStatus;
   runner: (taskId: string, projectRoot: string) => Promise<void>;
   label: CoordinatorStage;
 }
 
-// Порядок PIPELINE определяет доменный маршрут в пределах тика.
-// Self-loop стадии plan_review идут до implementer, чтобы реализация не стартовала
-// без решения Plan Review Gate.
-const PIPELINE: StatusTransition[] = [
-  // Planner формирует План задачи (для fix-задач: FIX_PLAN.md).
-  // В skills-режиме успешный выход направляется в Improve.
-  {
-    from: ["planning"],
-    inProgress: "planning",
-    onSuccess: "plan_review",
-    runner: runPlanner,
-    label: "planner",
-  },
-  // Improve доступен только в skills-mode.
-  // Вход в стадию возможен после planner при runPlanImprove=true.
-  {
-    from: ["improve"],
-    inProgress: "improve",
-    onSuccess: "plan_review",
-    runner: runImprover,
-    label: "improver",
-  },
-  // Plan Checker не меняет статус plan_review.
-  // Решение хранится в planReviewState, а не в названии статуса.
-  {
-    from: ["plan_review"],
-    inProgress: "plan_review",
-    onSuccess: "plan_review",
-    runner: runPlanChecker,
-    label: "plan-checker",
-  },
-  // Plan Publisher также self-loop.
-  // Если публикация не готова (ветка/файл), задача остаётся в plan_review.
-  {
-    from: ["plan_review"],
-    inProgress: "plan_review",
-    onSuccess: "plan_review",
-    runner: runPlanReviewPublisher,
-    label: "plan-publisher",
-  },
-  // Implementer запускается:
-  // - из plan_review после approved;
-  // - из implementing при повторном цикле после rework_requested.
-  {
-    from: ["plan_review", "implementing"],
-    inProgress: "implementing",
-    onSuccess: "verify",
-    runner: runImplementer,
-    label: "implementer",
-  },
-  // Verify подтверждает готовность результата к ревью.
-  // Успех стадии переводит задачу в Review, но не завершает конвейер.
-  {
-    from: ["verify"],
-    inProgress: "verify",
-    onSuccess: "review",
-    runner: runVerifier,
-    label: "verifier",
-  },
-  // Reviewer работает с Auto Review Gate.
-  // Если gate не применим, задача идёт в done по базовому сценарию.
-  {
-    from: ["review"],
-    inProgress: "review",
-    onSuccess: "done",
-    runner: runReviewer,
-    label: "reviewer",
-  },
-  // Done Checker переводит done -> accepted.
-  // accepted отделяет ручное подтверждение от машинного завершения.
-  {
-    from: ["done"],
-    inProgress: "done",
-    onSuccess: "accepted",
-    runner: runDoneChecker,
-    label: "done-checker",
-  },
-];
+// Runner'ы стадий: поведенческая часть, привязанная к топологии из lifecycle-map.
+const STAGE_RUNNERS: Record<
+  CoordinatorStage,
+  (taskId: string, projectRoot: string) => Promise<void>
+> = {
+  planner: runPlanner,
+  improver: runImprover,
+  "plan-checker": runPlanChecker,
+  "plan-publisher": runPlanReviewPublisher,
+  implementer: runImplementer,
+  verifier: runVerifier,
+  reviewer: runReviewer,
+  "done-checker": runDoneChecker,
+};
+
+// Порядок PIPELINE определяет доменный маршрут в пределах тика и выводится из
+// единого графа жизненного цикла — второго источника статусного графа больше нет.
+const PIPELINE: StatusTransition[] = COORDINATOR_STAGE_ORDER.map((stage) => {
+  const spec = TASK_STAGE_LIFECYCLE[stage];
+  const runner = STAGE_RUNNERS[stage];
+  if (!runner) {
+    // Недостижимо: map покрывает все стадии; страж на случай будущего дрейфа.
+    throw new Error(`Missing stage runner: ${stage}`);
+  }
+  return {
+    from: spec.from,
+    inProgress: spec.inProgress,
+    onSuccess: spec.onSuccess,
+    runner,
+    label: stage,
+  };
+});
 
 // ── Семафор стадий ───────────────────────────────────────────
 

@@ -29,6 +29,8 @@ import {
   type AutoQueueCommitStatus,
   type RuntimeLimitSnapshot,
   type TaskStatus,
+  type CoordinatorStage,
+  TASK_STAGE_LIFECYCLE,
 } from "@aif/shared";
 import { getDb } from "./db.js";
 import { createAuditEventValues } from "./audit.js";
@@ -37,15 +39,9 @@ import type { ProjectRow, TaskRow } from "@aif/shared";
 
 const log = createLogger("data");
 
-export type CoordinatorStage =
-  | "planner"
-  | "improver"
-  | "plan-checker"
-  | "plan-publisher"
-  | "implementer"
-  | "reviewer"
-  | "verifier"
-  | "done-checker";
+// Тип стадии живёт в @aif/shared (единый граф жизненного цикла); здесь только
+// реэкспорт для совместимости потребителей, импортирующих его из @aif/data.
+export type { CoordinatorStage } from "@aif/shared";
 
 export interface CoordinatorTaskClaimInput {
   taskId: string;
@@ -61,27 +57,35 @@ export function findCoordinatorTaskCandidate(stage: CoordinatorStage): TaskRow |
 }
 
 function coordinatorStageFilter(stage: CoordinatorStage) {
-  return stage === "implementer"
-    ? or(
-        eq(tasks.status, "implementing"),
-        and(eq(tasks.status, "plan_review"), eq(tasks.autoMode, true)),
-      )
-    : stage === "improver"
-      ? inArray(tasks.status, ["improve"])
-      : stage === "plan-checker" || stage === "plan-publisher"
-        ? inArray(tasks.status, ["plan_review"])
-        : stage === "planner"
-          ? inArray(tasks.status, ["planning"])
-          : stage === "verifier"
-            ? inArray(tasks.status, ["verify"])
-            : stage === "done-checker"
-              ? inArray(tasks.status, ["done"])
-              : inArray(tasks.status, ["review"]);
+  // Implementer подхватывает задачу в implementing, а также plan_review-задачу
+  // в autoMode (двухфазный claim). Статусы берутся из единого графа жизненного
+  // цикла, compound-условие autoMode — специфика выборки, не топология.
+  if (stage === "implementer") {
+    return or(
+      eq(tasks.status, TASK_STAGE_LIFECYCLE.implementer.inProgress),
+      and(eq(tasks.status, "plan_review"), eq(tasks.autoMode, true)),
+    );
+  }
+  return inArray(tasks.status, [TASK_STAGE_LIFECYCLE[stage].inProgress]);
 }
 
 function coordinatorAnyStageFilter() {
+  // Общий фильтр «есть автономная работа по задаче». Автономно продвигаются
+  // стадии planner → improver → implementer → verifier → reviewer (+ done-checker
+  // обрабатывает done в autoMode-конвейере); plan_review и done требуют участия
+  // человека и попадают в фильтр только через составное условие: plan_review —
+  // при autoMode=true (двухфазный claim implementer), done — без отдельного
+  // упоминания (done-checker подхватывает done только в конвейере autoMode-задачи).
+  const statuses = new Set<string>();
+  for (const stage of Object.keys(TASK_STAGE_LIFECYCLE) as CoordinatorStage[]) {
+    const inProgress = TASK_STAGE_LIFECYCLE[stage].inProgress;
+    if (inProgress === "plan_review" || inProgress === "done") {
+      continue;
+    }
+    statuses.add(inProgress);
+  }
   return or(
-    inArray(tasks.status, ["planning", "improve", "implementing", "verify", "review"]),
+    inArray(tasks.status, [...statuses] as TaskStatus[]),
     and(eq(tasks.status, "plan_review"), eq(tasks.autoMode, true)),
   );
 }

@@ -221,12 +221,13 @@ Open questions: none carried over.
 
 ### Phase 5: Agent Orchestration
 
-- [ ] Task 23: Derive the pipeline graph from a single lifecycle source
+- [x] Task 23: Derive the pipeline graph from a single lifecycle source
   - Deliverable: `PIPELINE` in `packages/agent/src/coordinator.ts:141-215` and its helpers `getStageSuccessStatus`, `planReviewStageIneligible`, and `shouldRunSkillsModeImprove` read stage ordering from one lifecycle map shared with `packages/shared/src/stateMachine.ts`, removing the second copy of the status graph.
   - Files: `packages/agent/src/coordinator.ts`, `packages/shared/src/stateMachine.ts`, new shared lifecycle map, `packages/agent/src/__tests__/coordinator.test.ts`.
   - Constraint: the plan_review gate must stay enforced (no `plan_review` to `implementing` without approval).
-  - Logging: DEBUG stage resolution with `{ stage, from, onSuccess, gate }`.
+  - Logging: DEBUG stage resolution with `{ stage, from, onSuccess, gate }` (kept existing DEBUG stage-candidate logs).
   - Acceptance: lifecycle statuses appear in exactly one definition; agent and shared suites green.
+  - Completed (2026-09-19): added `@aif/shared/src/taskLifecycle.ts` — the single lifecycle graph (`CoordinatorStage`, `COORDINATOR_STAGE_ORDER`, `TASK_STAGE_LIFECYCLE` with `from`/`inProgress`/`onSuccess` per stage, `stageInProgressStatus`) — exported from `@aif/shared`. `@aif/data` `coordinatorClaims.ts` re-exports `CoordinatorStage` from shared and derives `coordinatorStageFilter`/`coordinatorAnyStageFilter` from the map (implementer two-phase `plan_review AND autoMode` claim kept as query detail; any-stage filter deliberately excludes human-gated `plan_review`/`done` from autonomous actionability, matching the original). `@aif/agent` `coordinator.ts` now derives `PIPELINE` from `COORDINATOR_STAGE_ORDER` + `TASK_STAGE_LIFECYCLE` with a `STAGE_RUNNERS` map (behaviour stays in agent); helpers `getStageSuccessStatus`/`planReviewStageIneligible`/`shouldRunSkillsModeImprove` read from the map-derived stage. Regression caught in review: a too-loose `coordinatorAnyStageFilter` (all inProgress statuses) made plan_review autoMode=false tasks actionable — fixed to preserve the original semantics (bare `plan_review`/`done` excluded; `plan_review AND autoMode` compound kept); verified by `coordinator.test.ts` 78/78. Added `shared/__tests__/taskLifecycle.test.ts` (4 tests; taskLifecycle coverage 100%). Validation: build 7/7, shared 282/282, data 340/340, agent 511/512 first run → 512/512 on re-run (single transient git-worktree flake, documented), lint 0 errors. Acceptance met: stage topology defined once in shared; plan_review gate enforced (unchanged planReviewStageIneligible + stage ordering).
 
 - [ ] Task 24: Inject the runtime registry and usage sink into the agent
   - Deliverable: `getRuntimeRegistry()` in `packages/agent/src/subagentQuery.ts:637-664` no longer self-bootstraps; the registry and `createDbUsageSink` are provided by the composition root (`packages/agent/src/index.ts`) through the existing seam (`setRuntimeRegistry`, `packages/agent/src/coordinator.ts:113-119`). One owner per port.

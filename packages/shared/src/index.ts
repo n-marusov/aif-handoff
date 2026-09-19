@@ -338,6 +338,15 @@ export {
 // Единое правило корня исполнения задачи (worktree ?? project.rootPath).
 export { taskExecutionRoot, type TaskExecutionRootFields } from "./taskExecutionRoot.js";
 
+// Единый граф жизненного цикла координатора (stage pipeline).
+export {
+  COORDINATOR_STAGE_ORDER,
+  TASK_STAGE_LIFECYCLE,
+  stageInProgressStatus,
+  type CoordinatorStage,
+  type CoordinatorStageSpec,
+} from "./taskLifecycle.js";
+
 // Уведомления Telegram
 export {
   escapeMarkdown,
