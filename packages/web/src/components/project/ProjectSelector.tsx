@@ -377,7 +377,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
       {
         onSuccess: () => toast("GitLab repository connected", "success"),
         onError: (error) => {
-          console.error("[FIX] GitLab connect failed", { projectId: editingId, error });
+          console.error("GitLab connect failed", { projectId: editingId, error });
           showMutationError(error, "Failed to connect GitLab repository");
         },
       },
@@ -393,7 +393,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
           "success",
         ),
       onError: (error) => {
-        console.error("[FIX] GitLab sync failed", { projectId: editingId, error });
+        console.error("GitLab sync failed", { projectId: editingId, error });
         showMutationError(error, "Failed to synchronize GitLab repository");
       },
     });
@@ -494,7 +494,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
             const normalizedGroupName = groupName.trim() || null;
             const groupChanged = normalizedGroupName !== (editingProject?.groupName ?? null);
             if (groupChanged) {
-              console.debug("[FIX:pr-150] Updating project group", {
+              console.debug("Updating project group", {
                 projectId: editingId,
                 groupName: normalizedGroupName,
               });
@@ -502,13 +502,13 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                 { id: editingId, input: { groupName: normalizedGroupName } },
                 {
                   onSuccess: () => {
-                    console.debug("[FIX:pr-150] Project group updated without navigation", {
+                    console.debug("Project group updated without navigation", {
                       projectId: editingId,
                       groupName: normalizedGroupName,
                     });
                   },
                   onError: (error) => {
-                    console.error("[FIX:pr-150] Failed to update project group", {
+                    console.error("Failed to update project group", {
                       projectId: editingId,
                       groupName: normalizedGroupName,
                       error,

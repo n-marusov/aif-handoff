@@ -408,7 +408,7 @@ projectsRouter.patch(
       // pinnedAt == null - единственный надежный признак "не закреплен": пустая строка или
       // нулевая метка времени дали бы ложное срабатывание.
       { projectId: id, pinned: updated.pinnedAt != null, groupName: updated.groupName },
-      "[FIX:147] Project organization updated",
+      "Project organization updated",
     );
     broadcast({ type: "project:organization_updated", payload: updated });
     return c.json(updated);

@@ -111,7 +111,7 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
       const next = prev.includes(participantId)
         ? prev.filter((id) => id !== participantId)
         : [...prev, participantId];
-      console.debug("[FIX:participant-assignee-filter] Assignee filter toggled", {
+      console.debug("Assignee filter toggled", {
         participantId,
         active: next.includes(participantId),
       });

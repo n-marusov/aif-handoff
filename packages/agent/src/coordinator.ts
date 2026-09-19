@@ -875,11 +875,11 @@ async function processOneTask(task: PersistedTask, stage: StatusTransition): Pro
         logActivity(
           task.id,
           "Agent",
-          "[FIX] Approved plan was not implemented; scheduling another implementation attempt",
+          "Approved plan was not implemented; scheduling another implementation attempt",
         );
         log.warn(
           { taskId: task.id },
-          "[FIX] Implementation produced no files after corrective retry; keeping task in implementing for automatic retry",
+          "Implementation produced no files after corrective retry; keeping task in implementing",
         );
         flushActivityQueue(task.id);
         return true;
@@ -1640,7 +1640,7 @@ async function runPollCycle(): Promise<void> {
             } catch (err) {
               log.error(
                 { taskId: claimedTask?.id ?? task.id, stage: stage.label, err },
-                "[FIX:149] Failed to release coordinator task claim",
+                "Failed to release coordinator task claim",
               );
             } finally {
               stageSemaphore.release(stageKey);
@@ -1650,7 +1650,7 @@ async function runPollCycle(): Promise<void> {
           try {
             log.debug(
               { taskId: task.id, projectId: task.projectId, stage: stage.label },
-              "[FIX:149] Revalidating task candidate after coordinator permit",
+              "Revalidating task candidate after coordinator permit",
             );
 
             // Перепроверка после ожидания: пока задача стояла в очереди семафора, другой
@@ -1700,7 +1700,7 @@ async function runPollCycle(): Promise<void> {
             if (!claimedTask) {
               log.debug(
                 { taskId: task.id, stage: stage.label, expectedStatus: task.status },
-                "[FIX:149] Task candidate changed while waiting for permit, skipping",
+                "Task candidate changed while waiting for permit, skipping",
               );
               continue;
             }
@@ -1752,12 +1752,12 @@ async function runPollCycle(): Promise<void> {
         if (spawned.length > 0) {
           log.debug(
             { projectId, stage: stage.label, taskCount: spawned.length },
-            "[FIX:149] Draining started stage tasks before lane exit",
+            "Draining started stage tasks before lane exit",
           );
           await Promise.allSettled(spawned);
           log.debug(
             { projectId, stage: stage.label, taskCount: spawned.length },
-            "[FIX:149] Started stage tasks drained",
+            "Started stage tasks drained",
           );
         }
       }

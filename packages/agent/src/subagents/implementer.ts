@@ -730,12 +730,12 @@ Execution rules:
         parsedTaskCount,
         pendingTaskCount,
       },
-      "[FIX] Implementer produced no file changes; retrying with corrective execution prompt",
+      "Implementer produced no file changes; retrying with corrective execution prompt",
     );
     logActivity(
       taskId,
       "Agent",
-      `[FIX] Implementer produced no file changes; retrying approved plan execution. Expected files: ${expectedFilesLine}`,
+      `Implementer produced no file changes; retrying approved plan execution. Expected files: ${expectedFilesLine}`,
     );
 
     // В corrective-промпт подставляется ответ предыдущей попытки: модель должна увидеть свои
@@ -872,7 +872,7 @@ Rules for this retry:
   const finalResultNotes: string[] = [];
   if (noOpRetryAttempted) {
     finalResultNotes.push(
-      "[fix] First implementation attempt changed no files; coordinator automatically retried the approved plan execution.",
+      "First implementation attempt changed no files; coordinator automatically retried the approved plan execution.",
     );
   }
   if (checklistAutoSynced) {

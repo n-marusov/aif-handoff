@@ -526,14 +526,14 @@ export function resolveRuntimePromptPolicy(
       const skillName = commandMatch[1].toLowerCase();
       const skill = readApiSkillInstructions(input.projectRoot, skillName);
       const command = (input.workflow.promptInput.fallbackSlashCommand ?? "").trim();
-      // debug с пометкой [FIX] и указанием источника: по этим логам можно
-      // проверить, откуда реально взялись инструкции — из проекта или из
-      // встроенного fallback. Причём это не шум: сообщения различаются.
+      // debug с указанием источника: по этим логам можно проверить, откуда
+      // реально взялись инструкции — из проекта или из встроенного fallback.
+      // Причём это не шум: сообщения различаются.
       input.logger?.debug?.(
         { skillName, source: skill.source, projectRoot: input.projectRoot ?? null },
         skill.source === "project"
-          ? "[FIX] Skill instructions resolved from project and placed into system prompt"
-          : "[FIX] Skill file unavailable; inline fallback placed into system prompt",
+          ? "Skill instructions resolved from project and placed into system prompt"
+          : "Skill file unavailable; inline fallback placed into system prompt",
       );
       // Заголовок-рамка перед телом скилла объясняет модели необычность
       // ситуации: команда запрошена, но исполняется не рантаймом.

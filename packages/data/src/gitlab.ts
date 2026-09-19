@@ -491,7 +491,7 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
       } else {
         log.debug(
           { projectId: input.projectId, iid: input.iid, taskId },
-          "[FIX] GitLab sync skipped unchanged task row to avoid masking stale-claim recovery",
+          "GitLab sync skipped unchanged task row to avoid masking stale-claim recovery",
         );
       }
       // Ранний выход: существующая задача обновлена, создавать новую не нужно.

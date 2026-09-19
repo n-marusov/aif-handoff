@@ -513,9 +513,7 @@ describe("API slash-command prompt policy", () => {
     // Исходный промпт сохранён — содержимое скилла в systemPromptAppend
     expect(resolved.prompt).toBe("Plan this task");
     expect(resolved.systemPromptAppend).toContain("do not create, modify, or delete project files");
-    expect(messages).toContain(
-      "[FIX] Skill file unavailable; inline fallback placed into system prompt",
-    );
+    expect(messages).toContain("Skill file unavailable; inline fallback placed into system prompt");
   });
 });
 

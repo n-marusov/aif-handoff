@@ -179,7 +179,7 @@ function readPlanFromDisk(
           resolve(projectRoot, "PLAN.md"),
         ],
       },
-      "[FIX] Skipping generic plan fallback paths because an explicit task plan path was requested",
+      "Skipping generic plan fallback paths because an explicit task plan path was requested",
     );
   }
 
@@ -195,7 +195,7 @@ function readPlanFromDisk(
     if (minModifiedMs != null && statSync(candidatePath).mtimeMs < minModifiedMs) {
       log.warn(
         { planPath: candidatePath, minModifiedMs },
-        "[FIX] Ignoring stale plan file that was not modified during this planning run",
+        "Ignoring stale plan file that was not modified during this planning run",
       );
       continue;
     }
@@ -251,7 +251,7 @@ function clearPlanFileBeforeFreshPlanning(input: {
       unlinkSync(planFileOnDisk);
       log.warn(
         { taskId: input.taskId, planPath: planFileOnDisk },
-        "[FIX] Deleted pre-existing plan file before fresh planning; planner will generate a new task-specific plan",
+        "Deleted pre-existing plan file before fresh planning; planner will generate a new task-specific plan",
       );
     } catch (error) {
       log.error(
@@ -260,7 +260,7 @@ function clearPlanFileBeforeFreshPlanning(input: {
           planPath: planFileOnDisk,
           error: error instanceof Error ? error.message : String(error),
         },
-        "[FIX] Failed to delete pre-existing plan file before fresh planning",
+        "Failed to delete pre-existing plan file before fresh planning",
       );
       // Неудачное удаление блокирует этап вручную: продолжать с чужим планом на
       // диске опаснее, чем остановиться и дать оператору разобраться.

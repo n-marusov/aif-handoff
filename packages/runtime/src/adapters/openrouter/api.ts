@@ -689,7 +689,7 @@ export async function runOpenRouterApi(
           : "OpenRouter per-choice error in non-streaming response";
       logger?.warn?.(
         { runtimeId: input.runtimeId, choiceError },
-        "[FIX] OpenRouter per-choice error in non-streaming response",
+        "OpenRouter per-choice error in non-streaming response",
       );
       return Promise.reject(
         classifyOpenRouterRuntimeError(
@@ -849,7 +849,7 @@ async function runOpenRouterStreamingAttempt(
             toolCallSlots.clear();
             logger?.warn?.(
               { runtimeId: input.runtimeId, midStreamError: parsed.error },
-              "[FIX] OpenRouter mid-stream error detected in SSE event",
+              "OpenRouter mid-stream error detected in SSE event",
             );
             continue;
           }
@@ -871,7 +871,7 @@ async function runOpenRouterStreamingAttempt(
             toolCallSlots.clear();
             logger?.warn?.(
               { runtimeId: input.runtimeId, sseChoiceError },
-              "[FIX] OpenRouter per-choice error detected in SSE event",
+              "OpenRouter per-choice error detected in SSE event",
             );
             continue;
           }
@@ -1067,7 +1067,7 @@ export async function listOpenRouterApiModels(
             model: model.id,
             supportedEffortLevels: OPENROUTER_GATEWAY_MODEL_EFFORT_LEVELS,
           },
-          "[FIX:openrouter-effort] Expanded unrestricted reasoning effort metadata",
+          "Expanded unrestricted reasoning effort metadata",
         );
       }
       const defaultEffort = normalizeModelEffort(reasoning.default_effort);

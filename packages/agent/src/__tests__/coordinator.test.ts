@@ -13,7 +13,7 @@ import { createTestDb } from "@aif/data/db";
 import { RuntimeExecutionError } from "@aif/runtime";
 import { eq } from "drizzle-orm";
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createGitTestRoot } from "./gitTestUtils.js";
 
@@ -146,6 +146,20 @@ describe("coordinator", () => {
     executeSubagentQueryMock.mockResolvedValue({ resultText: "done" });
     resetCoordinatorRuntimeCountersForTests();
     getStageSemaphore().reset();
+  });
+
+  // Known issue: "[FIX]/[FIX:*] маркеры остаются в production-логах coordinator".
+  // Regression guard (Task 3): production coordinator logs must use neutral, stable
+  // wording without ticket-style markers while keeping structured { taskId, stage } context.
+  it("logs neutral wording with taskId/stage context and no ticket markers", () => {
+    const source = readFileSync(new URL("../coordinator.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/\[FIX/i);
+    expect(source).toContain(
+      '"Approved plan was not implemented; scheduling another implementation attempt"',
+    );
+    expect(source).toContain('"Failed to release coordinator task claim"');
+    // The release-claim failure keeps { taskId, stage, err } structured context.
+    expect(source).toMatch(/err\s*\}\s*,\s*"Failed to release coordinator task claim"/);
   });
 
   it("should remove inactive project-stage semaphore keys", async () => {

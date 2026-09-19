@@ -219,7 +219,7 @@ export async function bootstrapFirstParticipantAdmin(
 
     if (options.interactive) {
       await new Promise<void>((resolve) => setImmediate(resolve));
-      log.debug("[FIX:participant-bootstrap-prompt] Pending terminal output flushed");
+      log.debug("Pending terminal output flushed");
     }
     const input = options.interactive
       ? await dependencies.promptInteractive()
@@ -232,7 +232,7 @@ export async function bootstrapFirstParticipantAdmin(
           passwordConfirmation: null,
         };
     if (options.interactive) {
-      log.info("[FIX:participant-bootstrap-interactive] Interactive credentials collected");
+      log.info("Interactive credentials collected");
     }
     const username = input.username.trim();
     const displayName = input.displayName.trim();

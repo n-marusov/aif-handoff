@@ -648,7 +648,7 @@ function buildWorkflowSpec(options: SubagentQueryOptions): RuntimeWorkflowSpec {
           workflowKind: workflow.workflowKind,
           fallbackSlashCommand,
         },
-        "[FIX] Preserved slash fallback supplied alongside explicit workflow spec",
+        "Preserved slash fallback supplied alongside explicit workflow spec",
       );
       return {
         ...workflow,
@@ -715,12 +715,12 @@ async function fallbackToWorkspaceToolRuntime(input: {
       profileId: input.resolved.profileId,
       transport: input.resolved.transport,
     },
-    "[FIX] Selected runtime lacks workspace execution capability; refusing implicit runtime fallback",
+    "Selected runtime lacks workspace execution capability; refusing implicit runtime fallback",
   );
   logActivity(
     input.options.taskId,
     "Agent",
-    `[FIX] Selected implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace. Configure a workspace-capable GUI runtime profile or enable API tool execution.`,
+    `Selected implementation runtime ${input.resolved.runtimeId}/${input.resolved.transport} cannot edit the workspace. Configure a workspace-capable GUI runtime profile or enable API tool execution.`,
   );
   // Падаем громко и с понятной причиной: пытаться писать код рантаймом,
   // который этого не умеет, хуже, чем остановить стадию до запуска.
@@ -775,7 +775,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     if (canUsePinnedSelection) {
       log.warn(
         { taskId: options.taskId, profileId: pinnedSelection?.profileId ?? null },
-        "[FIX] Discarding stale or unavailable pinned runtime profile",
+        "Discarding stale or unavailable pinned runtime profile",
       );
       clearTaskActiveRuntimeSelection(options.taskId);
     }

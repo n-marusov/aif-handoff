@@ -325,13 +325,13 @@ export function updateProjectOrganization(
       pinned: patch.pinnedAt != null,
       groupName: patch.groupName,
     },
-    "[FIX:147] Updating project organization",
+    "Updating project organization",
   );
   getDb().update(projects).set(patch).where(eq(projects.id, id)).run();
   const updated = findProjectById(id);
   log.debug(
     { projectId: id, updated: updated != null },
-    "[FIX:147] Project organization updated",
+    "Project organization updated",
   );
   return updated;
 }

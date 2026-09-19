@@ -453,7 +453,7 @@ export function importGitHubIssueTask(input: ImportGitHubIssueInput): {
       } else {
         log.debug(
           { projectId: input.projectId, issueNumber: input.issueNumber, taskId },
-          "[FIX] GitHub sync skipped unchanged task row to avoid masking stale-claim recovery",
+          "GitHub sync skipped unchanged task row to avoid masking stale-claim recovery",
         );
       }
       return;

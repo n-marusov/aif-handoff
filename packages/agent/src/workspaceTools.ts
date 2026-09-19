@@ -288,10 +288,7 @@ export class WorkspaceToolExecutor {
   // Единая точка входа: разбор аргументов, диспетчеризация по имени, логирование
   // и приведение любой ошибки к RuntimeValidationError.
   async execute(call: RuntimeToolCall): Promise<string> {
-    log.info(
-      { toolName: call.function.name, callId: call.id },
-      "[FIX] Executing local workspace tool",
-    );
+    log.info({ toolName: call.function.name, callId: call.id }, "Executing local workspace tool");
     try {
       // Аргументы приходят строкой JSON. Пустая строка трактуется как пустой
       // объект: некоторые модели так вызывают инструмент без параметров.
@@ -422,10 +419,7 @@ ${stderr}`
         default:
           throw new RuntimeValidationError(`Unknown workspace tool: ${call.function.name}`);
       }
-      log.info(
-        { toolName: call.function.name, callId: call.id },
-        "[FIX] Local workspace tool succeeded",
-      );
+      log.info({ toolName: call.function.name, callId: call.id }, "Local workspace tool succeeded");
       return result;
     } catch (error) {
       log.error(
@@ -434,7 +428,7 @@ ${stderr}`
           callId: call.id,
           errorName: error instanceof Error ? error.name : typeof error,
         },
-        "[FIX] Local workspace tool failed",
+        "Local workspace tool failed",
       );
       // Наружу всегда уходит RuntimeValidationError с текстом для модели:
       // адаптер покажет это сообщение в ответе, а не сырой стектрейс.
