@@ -253,6 +253,17 @@ export function normalizeModelEffortLevels(value: unknown): string[] | undefined
 
 // Единственный способ получить конфигурацию рантайма: нормализация ключа здесь
 // обязательна, иначе "Claude" и "claude" разойдутся на разные (и один пустой) результат.
+//
+// Список-аналог descriptor.effort используется как совместимость для прямых вызовов
+// без адаптера (тесты, утилитарные ветки). Реальная запись идёт из descriptor адаптера
+// (см. getRuntimeModelEffortConfigFromDescriptor), и таблица ниже остаётся только
+// запасной точкой после ввода descriptor-деклараций во все адаптеры (Task 10).
+export function getRuntimeModelEffortConfigFromDescriptor(
+  effort: RuntimeModelEffortConfig | undefined,
+): RuntimeModelEffortConfig | null {
+  return effort ?? null;
+}
+
 export function getRuntimeModelEffortConfig(runtimeId: string): RuntimeModelEffortConfig | null {
   return MODEL_EFFORT_CONFIGS.get(runtimeId.trim().toLowerCase()) ?? null;
 }
@@ -303,8 +314,11 @@ export function resolveModelEffortOption(
 export function validateRuntimeModelEffort(
   input: RuntimeRunInput,
   models: RuntimeModel[] | null,
+  descriptorEffort?: RuntimeModelEffortConfig,
 ): RuntimeModelEffortValidation {
-  const config = getRuntimeModelEffortConfig(input.runtimeId);
+  const config =
+    getRuntimeModelEffortConfigFromDescriptor(descriptorEffort) ??
+    getRuntimeModelEffortConfig(input.runtimeId);
   const options = input.options ?? {};
   // Все три чтения options зависят от config: если рантайм не оперирует effort,
   // поле в options для него просто не имеет смысла и не диагностируется.

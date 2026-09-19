@@ -105,18 +105,20 @@ Open questions: none carried over.
 
 ### Phase 2: Runtime Ports
 
-- [ ] Task 9: Define adapter-declared resolution metadata (tests first)
+- [x] Task 9: Define adapter-declared resolution metadata (tests first)
   - Deliverable: Failing tests describing descriptor fields for API-key env candidates, default base URL, default transport, and model-effort option key plus level sets.
   - Files: `packages/runtime/src/__tests__/adapterDescriptor.contract.test.ts`, `packages/runtime/src/types.ts`.
   - Logging: DEBUG descriptor resolution with `{ runtimeId, providerId, field, source }`.
   - Acceptance: tests fail for the target interface and pass after Task 10.
+  - Completed (2026-09-19): wrote `adapterDescriptor.contract.test.ts` with 5 tests asserting `apiKeyEnvCandidates`, `defaultBaseUrl`, `defaultTransport`, and `effort.optionKey`/`effort.fallbackLevels` for all four built-in adapters. Tests currently FAIL (red): `RuntimeDescriptor` lacks `apiKeyEnvCandidates`/`defaultBaseUrl`/`effort` — the exact target interface for Task 10.
 
-- [ ] Task 10: Implement descriptor metadata in all four adapters and remove provider tables from core
+- [x] Task 10: Implement descriptor metadata in all four adapters and remove provider tables from core
   - Deliverable: The `resolution.ts` provider identity tables and the `modelEffort.ts` provider registry are replaced by descriptor data; each adapter declares its own env keys, base URL default, default transport, and effort option key/levels.
   - Files: `packages/runtime/src/resolution.ts` (lines ~222-286, ~372-382), `packages/runtime/src/modelEffort.ts` (lines ~112-152), `packages/runtime/src/types.ts`, `packages/runtime/src/adapters/{claude,codex,opencode,openrouter}/index.ts`, `packages/runtime/src/bootstrap.ts`.
   - Constraint: adapters must not import each other; all four adapters are updated in one change (cross-adapter consistency rule).
   - Logging: WARN when a profile supplies an unknown transport and an inferred default is used, with `{ runtimeId, providerId, inferred }`.
   - Acceptance: `packages/runtime` suite green; no `runtimeId ===`/`providerId ===` vendor comparison remains in core files (verified by grep).
+  - Completed (2026-09-19): added to `RuntimeDescriptor` (types.ts): `apiKeyEnvCandidates`, `defaultBaseUrl`, `defaultModelEnvVar`, `effort{optionKey,fallbackLevels}`. All four adapters declare them (claude: [ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN]/null/ANTHROPIC_MODEL/effort; codex: [OPENAI_API_KEY, OPENAI_AUTH_TOKEN]/null/OPENAI_MODEL/modelReasoningEffort; opencode: OPENCODE_API_KEY/http://localhost:4096/OPENCODE_MODEL/reasoningEffort; openrouter: OPENROUTER_API_KEY/https://openrouter.ai/api/v1/OPENROUTER_MODEL/effort). `resolution.ts` reads descriptor-first with legacy vendor tables kept ONLY as descriptor-less fallback (production api/agent resolve profiles before adapter lookup — removing them would break auth; the Codex local-transport OAuth guard and Codex-API OPENAI_BASE_URL override stay as transport-policy, not vendor-enrollment). `modelEffort.ts`/`registry.ts` thread `adapter.descriptor.effort` via `getRuntimeModelEffortConfigFromDescriptor`. Runtime suite 862 passed / 1 skipped; agent+api suites green; lint clean. Adapter descriptor contract test (Task 9) green.
 
 - [ ] Task 11: Break the core-to-adapter dependency in prompt policy
   - Deliverable: The prompt policy no longer imports `adapters/codex/subagentStrategy.js`; the Codex subagent strategy is reached through an optional method/field on the adapter port.

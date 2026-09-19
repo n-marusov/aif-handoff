@@ -136,12 +136,31 @@ export interface ResolveRuntimeProfileInput {
   // сохранённого профиля — системный режим). Существование этой пары — причина, по
   // которой разрешатель не требует профиль обязательно: «без профиля» — штатный
   // случай нового проекта, а не ошибка конфигурации.
+  // Определённый адаптером набор метаданных резолвинга: упорядоченные env-кандидаты
+  // ключа, дефолтный base URL и дефолтный транспорт. Когда адаптер пришёл из реестра,
+  // резолвинг предпочитает его декларацию рукописным таблицам ниже (Task 10).
+  adapterDescriptor?: RuntimeResolutionDescriptorLike;
   fallbackRuntimeId?: string;
   fallbackProviderId?: string;
   allowDisabled?: boolean;
   // logger опционален: разрешение живёт и в процессах без логгера (скрипты, тесты),
   // и отсутствие его не должна менять поведение — только наблюдаемость.
   logger?: RuntimeResolutionLogger;
+}
+
+// Минимальная «разрешающая» проекция RuntimeDescriptor: резолвинг читает только эти
+// поля, поэтому тип узкий и не зависит от полного интерфейса адаптера.
+export interface RuntimeResolutionDescriptorLike {
+  /** Упорядоченные env-имена для пробы API-ключа; первое существующее побеждает. */
+  apiKeyEnvCandidates?: string[];
+  /** Имя env-переменной base URL (placeholder-подсказка UI, а также источник env-переопределения). */
+  defaultBaseUrlEnvVar?: string;
+  /** Конкретный base URL по умолчанию; null = «библиотека решает сама». */
+  defaultBaseUrl?: string | null;
+  /** Имя env-переменной с моделью по умолчанию. */
+  defaultModelEnvVar?: string;
+  /** Транспорт, который выбирается при отсутствии явного выбора в профиле. */
+  defaultTransport?: RuntimeTransport;
 }
 
 // Результат — полностью конкретный профиль: никаких undefined/пустых строк внутри,
@@ -214,16 +233,25 @@ export function isValidEnvVarName(value: string | null | undefined): value is st
 // Ветвящиеся return'ы без early-exit-валидаций — это таблица решений, а не алгоритм:
 // читается линейно и расширяется одной строкой на нового вендора.
 function inferDefaultApiKeyEnvVar(
+  env: RuntimeResolutionEnv,
+  descriptor: RuntimeResolutionDescriptorLike | undefined,
   runtimeId: string,
   providerId: string,
-  env: RuntimeResolutionEnv,
-): string {
+): string | null {
+  // Декларация адаптера — главный источник: упорядоченные env-кандидаты.
+  const candidates = descriptor?.apiKeyEnvCandidates ?? [];
+  if (candidates.length > 0) {
+    for (const candidate of candidates) {
+      if (normalizeString(env[candidate])) return candidate;
+    }
+    return candidates[0];
+  }
+
+  // Бес-дескрипторный fallback: прямые вызовы без адаптера (старые тесты, системный
+  // fallback api/agent) не должны терять авторизацию. Это таблица вендора как
+  // последний опорный source; дескриптор, когда он передан, всегда приоритетнее.
   const runtime = runtimeId.toLowerCase();
   const provider = providerId.toLowerCase();
-
-  // Сравнение идёт по обоим полям (runtime || provider), потому что профиль может
-  // называть реализацию иначе, чем вендор: claude-адаптер над anthropic-аккаунтом
-  // и «просто anthropic» без указания runtime — обе ветки должны ловиться.
   if (runtime === "claude" || provider === "anthropic") {
     if (normalizeString(env.ANTHROPIC_API_KEY)) return "ANTHROPIC_API_KEY";
     if (normalizeString(env.ANTHROPIC_AUTH_TOKEN)) return "ANTHROPIC_AUTH_TOKEN";
@@ -232,9 +260,6 @@ function inferDefaultApiKeyEnvVar(
   if (runtime === "openrouter" || provider === "openrouter") {
     return "OPENROUTER_API_KEY";
   }
-  // Финальный return OPENAI_API_KEY — не «для OpenAI», а дефолт по умолчанию для
-  // всего OpenAI-совместимого: любой self-hosted шлюз говорит на этом диалекте,
-  // и угадать для него другое имя было бы хуже, чем отдать нейтральное.
   return "OPENAI_API_KEY";
 }
 
@@ -242,36 +267,33 @@ function inferDefaultApiKeyEnvVar(
 // разных транспортов одна и та же пара (runtime, provider) даёт разные baseUrl-политики
 // (см. ветку codex), поэтому transport здесь — полноценный аргумент решения.
 function inferDefaultBaseUrl(
+  env: RuntimeResolutionEnv,
+  descriptor: RuntimeResolutionDescriptorLike | undefined,
   runtimeId: string,
   providerId: string,
-  env: RuntimeResolutionEnv,
   transport: RuntimeTransport,
 ): string | null {
+  // Декларация адаптера: конкретный URL по умолчанию (OpenRouter SaaS) либо null
+  // «не подменять» (Anthropic SDK, Codex OAuth). env-переопределение поверх дефолта.
+  if (descriptor && "defaultBaseUrl" in descriptor) {
+    const envVar = descriptor.defaultBaseUrlEnvVar;
+    const envValue = envVar ? normalizeString(env[envVar]) : null;
+    if (envValue) return envValue;
+    return descriptor.defaultBaseUrl ?? null;
+  }
+
+  // Бес-дескрипторный fallback: прямая витаблица вендора для вызовов без адаптера.
   const runtime = runtimeId.toLowerCase();
   const provider = providerId.toLowerCase();
-
   if (runtime === "claude" || provider === "anthropic") {
-    // Никакого hardcoded-дефолта: Anthropic SDK знает свой адрес сам, и подменять
-    // его строкой здесь — значит создать вторую точку правды, которая разойдётся
-    // с первой при первой же смене домена вендора.
     return normalizeString(env.ANTHROPIC_BASE_URL);
   }
-
   if (runtime === "openrouter" || provider === "openrouter") {
-    // Единственный вендор с захардкоженным fallback-URL: openrouter.ai публичный
-    // SaaS, его адрес — часть контракта, а не секрет настройки. Все остальные
-    // baseUrl из ENV: нет значения — нет и дефолта (пусть провайдерская библиотека
-    // сама решает, это её территория ответственности).
     return normalizeString(env.OPENROUTER_BASE_URL) ?? "https://openrouter.ai/api/v1";
   }
-
-  // Локальные транспорты Codex (sdk/cli/app-server) не должны молча наследовать
-  // OPENAI_BASE_URL: сессия `codex login` на OAuth обязана идти в собственный
-  // бэкенд Codex, если profile baseUrl или CODEX_BASE_URL явно не согласны.
   if (runtime === "codex" && transport !== RuntimeTransport.API) {
     return normalizeString(env.CODEX_BASE_URL);
   }
-
   return normalizeString(env.OPENAI_BASE_URL);
 }
 
@@ -279,7 +301,13 @@ function inferDefaultBaseUrl(
 // Codex — CLI (нативный режим с OAuth-входами), OpenRouter — только API (нет
 // локального бинарника), всё остальное — SDK. Здесь решается только дефолт, когда
 // профиль молчит; явный выбор профиля обрабатывается ниже в resolveConfiguredTransport.
-function inferDefaultTransport(runtimeId: string): RuntimeTransport {
+function inferDefaultTransport(
+  descriptor: RuntimeResolutionDescriptorLike | undefined,
+  runtimeId: string,
+): RuntimeTransport {
+  // Декларация адаптера — «главный транспорт по жизни». Без дескриптора — прежняя
+  // витаблица как fallback для прямых вызовов без адаптера.
+  if (descriptor?.defaultTransport) return descriptor.defaultTransport;
   if (runtimeId.toLowerCase() === "codex") return RuntimeTransport.CLI;
   if (runtimeId.toLowerCase() === "openrouter") return RuntimeTransport.API;
   return RuntimeTransport.SDK;
@@ -295,9 +323,10 @@ function resolveConfiguredTransport(input: {
   profileId: string | null;
   runtimeId: string;
   rawTransport: string | null;
+  adapterDescriptor?: RuntimeResolutionDescriptorLike;
   logger?: RuntimeResolutionLogger;
 }): RuntimeTransport {
-  const fallback = inferDefaultTransport(input.runtimeId);
+  const fallback = inferDefaultTransport(input.adapterDescriptor, input.runtimeId);
   if (!input.rawTransport) {
     return fallback;
   }
@@ -362,25 +391,29 @@ function resolveConfiguredTransport(input: {
 // «какая модель всё-таки» осталось за цепочкой приоритетов в resolveRuntimeProfile.
 // Возвращает null (не строку-заглушку): потребитель обязан отличать «не задано» от «задано».
 function inferDefaultModel(
+  env: RuntimeResolutionEnv,
+  descriptor: RuntimeResolutionDescriptorLike | undefined,
   runtimeId: string,
   providerId: string,
-  env: RuntimeResolutionEnv,
 ): string | null {
+  // Имя env-переменной модели из декларации адаптера; без дескриптора — прежняя
+  // витаблица как fallback для прямых вызовов без адаптера.
+  const envVar = descriptor?.defaultModelEnvVar;
+  if (envVar) {
+    const value = normalizeString(env[envVar]);
+    if (value) return value;
+  }
   const runtime = runtimeId.toLowerCase();
   const provider = providerId.toLowerCase();
-
   if (runtime === "claude" || provider === "anthropic") {
     return normalizeString(env.ANTHROPIC_MODEL);
   }
-
   if (runtime === "codex" || provider === "openai") {
     return normalizeString(env.OPENAI_MODEL);
   }
-
   if (runtime === "openrouter" || provider === "openrouter") {
     return normalizeString(env.OPENROUTER_MODEL);
   }
-
   return null;
 }
 
@@ -472,18 +505,25 @@ export function resolveRuntimeProfile(input: ResolveRuntimeProfileInput): Resolv
   // С первого же поля включается паттерн «валидация с предупреждением»: transport
   // никогда не остаётся undefined — худший исход это inferred-default. Контракт
   // ResolvedRuntimeProfile обязывает: у потребителя всегда есть конкретный транспорт.
+  const adapterDescriptor = input.adapterDescriptor;
   const transport = resolveConfiguredTransport({
     source: input.source,
     profileId: normalizeString(profile?.id),
     runtimeId,
     rawTransport,
+    adapterDescriptor,
     logger: input.logger,
   });
   // Развязка имени переменной и значения секрета: здесь работаем только с ИМЕНАМИ,
   // сам ключ читается одной строкой ниже и живёт только в локальной переменной apiKey.
   // Разделение нужно логированию и UI: они могут показывать apiKeyEnvVar, не видя секрета.
   const explicitApiKeyEnvVar = normalizeString(profile?.apiKeyEnvVar);
-  const defaultApiKeyEnvVar = inferDefaultApiKeyEnvVar(runtimeId, providerId, env);
+  const defaultApiKeyEnvVar = inferDefaultApiKeyEnvVar(
+    env,
+    adapterDescriptor,
+    runtimeId,
+    providerId,
+  );
   // Локальные транспорты Codex по умолчанию используют `codex login` / OAuth. Они не
   // должны молча подхватывать внешнюю OPENAI_API_KEY — только явный profile
   // apiKeyEnvVar переводит локальный Codex-запуск на авторизацию по API-ключу.
@@ -553,10 +593,20 @@ export function resolveRuntimeProfile(input: ResolveRuntimeProfileInput): Resolv
     }
   }
   // baseUrl: профиль -> env-инференс -> null. В отличие от ключа, здесь нет «второго
-  // шанса» и warn'а: пустой baseUrl для многих транспортов — норма (SDK сам знает
-  // адрес вендора), и поднимать шум на норме значило бы обесценить будущие реальные warn'и.
-  const baseUrl =
-    normalizeString(profile?.baseUrl) ?? inferDefaultBaseUrl(runtimeId, providerId, env, transport);
+  // шанса»: пустой baseUrl для многих транспортов — норма (SDK сам знает адрес вендора).
+  // Транспорт-специфичное исключение для Codex API: OpenAI-совместимый шлюз читает
+  // OPENAI_BASE_URL, хотя локальные транспорты Codex используют CODEX_BASE_URL.
+  let baseUrl =
+    normalizeString(profile?.baseUrl) ??
+    inferDefaultBaseUrl(env, adapterDescriptor, runtimeId, providerId, transport);
+  if (
+    !baseUrl &&
+    runtimeId.toLowerCase() === "codex" &&
+    transport === RuntimeTransport.API &&
+    !isCodexLocalTransport
+  ) {
+    baseUrl = normalizeString(env.OPENAI_BASE_URL);
+  }
   // Модель — самая длинная цепочка приоритетов в файле, и её порядок — часть продукта:
   // явный override вызова > настройка профиля > «лёгкая» модель адаптера (lightModel,
   // для черновых прогонов) > env-инференс. suppressModelFallback — аварийный выключатель
@@ -568,7 +618,7 @@ export function resolveRuntimeProfile(input: ResolveRuntimeProfileInput): Resolv
       : (normalizeString(input.modelOverride) ??
         normalizeString(profile?.defaultModel) ??
         normalizeString(input.lightModelFallback) ??
-        inferDefaultModel(runtimeId, providerId, env));
+        inferDefaultModel(env, adapterDescriptor, runtimeId, providerId));
   // headers: пустой объект вместо undefined — та же канонизация результата, что и
   // в ResolvedRuntimeProfile: потребитель делает Object.entries(headers) без guards.
   const headers = profile?.headers ?? {};

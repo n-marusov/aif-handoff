@@ -265,12 +265,30 @@ export interface RuntimeDescriptor {
   // Здесь хранится ИМЯ переменной окружения, а не секрет: ключ никогда не попадает
   // в метаданные и БД, только ссылка на ENV. UI показывает это имя как placeholder.
   defaultApiKeyEnvVar?: string;
+  /** Упорядоченный список env-имён, которые резолвинг пробует для поиска API-ключа. Первое существующее значение побеждает. */
+  // Это машинно используемая версия defaultApiKeyEnvVar: резолвинг идёт по списку
+  // слева направо (явный ключ важнее auth-токена и т.п.), а не по одному имени.
+  apiKeyEnvCandidates?: string[];
   /** Имя env-переменной base URL по умолчанию (например "OPENAI_BASE_URL"). Для placeholder-подсказок UI. */
   defaultBaseUrlEnvVar?: string;
+  /** Конкретный базовый URL по умолчанию, либо null — «библиотека провайдера решает сама» (например Anthropic SDK). */
+  // В отличие от defaultBaseUrlEnvVar (имя env для проброса), это готовое значение:
+  // OpenRouter публикует SaaS-адрес как часть контракта, и он зашит здесь намеренно.
+  defaultBaseUrl?: string | null;
   /** Placeholder имени модели для UI (например "claude-sonnet-4-5", "gpt-5.4"). */
   // Обе «плейсхолдер»-пары нужны, чтобы web-форма не хардкодила вендорские строки:
   // меняешь адаптер — подсказки в форме меняются сами, потому что источник один.
   defaultModelPlaceholder?: string;
+  /** Имя env-переменной с моделью по умолчанию (например "ANTHROPIC_MODEL", "OPENAI_MODEL"). */
+  defaultModelEnvVar?: string;
+  /** Спецификация reasoning-effort: ключ в options и fallback-набор уровней. */
+  // Единый источник правды вместо таблицы MODEL_EFFORT_CONFIGS по runtimeId.
+  // optionKey — имя поля, которое уйдёт провайдеру; fallbackLevels — список, которому
+  // доверяем, когда метаданные модели (discovery) не дают ничего лучшего.
+  effort?: {
+    optionKey: "effort" | "modelReasoningEffort" | "reasoningEffort";
+    fallbackLevels: readonly string[];
+  };
   /** Транспорты runtime, которые поддерживает адаптер. UI фильтрует по ним селектор транспортов. */
   // Белый список транспортов для UI: если адаптер не поддерживает SDK, пользователь
   // просто не увидит эту опцию вместо неизбежной ошибки при запуске.

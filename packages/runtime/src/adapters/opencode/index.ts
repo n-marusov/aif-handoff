@@ -41,6 +41,7 @@ import {
 } from "./api.js";
 import { classifyOpenCodeRuntimeError } from "./errors.js";
 import { RuntimeExecutionError } from "../../errors.js";
+import { OPENCODE_MODEL_EFFORT_LEVELS } from "../../modelEffort.js";
 
 // Адаптер принимает ровно тот же структурный интерфейс логгера, что и api.ts:
 // отдельный тип нужен лишь как точка расширения, а не как прослойка-адаптер.
@@ -227,13 +228,21 @@ export function createOpenCodeRuntimeAdapter(
       // lightModel не заявлен: дешёвой модели для автопроверок у этого рантайма нет,
       // и подставлять произвольную было бы нечестно - reviewGate получит явный null.
       lightModel: null,
+      defaultApiKeyEnvVar: "OPENCODE_API_KEY",
+      apiKeyEnvCandidates: ["OPENCODE_API_KEY"],
       // UI подсказывает эти значения в форме профиля, чтобы не запоминать их вручную.
       defaultBaseUrlEnvVar: "OPENCODE_BASE_URL",
+      defaultBaseUrl: "http://localhost:4096",
+      defaultModelEnvVar: "OPENCODE_MODEL",
       defaultModelPlaceholder: "anthropic/claude-sonnet-4",
       // Список из одного элемента - не ограничение, а фиксация единственного
       // реализованного транспорта: HTTP API к opencode serve.
       supportedTransports: [RuntimeTransport.API],
       defaultTransport: RuntimeTransport.API,
+      effort: {
+        optionKey: "reasoningEffort",
+        fallbackLevels: OPENCODE_MODEL_EFFORT_LEVELS,
+      },
       capabilities: API_CAPABILITIES,
     },
 

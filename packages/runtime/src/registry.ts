@@ -39,6 +39,7 @@ import {
 import { buildLanguageDirective } from "./languagePolicy.js";
 import {
   getRuntimeModelEffortConfig,
+  getRuntimeModelEffortConfigFromDescriptor,
   hasConfiguredModelEffort,
   normalizeConfiguredModelEffort,
   stripRuntimeModelEffortMetadata,
@@ -513,7 +514,9 @@ export class RuntimeRegistry {
       ...(input.options ?? {}),
       ...(input.projectRoot ? { projectRoot: input.projectRoot } : {}),
     };
-    const effortConfig = getRuntimeModelEffortConfig(input.runtimeId);
+    const effortConfig =
+      getRuntimeModelEffortConfigFromDescriptor(adapter.descriptor.effort) ??
+      getRuntimeModelEffortConfig(input.runtimeId);
     if (effortConfig) {
       // Ключ effort вычитается из options: discovery-профиль — внутренняя копия
       // входных настроек, и effort-ключ в нём только сбивал бы с толку listModels.
@@ -562,7 +565,9 @@ export class RuntimeRegistry {
       return input;
     }
 
-    const config = getRuntimeModelEffortConfig(input.runtimeId);
+    const config =
+      getRuntimeModelEffortConfigFromDescriptor(adapter.descriptor.effort) ??
+      getRuntimeModelEffortConfig(input.runtimeId);
     // Имя опции effort различается у вендоров (codex: model_reasoning_effort, ...),
     // поэтому оно не хардкод, а lookup по runtimeId — та же таблица, что и у
     // strip/validate-функций в modelEffort.ts. null config = рантайм вообще без effort.
@@ -601,7 +606,7 @@ export class RuntimeRegistry {
       }
     }
 
-    const validation = validateRuntimeModelEffort(input, models);
+    const validation = validateRuntimeModelEffort(input, models, adapter.descriptor.effort);
     if (validation.reasonCode) {
       // Невалидный effort не бросается исключением: конфигурация пришла из UI и
       // могла устареть (модель перестала поддерживать уровень). Молча игнорируем

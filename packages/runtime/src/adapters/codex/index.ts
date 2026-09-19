@@ -60,6 +60,7 @@ import {
   type RuntimeEvent,
 } from "../../types.js";
 import { RuntimeCapabilityError, RuntimeExecutionError } from "../../errors.js";
+import { CODEX_MODEL_EFFORT_LEVELS } from "../../modelEffort.js";
 import { runCodexCli, probeCodexCli, type CodexCliLogger } from "./cli.js";
 import {
   listCodexAgentApiModels,
@@ -715,7 +716,14 @@ export function createCodexRuntimeAdapter(
       // и честнее вернуть null, чем выдать произвольную.
       lightModel: null,
       defaultApiKeyEnvVar: "OPENAI_API_KEY",
-      defaultBaseUrlEnvVar: "OPENAI_BASE_URL",
+      apiKeyEnvCandidates: ["OPENAI_API_KEY", "OPENAI_AUTH_TOKEN"],
+      defaultBaseUrlEnvVar: "CODEX_BASE_URL",
+      // Codex sdk/cli стартуют с OAuth-логина: подмена base URL по умолчанию
+      // уводила бы сессию в чужой бэкенд, поэтому null (не подменять).
+      // API-транспорт Codex читает OPENAI_BASE_URL — ветка зашита в резолвинге
+      // как транспорт-специфичное правило, а не vendor-таблица.
+      defaultBaseUrl: null,
+      defaultModelEnvVar: "OPENAI_MODEL",
       defaultModelPlaceholder: "gpt-5.4",
       // Порядок транспортов в списке фиксирован: он влияет на порядок в UI
       // настроек профиля, и app-server с api не должны случайно поменяться
@@ -727,6 +735,10 @@ export function createCodexRuntimeAdapter(
         RuntimeTransport.API,
       ],
       defaultTransport: RuntimeTransport.CLI,
+      effort: {
+        optionKey: "modelReasoningEffort",
+        fallbackLevels: CODEX_MODEL_EFFORT_LEVELS,
+      },
       capabilities: CLI_CAPABILITIES,
     },
 

@@ -37,7 +37,7 @@ import {
   type RuntimeSessionListInput,
 } from "../../types.js";
 import { RuntimeCapabilityError, RuntimeExecutionError } from "../../errors.js";
-import { normalizeModelEffortLevels } from "../../modelEffort.js";
+import { CLAUDE_MODEL_EFFORT_LEVELS, normalizeModelEffortLevels } from "../../modelEffort.js";
 import { diagnoseClaudeError } from "./diagnostics.js";
 import { getClaudeMcpStatus, installClaudeMcpServer, uninstallClaudeMcpServer } from "./mcp.js";
 import { initClaudeProject } from "./project.js";
@@ -720,10 +720,19 @@ export function createClaudeRuntimeAdapter(
       // дешёвой, чтобы проверочный конвейер не съедал основной бюджет задачи.
       lightModel: "haiku",
       defaultApiKeyEnvVar: "ANTHROPIC_API_KEY",
+      // Явный ключ важнее auth-токена: порядок в списке — иерархия пробы резолвинга.
+      apiKeyEnvCandidates: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
       defaultBaseUrlEnvVar: "ANTHROPIC_BASE_URL",
+      // Anthropic SDK знает свой адрес сам: null означает «не подменять».
+      defaultBaseUrl: null,
+      defaultModelEnvVar: "ANTHROPIC_MODEL",
       defaultModelPlaceholder: "opus",
       defaultTransport: RuntimeTransport.SDK,
       supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
+      effort: {
+        optionKey: "effort",
+        fallbackLevels: CLAUDE_MODEL_EFFORT_LEVELS,
+      },
       // Дескриптор описывает рекламируемый транспорт по умолчанию (SDK): реальную
       // картину для CLI/API берут через getEffectiveCapabilities.
       capabilities: withSessionForkRolloutGate(SDK_CAPABILITIES),

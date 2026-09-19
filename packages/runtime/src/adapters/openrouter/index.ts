@@ -34,6 +34,7 @@ import {
 } from "./api.js";
 import { classifyOpenRouterRuntimeError } from "./errors.js";
 import { RuntimeExecutionError } from "../../errors.js";
+import { OPENROUTER_MODEL_EFFORT_LEVELS } from "../../modelEffort.js";
 
 // Логгер адаптера расширяет логгер API опциональным error: сам транспорт ошибки не логирует,
 // а верхнему уровню полезно видеть их через тот же канал.
@@ -198,10 +199,18 @@ export function createOpenRouterRuntimeAdapter(
       displayName: options.displayName ?? "OpenRouter",
       lightModel: null,
       defaultApiKeyEnvVar: "OPENROUTER_API_KEY",
+      apiKeyEnvCandidates: ["OPENROUTER_API_KEY"],
       defaultBaseUrlEnvVar: "OPENROUTER_BASE_URL",
+      // Публичный SaaS: адрес — часть контракта, а не секрет настройки.
+      defaultBaseUrl: "https://openrouter.ai/api/v1",
+      defaultModelEnvVar: "OPENROUTER_MODEL",
       defaultModelPlaceholder: "anthropic/claude-sonnet-4",
       supportedTransports: [RuntimeTransport.API],
       defaultTransport: RuntimeTransport.API,
+      effort: {
+        optionKey: "effort",
+        fallbackLevels: OPENROUTER_MODEL_EFFORT_LEVELS,
+      },
       capabilities: API_CAPABILITIES,
     },
 

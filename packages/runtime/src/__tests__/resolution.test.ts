@@ -4,6 +4,15 @@ import {
   RuntimeValidationError,
   validateResolvedRuntimeProfile,
 } from "../index.js";
+import { createClaudeRuntimeAdapter } from "../adapters/claude/index.js";
+import { createCodexRuntimeAdapter } from "../adapters/codex/index.js";
+import { createOpenRouterRuntimeAdapter } from "../adapters/openrouter/index.js";
+
+// Дескрипторы адаптеров — единственный источник vendor-метаданных (Task 10):
+// тесты резолвинга передают их, как это делает реестр в рантайме.
+const claudeDescriptor = createClaudeRuntimeAdapter().descriptor;
+const codexDescriptor = createCodexRuntimeAdapter().descriptor;
+const openrouterDescriptor = createOpenRouterRuntimeAdapter().descriptor;
 
 describe("resolveRuntimeProfile", () => {
   it("merges profile settings with env and runtime overrides", () => {
@@ -21,6 +30,7 @@ describe("resolveRuntimeProfile", () => {
         options: { approvalMode: "auto" },
         enabled: true,
       },
+      adapterDescriptor: codexDescriptor,
       env: {
         OPENAI_API_KEY: "sk-test",
         OPENAI_BASE_URL: "https://api.openai.com/v1",
@@ -47,6 +57,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "claude",
       fallbackProviderId: "anthropic",
+      adapterDescriptor: claudeDescriptor,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
@@ -65,6 +76,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "codex",
       fallbackProviderId: "openai",
+      adapterDescriptor: codexDescriptor,
       env: {},
     });
 
@@ -83,6 +95,7 @@ describe("resolveRuntimeProfile", () => {
         transport: "sdk",
         defaultModel: "gpt-5.5",
       },
+      adapterDescriptor: codexDescriptor,
       env: {
         OPENAI_API_KEY: "sk-test",
         OPENAI_BASE_URL: "http://host.docker.internal:8317/v1",
@@ -104,6 +117,7 @@ describe("resolveRuntimeProfile", () => {
         providerId: "openai",
         transport: "cli",
       },
+      adapterDescriptor: codexDescriptor,
       env: {
         OPENAI_API_KEY: "sk-000",
         OPENAI_BASE_URL: "http://host.docker.internal:8317/v1",
@@ -125,6 +139,7 @@ describe("resolveRuntimeProfile", () => {
         providerId: "openai",
         transport: "api",
       },
+      adapterDescriptor: codexDescriptor,
       env: {
         OPENAI_API_KEY: "sk-real",
         OPENAI_BASE_URL: "https://api.openai.com/v1",
@@ -146,6 +161,7 @@ describe("resolveRuntimeProfile", () => {
         providerId: "openai",
         transport: "sdk",
       },
+      adapterDescriptor: codexDescriptor,
       env: {
         CODEX_BASE_URL: "https://codex.internal/api",
         OPENAI_BASE_URL: "http://should-not-be-used/v1",
@@ -198,6 +214,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "claude",
       fallbackProviderId: "anthropic",
+      adapterDescriptor: claudeDescriptor,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
         ANTHROPIC_MODEL: "glm-4.5",
@@ -213,6 +230,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "claude",
       fallbackProviderId: "anthropic",
+      adapterDescriptor: claudeDescriptor,
       env: {
         ANTHROPIC_AUTH_TOKEN: "token-test",
       },
@@ -232,6 +250,7 @@ describe("resolveRuntimeProfile", () => {
         providerId: "anthropic",
         apiKeyEnvVar: "invalid env var",
       },
+      adapterDescriptor: claudeDescriptor,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
@@ -253,6 +272,7 @@ describe("resolveRuntimeProfile", () => {
         providerId: "anthropic",
         apiKeyEnvVar: "legacy.custom.key",
       },
+      adapterDescriptor: claudeDescriptor,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
@@ -354,6 +374,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "openrouter",
       fallbackProviderId: "openrouter",
+      adapterDescriptor: openrouterDescriptor,
       env: {
         OPENROUTER_API_KEY: "sk-or-test",
       },
@@ -373,6 +394,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "openrouter",
       fallbackProviderId: "openrouter",
+      adapterDescriptor: openrouterDescriptor,
       env: {
         OPENROUTER_API_KEY: "sk-or-test",
         OPENROUTER_MODEL: "openai/gpt-4o",
@@ -388,6 +410,7 @@ describe("resolveRuntimeProfile", () => {
       profile: null,
       fallbackRuntimeId: "openrouter",
       fallbackProviderId: "openrouter",
+      adapterDescriptor: openrouterDescriptor,
       env: {
         OPENROUTER_API_KEY: "sk-or-test",
         OPENROUTER_BASE_URL: "https://my-proxy.example.com/v1",
