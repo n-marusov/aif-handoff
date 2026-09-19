@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { projects, resetEnvCache, type RuntimeLimitSnapshot } from "@aif/shared";
+import { toRuntimeProfileResponse, toTaskResponse, toTaskSummary } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 import {
   createTask,
@@ -21,10 +22,7 @@ import {
   findRuntimeProfileById,
   findTaskById,
   persistRuntimeProfileLimitSnapshot,
-  toRuntimeProfileResponse,
   updateTaskStatus,
-  toTaskResponse,
-  toTaskSummary,
   evaluateRuntimeLimitGate,
 } from "../index.js";
 

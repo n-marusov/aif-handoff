@@ -20,13 +20,13 @@ const {
   createChatMessage,
   listChatMessages,
   updateChatSessionTimestamp,
-  toChatSessionResponse,
-  toChatMessageResponse,
   upsertCodexSessions,
   upsertCodexSessionFiles,
   listCodexSessionsByProjectRoot,
   findCodexSessionFilePathBySessionId,
 } = await import("../index.js");
+
+const { toChatSessionResponse, toChatMessageResponse } = await import("@aif/shared");
 
 function seedProject(id = "proj-1") {
   testDb.current

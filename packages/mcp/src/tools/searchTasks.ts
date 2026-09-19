@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { logger } from "@aif/shared";
-import { searchTasksPaginated, toTaskSummary } from "@aif/data";
+import { logger, toTaskSummary } from "@aif/shared";
+import { searchTasksPaginated } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError } from "../middleware/errorHandler.js";
 

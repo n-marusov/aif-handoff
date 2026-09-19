@@ -15,10 +15,11 @@ const {
   createTask,
   updateTask,
   findCoordinatorTaskCandidate,
-  toTaskResponse,
   listDueBlockedExternalTasks,
   listStaleInProgressTasks,
 } = await import("../index.js");
+
+const { toTaskResponse } = await import("@aif/shared");
 
 function insertTestProject(db: ReturnType<typeof createTestDb>) {
   db.insert(projects).values({ id: "test-project", name: "Test", rootPath: "/tmp/test" }).run();

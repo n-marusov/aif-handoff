@@ -31,8 +31,6 @@ const {
   findTaskById,
   listTasks,
   listTaskListItems,
-  toTaskResponse,
-  toCommentResponse,
   listTaskComments,
   createTaskComment,
   updateTaskComment,
@@ -70,7 +68,6 @@ const {
   touchLastSyncedAt,
   listTasksPaginated,
   searchTasksPaginated,
-  toTaskSummary,
   listDueScheduledTasks,
   clearScheduledAt,
   updateScheduledAt,
@@ -111,6 +108,8 @@ const {
   listCodexSessionFileStatesByPaths,
   deleteCodexSessionsByFilePaths,
 } = await import("../index.js");
+
+const { toTaskResponse, toCommentResponse, toTaskSummary } = await import("@aif/shared");
 
 function seedProject(id = "proj-1") {
   testDb.current
@@ -233,15 +232,18 @@ describe("data layer", () => {
         projectId: "proj-1",
         title: "A",
         description: "Board description",
-        hasPlan: true,
         tokenInput: 10,
         tokenOutput: 20,
         tokenTotal: 30,
         costUsd: 0.12,
         lastHeartbeatAt: "2026-08-16T02:00:00.000Z",
-        tags: ["roadmap"],
         roadmapAlias: "v1",
       });
+      // Строка списка (не view-модель): hasPlan приходит числовым флагом из SQL,
+      // tags — JSON-строкой колонки. Преобразование в булево/массив выполняет
+      // презентационный маппер toTaskListItem.
+      expect(result[0]?.hasPlan).toBeTruthy();
+      expect(result[0]?.tags).toBe("[\"roadmap\"]");
       expect(result[0]).not.toHaveProperty("plan");
       expect(result[0]).not.toHaveProperty("implementationLog");
       expect(result[0]).not.toHaveProperty("reviewComments");
@@ -257,7 +259,7 @@ describe("data layer", () => {
 
       const result = listTaskListItems("proj-1");
       expect(result[0]?.lastActivityAt).toBeTruthy();
-      expect(result[0]?.currentTool?.name).toBe("Read");
+      expect(result[0]?.currentToolJson).toContain("Read");
     });
 
     it("sorts by kanban status order before position", () => {

@@ -45,6 +45,7 @@ import {
   getEnv,
   logger,
   normalizeRuntimeLimitSnapshot,
+  toRuntimeProfileResponse,
   type RuntimeLimitSnapshot,
 } from "@aif/shared";
 // Доступ к БД только через @aif/data: прямые запросы из роутера запрещены
@@ -55,11 +56,10 @@ import {
   findRuntimeProfileById,
   findProjectById,
   findTaskById,
-  getRuntimeProfileResponseById,
-  listRuntimeProfileResponses,
+  getRuntimeProfileWithUsageById,
+  listRuntimeProfilesWithUsage,
   getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
-  toRuntimeProfileResponse,
   updateRuntimeProfile,
 } from "@aif/data";
 // Схемы запросов вынесены в ../schemas.js, чтобы валидация совпадала с другими
@@ -676,24 +676,27 @@ runtimeProfilesRouter.get("/", queryValidator(runtimeProfileListQuerySchema), as
     return c.json({ error: "projectId is required when scope=project" }, 400);
   }
 
-  let profiles;
+  let profileRows;
   if (scope === "global") {
-    profiles = listRuntimeProfileResponses({ enabledOnly }).filter(
-      (profile) => profile.projectId == null,
+    profileRows = listRuntimeProfilesWithUsage({ enabledOnly }).filter(
+      (entry) => entry.row.projectId == null,
     );
     // includeGlobal=false плюс фильтр по projectId дают срез одного проекта, хотя
     // репозиторий умеет отдавать выборку и с наследованием.
   } else if (scope === "project") {
-    profiles = listRuntimeProfileResponses({
+    profileRows = listRuntimeProfilesWithUsage({
       projectId,
       includeGlobal: false,
       enabledOnly,
-    }).filter((profile) => profile.projectId === projectId);
+    }).filter((entry) => entry.row.projectId === projectId);
   } else {
-    profiles = listRuntimeProfileResponses({ projectId, includeGlobal, enabledOnly }).sort(
-      compareVisibleRuntimeProfiles,
+    profileRows = listRuntimeProfilesWithUsage({ projectId, includeGlobal, enabledOnly }).sort(
+      (a, b) => compareVisibleRuntimeProfiles(a.row, b.row),
     );
   }
+  const profiles = profileRows.map((entry) =>
+    toRuntimeProfileResponse(entry.row, entry.usageState),
+  );
   // Обогащение идёт после выборки и сортировки: оно не меняет порядок, а только
   // дополняет снимки лимитов.
   const refreshedProfiles = await refreshProfilesWithIndexedCodexLimits(
@@ -706,8 +709,9 @@ runtimeProfilesRouter.get("/", queryValidator(runtimeProfileListQuerySchema), as
 // GET /runtime-profiles/:id
 runtimeProfilesRouter.get("/:id", async (c) => {
   const { id } = c.req.param();
-  const profile = getRuntimeProfileResponseById(id);
-  if (!profile) return c.json({ error: "Runtime profile not found" }, 404);
+  const entry = getRuntimeProfileWithUsageById(id);
+  if (!entry) return c.json({ error: "Runtime profile not found" }, 404);
+  const profile = toRuntimeProfileResponse(entry.row, entry.usageState);
   // Корень проекта берётся из самого профиля: он определяет, какой индексный
   // снимок лимитов подходит для строки.
   const refreshedProfile = await refreshProfileWithIndexedCodexLimit(

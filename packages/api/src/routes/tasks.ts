@@ -52,6 +52,7 @@ import {
   toTaskResponse,
   toTaskBroadcastPayload,
   toCommentResponse,
+  toTaskListItem,
   getTaskPlanFileStatus,
   updateTaskPlan,
   syncTaskPlanFromFile,
@@ -356,7 +357,8 @@ tasksRouter.get("/", (c) => {
     return c.json({ error: "Invalid projectId format" }, 400);
   }
 
-  const taskList = listTaskListItems(projectId, ownershipFilters.filters, actionContext);
+  const taskListRows = listTaskListItems(projectId, ownershipFilters.filters);
+  const taskList = taskListRows.map((row) => toTaskListItem(row, row.assignees, actionContext));
   log.debug({ count: taskList.length, projectId, responseType: "TaskListItem" }, "Listed tasks");
   return c.json(taskList);
 });

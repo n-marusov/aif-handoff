@@ -20,7 +20,8 @@ import {
 import { getDb } from "@aif/shared/server";
 import { findTaskById, type TaskRow } from "./tasks.js";
 import { findProjectById, type ProjectRow } from "./projects.js";
-import { findRuntimeProfileById, toRuntimeProfileResponse } from "./runtimeProfiles.js";
+import { findRuntimeProfileById } from "./runtimeProfiles.js";
+import { toRuntimeProfileResponse } from "@aif/shared";
 import { findLatestRuntimeProfileUsageByIds } from "./usage.js";
 
 const log = createLogger("data");

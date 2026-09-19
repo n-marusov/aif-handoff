@@ -5,7 +5,6 @@ import { eq } from "drizzle-orm";
 import {
   appSettings,
   logger as createLogger,
-  type AppSettings,
   type UpdateAppSettingsInput,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
@@ -16,18 +15,6 @@ const log = createLogger("data");
 const APP_SETTINGS_ID = 1;
 
 export type AppSettingsRow = typeof appSettings.$inferSelect;
-
-export function toAppSettingsResponse(row: AppSettingsRow): AppSettings {
-  return {
-    id: row.id,
-    defaultTaskRuntimeProfileId: row.defaultTaskRuntimeProfileId,
-    defaultPlanRuntimeProfileId: row.defaultPlanRuntimeProfileId,
-    defaultReviewRuntimeProfileId: row.defaultReviewRuntimeProfileId,
-    defaultChatRuntimeProfileId: row.defaultChatRuntimeProfileId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
 
 function ensureAppSettingsRow(): AppSettingsRow {
   const db = getDb();

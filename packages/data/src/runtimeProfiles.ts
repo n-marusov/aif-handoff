@@ -10,16 +10,11 @@ import {
   runtimeWarmupSessions,
   type CreateRuntimeProfileInput,
   type RuntimeLimitSnapshot,
-  type RuntimeProfile,
   type RuntimeWarmupSessionStatus,
   type UpdateRuntimeProfileInput,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
-import {
-  parseRuntimeLimitSnapshot,
-  parseRuntimeObject,
-  serializeRuntimeLimitSnapshot,
-} from "./internal.js";
+import { serializeRuntimeLimitSnapshot } from "./internal.js";
 import {
   findLatestRuntimeProfileUsageByIds,
   type RuntimeProfileUsageState,
@@ -46,19 +41,6 @@ export interface CreateRuntimeWarmupSessionInput extends RuntimeWarmupScopeInput
   sourceSessionId?: string | null;
   summary?: string | null;
   createdAt?: string;
-}
-
-function parseRuntimeHeaders(raw: string | null | undefined): Record<string, string> {
-  const parsed = parseRuntimeObject(raw);
-  if (!parsed) return {};
-
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    if (typeof value === "string") {
-      headers[key] = value;
-    }
-  }
-  return headers;
 }
 
 function toJsonPayload(value: Record<string, unknown> | null | undefined): string {
@@ -257,45 +239,17 @@ export function findActiveReadyRuntimeWarmupSession(
     .get();
 }
 
-export function toRuntimeProfileResponse(
-  row: RuntimeProfileRow,
-  usageState: RuntimeProfileUsageState | null = null,
-): RuntimeProfile {
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    name: row.name,
-    runtimeId: row.runtimeId,
-    providerId: row.providerId,
-    transport: row.transport,
-    baseUrl: row.baseUrl,
-    apiKeyEnvVar: row.apiKeyEnvVar,
-    defaultModel: row.defaultModel,
-    headers: parseRuntimeHeaders(row.headersJson),
-    options: parseRuntimeObject(row.optionsJson) ?? {},
-    enabled: row.enabled,
-    runtimeLimitSnapshot: parseRuntimeLimitSnapshot(
-      row.runtimeLimitSnapshotJson,
-      "runtime_profile",
-      row.id,
-    ),
-    runtimeLimitUpdatedAt: row.runtimeLimitUpdatedAt ?? null,
-    lastUsage: usageState?.lastUsage ?? null,
-    lastUsageAt: usageState?.lastUsageAt ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
 export function findRuntimeProfileById(id: string): RuntimeProfileRow | undefined {
   return getDb().select().from(runtimeProfiles).where(eq(runtimeProfiles.id, id)).get();
 }
 
-export function getRuntimeProfileResponseById(id: string): RuntimeProfile | undefined {
+export function getRuntimeProfileWithUsageById(
+  id: string,
+): { row: RuntimeProfileRow; usageState: RuntimeProfileUsageState | null } | undefined {
   const row = findRuntimeProfileById(id);
   if (!row) return undefined;
   const usageState = findLatestRuntimeProfileUsageByIds([id]).get(id) ?? null;
-  return toRuntimeProfileResponse(row, usageState);
+  return { row, usageState };
 }
 
 export function listRuntimeProfiles(input: {
@@ -332,14 +286,14 @@ export function listRuntimeProfiles(input: {
     .all();
 }
 
-export function listRuntimeProfileResponses(input: {
+export function listRuntimeProfilesWithUsage(input: {
   projectId?: string;
   includeGlobal?: boolean;
   enabledOnly?: boolean;
-} = {}): RuntimeProfile[] {
+} = {}): Array<{ row: RuntimeProfileRow; usageState: RuntimeProfileUsageState | null }> {
   const rows = listRuntimeProfiles(input);
   const usageByProfileId = findLatestRuntimeProfileUsageByIds(rows.map((row) => row.id));
-  return rows.map((row) => toRuntimeProfileResponse(row, usageByProfileId.get(row.id) ?? null));
+  return rows.map((row) => ({ row, usageState: usageByProfileId.get(row.id) ?? null }));
 }
 
 export function createRuntimeProfile(input: CreateRuntimeProfileInput): RuntimeProfileRow | undefined {

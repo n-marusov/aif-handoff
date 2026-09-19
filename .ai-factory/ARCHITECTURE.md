@@ -24,6 +24,7 @@ packages/
 │       ├── constants.ts     # Application constants
 │       ├── env.ts           # Environment config validation (zod)
 │       ├── logger.ts        # Pino logger factory
+│       ├── presenters.ts    # Row → view-model mappers (Node-only; delivery-side)
 │       ├── index.ts         # Public API (Node.js)
 │       └── browser.ts       # Public API (browser-safe subset)
 │
@@ -172,8 +173,9 @@ mcp ──→ data
 
 ```typescript
 // In packages/api/src/routes/tasks.ts
-import { listTasks, toTaskResponse } from "@aif/data";
+import { toTaskResponse } from "@aif/shared";
 import { TaskStatus } from "@aif/shared";
+import { listTasks } from "@aif/data";
 
 // In packages/web/src/hooks/useTasks.ts
 import { TaskStatus, type Task } from "@aif/shared/browser";
@@ -186,7 +188,8 @@ import { TaskStatus, type Task } from "@aif/shared/browser";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { createTask, toTaskResponse } from "@aif/data";
+import { toTaskResponse } from "@aif/shared";
+import { createTask } from "@aif/data";
 
 const app = new Hono();
 

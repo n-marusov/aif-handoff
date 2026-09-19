@@ -66,17 +66,23 @@ vi.mock("@aif/data", () => ({
   updateChatSession: (...args: unknown[]) => mockUpdateChatSession(...args),
   deleteChatSession: (...args: unknown[]) => mockDeleteChatSession(...args),
   listChatMessages: (...args: unknown[]) => mockListChatMessages(...args),
-  toChatSessionResponse: (row: Record<string, unknown>) => mockToChatSessionResponse(row),
-  toChatMessageResponse: (row: Record<string, unknown>) => mockToChatMessageResponse(row),
   findProjectById: (id: string) => mockFindProjectById(id),
   findTaskById: vi.fn(),
-  toTaskResponse: vi.fn(),
   createChatMessage: vi.fn(),
   updateChatSessionTimestamp: vi.fn(),
   findRuntimeProfileById: (id: string) => mockFindRuntimeProfileById(id),
-  toRuntimeProfileResponse: (row: Record<string, unknown>) => mockToRuntimeProfileResponse(row),
   createDbUsageSink: () => ({ record: vi.fn() }),
 }));
+vi.mock("@aif/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aif/shared")>();
+  return {
+    ...actual,
+    toChatSessionResponse: (row: Record<string, unknown>) => mockToChatSessionResponse(row),
+    toChatMessageResponse: (row: Record<string, unknown>) => mockToChatMessageResponse(row),
+    toTaskResponse: vi.fn(),
+    toRuntimeProfileResponse: (row: Record<string, unknown>) => mockToRuntimeProfileResponse(row),
+  };
+});
 vi.mock("@aif/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/runtime")>();
   return {

@@ -18,7 +18,7 @@ const mockListCodexSessionFileStates = vi.fn(() => [] as Array<Record<string, un
 const mockListCodexSessionFileStatesByPaths = vi.fn(() => [] as Array<Record<string, unknown>>);
 const mockListCodexLimitHeadsForOverlay = vi.fn(() => [] as Array<Record<string, unknown>>);
 const mockListProjects = vi.fn(() => [] as Array<Record<string, unknown>>);
-const mockListRuntimeProfileResponses = vi.fn(
+const mockListRuntimeProfilesWithUsage = vi.fn(
   (..._args: any[]) => [] as Array<Record<string, unknown>>,
 );
 const mockPruneCodexLimitHistoryByHead = vi.fn(() => 0);
@@ -72,7 +72,7 @@ vi.mock("@aif/data", () => ({
   listCodexSessionFileStates: mockListCodexSessionFileStates,
   listCodexSessionFileStatesByPaths: mockListCodexSessionFileStatesByPaths,
   listProjects: mockListProjects,
-  listRuntimeProfileResponses: mockListRuntimeProfileResponses,
+  listRuntimeProfilesWithUsage: mockListRuntimeProfilesWithUsage,
   pruneCodexLimitHistoryByHead: mockPruneCodexLimitHistoryByHead,
   pruneCodexLimitHistoryRetention: mockPruneCodexLimitHistoryRetention,
   pruneCodexLimitRowsBeforeObservedAt: mockPruneCodexLimitRowsBeforeObservedAt,
@@ -142,7 +142,7 @@ describe("codex index service", () => {
       linkedRowsRetained: 0,
     });
     mockListProjects.mockReturnValue([]);
-    mockListRuntimeProfileResponses.mockReturnValue([]);
+    mockListRuntimeProfilesWithUsage.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -385,14 +385,17 @@ describe("codex index service", () => {
       { id: "project-1", rootPath: "/tmp/project-1" },
       { id: "project-2", rootPath: "/tmp/project-2" },
     ]);
-    mockListRuntimeProfileResponses.mockImplementation((input: { projectId: string }) =>
+    mockListRuntimeProfilesWithUsage.mockImplementation((input: { projectId: string }) =>
       input.projectId === "project-1"
         ? [
             {
-              id: "profile-codex-1",
-              runtimeId: "codex",
-              transport: "sdk",
-              enabled: true,
+              row: {
+                id: "profile-codex-1",
+                runtimeId: "codex",
+                transport: "sdk",
+                enabled: true,
+              },
+              usageState: null,
             },
           ]
         : [],
@@ -646,14 +649,17 @@ describe("codex index service", () => {
       { id: "project-1", rootPath: "/tmp/project-1" },
       { id: "project-2", rootPath: "/tmp/project-2" },
     ]);
-    mockListRuntimeProfileResponses.mockImplementation((input: { projectId: string }) =>
+    mockListRuntimeProfilesWithUsage.mockImplementation((input: { projectId: string }) =>
       input.projectId === "project-1"
         ? [
             {
-              id: "profile-codex-1",
-              runtimeId: "codex",
-              transport: "sdk",
-              enabled: true,
+              row: {
+                id: "profile-codex-1",
+                runtimeId: "codex",
+                transport: "sdk",
+                enabled: true,
+              },
+              usageState: null,
             },
           ]
         : [],
@@ -764,12 +770,15 @@ describe("codex index service", () => {
       pendingTail: "",
     });
     mockListProjects.mockReturnValue([{ id: "project-1", rootPath: "c:/projects/one" }]);
-    mockListRuntimeProfileResponses.mockReturnValue([
+    mockListRuntimeProfilesWithUsage.mockReturnValue([
       {
-        id: "profile-codex-1",
-        runtimeId: "codex",
-        transport: "sdk",
-        enabled: true,
+        row: {
+          id: "profile-codex-1",
+          runtimeId: "codex",
+          transport: "sdk",
+          enabled: true,
+        },
+        usageState: null,
       },
     ]);
     mockUpsertCodexLimitHeads.mockReturnValue(1);

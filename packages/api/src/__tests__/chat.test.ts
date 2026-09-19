@@ -57,7 +57,6 @@ const runtimeAdapter: RuntimeAdapter = {
 vi.mock("@aif/data", () => ({
   findProjectById: (id: string) => mockFindProjectById(id),
   findTaskById: (id: string) => mockFindTaskById(id),
-  toTaskResponse: (task: unknown) => mockToTaskResponse(task),
   createChatSession: (input: unknown) => mockCreateChatSession(input),
   findChatSessionById: (id: string) => mockFindChatSessionById(id),
   updateChatSession: (id: string, input: unknown) => mockUpdateChatSession(id, input),
@@ -67,8 +66,6 @@ vi.mock("@aif/data", () => ({
   listCodexSessionsByProjectRoot: vi.fn(() => []),
   findCodexSessionFilePathBySessionId: vi.fn(() => null),
   listChatMessages: (...args: unknown[]) => mockListChatMessages(...args),
-  toChatSessionResponse: vi.fn((row: unknown) => row),
-  toChatMessageResponse: (row: unknown) => mockToChatMessageResponse(row),
   deleteChatSession: vi.fn(),
   findRuntimeProfileById: vi.fn(() => null),
   createDbUsageSink: () => ({ record: vi.fn() }),
@@ -131,6 +128,9 @@ vi.mock("@aif/shared", async (importOriginal) => {
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
       AIF_USAGE_LIMITS_ENABLED: true,
     }),
+    toTaskResponse: (task: unknown) => mockToTaskResponse(task),
+    toChatSessionResponse: (row: unknown) => row,
+    toChatMessageResponse: (row: unknown) => mockToChatMessageResponse(row),
   };
 });
 

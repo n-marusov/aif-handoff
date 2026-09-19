@@ -27,11 +27,8 @@ import {
   isRuntimeTransport,
   logger as createLogger,
   normalizeRuntimeLimitSnapshot,
-  parseAttachments,
   participants,
   persistTaskPlan,
-  redactProviderText,
-  resolveTaskPermissions,
   sanitizeRuntimeLimitSnapshotForExposure,
   taskAssignments,
   taskComments,
@@ -41,14 +38,12 @@ import {
   type AutoReviewState,
   type ExecutionOwner,
   type RuntimeLimitSnapshot,
-  type Task,
-  type TaskActionContext,
   type TaskActiveRuntimeSelection,
   type TaskAssigneeSummary,
   type TaskCurrentTool,
-  type TaskListItem,
   type TaskStatus,
 } from "@aif/shared";
+export { parseTaskCurrentTool } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import {
   buildTaskOwnershipConditions,
@@ -77,15 +72,6 @@ export type HydratedTaskRow = TaskRow & {
   assignees: TaskAssigneeSummary[];
   autoReviewState?: AutoReviewState | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
-};
-
-const LEGACY_TASK_ACTION_CONTEXT: TaskActionContext = {
-  participantsModeEnabled: false,
-  actor: {
-    kind: "anonymous",
-    id: null,
-    displayNameSnapshot: null,
-  },
 };
 
 export type TaskFieldsPatch = Partial<
@@ -150,76 +136,12 @@ export type TaskFieldsUpdate = {
   worktreePath?: string | null;
 };
 
-function redactTaskTextForExternalUse(text: string | null | undefined): string | null {
-  if (typeof text !== "string") {
-    return text ?? null;
-  }
-  return text
-    .split(/\r?\n/)
-    .map((line) => redactProviderText(line))
-    .join("\n");
-}
-
 function parseTaskRuntimeLimitSnapshot(
   raw: string | null | undefined,
   taskId: string,
 ): RuntimeLimitSnapshot | null {
   const snapshot = parseRuntimeLimitSnapshot(raw, "task", taskId);
   return snapshot ? sanitizeRuntimeLimitSnapshotForExposure(snapshot, "task") : null;
-}
-
-export function toTaskResponse(
-  task: TaskRow & { assignees?: TaskAssigneeSummary[] },
-  actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
-): Task {
-// Внутренние ссылки рантайма не покидают процесс: в ответе они отбрасываются,
-// а из JSON-колонок раскрываются только те поля, которые нужны клиенту.
-  const {
-    attachments,
-    tags,
-    assignees = [],
-    runtimeOptionsJson,
-    autoReviewStateJson,
-    currentToolJson,
-    activeRuntimeSelectionJson: _activeRuntimeSelectionJson,
-    activeRuntimeStatus: _activeRuntimeStatus,
-    runtimeLimitSnapshotJson,
-    ...rest
-  } = task;
-  return {
-    ...rest,
-    attachments: parseAttachments(attachments),
-    tags: parseTags(tags),
-    assignees,
-    permissions: resolveTaskPermissions(
-      {
-        id: task.id,
-        status: task.status,
-        autoMode: task.autoMode,
-        executionOwner: task.executionOwner,
-        assignees,
-        blockedFromStatus: task.blockedFromStatus,
-        skipReview: task.skipReview,
-        runPostVerify: task.runPostVerify,
-      },
-      actionContext,
-    ),
-    autoReviewState: parseAutoReviewState(autoReviewStateJson),
-    runtimeOptions: parseRuntimeObject(runtimeOptionsJson),
-    agentActivityLog: redactTaskTextForExternalUse(task.agentActivityLog),
-    runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(runtimeLimitSnapshotJson, task.id),
-    currentTool: parseTaskCurrentTool(currentToolJson),
-  };
-}
-
-function parseTags(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
-  } catch {
-    return [];
-  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -486,9 +408,9 @@ const TASK_LIST_COLUMNS = {
   hasPlan: sql<number>`case when length(trim(coalesce(${tasks.plan}, ''))) > 0 then 1 else 0 end`,
 } as const;
 
-function toBooleanFlag(value: boolean | number): boolean {
-  return value === true || value === 1;
-}
+export type ListTaskListItemRow = TaskListItemRow & {
+  assignees: TaskAssigneeSummary[];
+};
 
 const TASK_STATUS_ORDER = new Map<TaskStatus, number>(
   TASK_STATUSES.map((status, index) => [status, index]),
@@ -502,48 +424,10 @@ function compareTaskListRows(a: TaskListItemRow, b: TaskListItemRow): number {
   return a.position - b.position;
 }
 
-export function toTaskListItem(
-  row: TaskListItemRow,
-  assignees: TaskAssigneeSummary[] = [],
-  actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
-): TaskListItem {
-  const {
-    tags,
-    runtimeLimitSnapshotJson,
-    currentToolJson,
-    hasPlan,
-    skipReview,
-    runPostVerify,
-    ...rest
-  } = row;
-  return {
-    ...rest,
-    tags: parseTags(tags),
-    assignees,
-    permissions: resolveTaskPermissions(
-      {
-        id: row.id,
-        status: row.status,
-        autoMode: row.autoMode,
-        executionOwner: row.executionOwner,
-        assignees,
-        blockedFromStatus: row.blockedFromStatus,
-        skipReview,
-        runPostVerify,
-      },
-      actionContext,
-    ),
-    runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(runtimeLimitSnapshotJson, row.id),
-    currentTool: parseTaskCurrentTool(currentToolJson),
-    hasPlan: toBooleanFlag(hasPlan),
-  };
-}
-
 export function listTaskListItems(
   projectId: string,
   ownershipFilters: TaskOwnershipFilters = {},
-  actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
-): TaskListItem[] {
+): ListTaskListItemRow[] {
   const conditions = [
     eq(tasks.projectId, projectId),
     ...buildTaskOwnershipConditions(ownershipFilters),
@@ -561,13 +445,10 @@ export function listTaskListItems(
 
   rows.sort(compareTaskListRows);
   log.debug({ projectId, count: rows.length, projection: "task-list" }, "Listed task list items");
-  return rows.map((row) =>
-    toTaskListItem(
-      row,
-      assigneesByTaskId.get(row.id) ?? [],
-      actionContext,
-    ),
-  );
+  return rows.map((row) => ({
+    ...row,
+    assignees: assigneesByTaskId.get(row.id) ?? [],
+  }));
 }
 
 export function getMinBacklogPosition(projectId: string): number | null {
@@ -729,39 +610,6 @@ export function searchTasksPaginated(options: {
     total,
     limit: lim,
     offset: off,
-  };
-}
-
-export function toTaskSummary(
-  row: TaskSummaryRow,
-  actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
-) {
-  const {
-    tags,
-    runtimeLimitSnapshotJson,
-    assignees = [],
-    skipReview,
-    runPostVerify,
-    ...rest
-  } = row;
-  return {
-    ...rest,
-    tags: parseTags(tags),
-    assignees,
-    permissions: resolveTaskPermissions(
-      {
-        id: row.id,
-        status: row.status,
-        autoMode: row.autoMode,
-        executionOwner: row.executionOwner,
-        assignees,
-        blockedFromStatus: row.blockedFromStatus,
-        skipReview,
-        runPostVerify,
-      },
-      actionContext,
-    ),
-    runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(runtimeLimitSnapshotJson, row.id),
   };
 }
 
@@ -1159,23 +1007,6 @@ export function appendTaskActivityLog(taskId: string, newLines: string): void {
     lastActivityAt: nowIso,
     updatedAt: nowIso,
   });
-}
-
-export function parseTaskCurrentTool(raw: string | null | undefined): TaskCurrentTool | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown> | null;
-    if (!parsed || typeof parsed.name !== "string" || typeof parsed.startedAt !== "string") {
-      return null;
-    }
-    return {
-      name: parsed.name,
-      detail: typeof parsed.detail === "string" ? parsed.detail : undefined,
-      startedAt: parsed.startedAt,
-    };
-  } catch {
-    return null;
-  }
 }
 
 export function setTaskInFlightTool(taskId: string, tool: TaskCurrentTool | null): void {

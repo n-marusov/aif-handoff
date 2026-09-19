@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { logger, TASK_STATUSES } from "@aif/shared";
-import { findTaskById, transitionTaskStatus, toTaskResponse } from "@aif/data";
+import { logger, TASK_STATUSES, toTaskResponse } from "@aif/shared";
+import { findTaskById, transitionTaskStatus } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
 import { resolveConflict } from "../sync/conflictResolver.js";

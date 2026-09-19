@@ -8,8 +8,6 @@ import {
   logger as createLogger,
   type ChatMessageAttachment,
   type ChatMessageRow,
-  type ChatSession,
-  type ChatSessionMessage,
   type ChatSessionRow,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
@@ -41,39 +39,6 @@ export function updateChatSessionRuntime(
     .where(eq(chatSessions.id, sessionId))
     .run();
   return findChatSessionById(sessionId);
-}
-
-export function toChatSessionResponse(row: ChatSessionRow): ChatSession {
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    title: row.title,
-    agentSessionId: row.agentSessionId,
-    runtimeProfileId: row.runtimeProfileId,
-    runtimeSessionId: row.runtimeSessionId ?? row.agentSessionId,
-    source: "web",
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-export function toChatMessageResponse(row: ChatMessageRow): ChatSessionMessage {
-  let attachments: ChatMessageAttachment[] | undefined;
-  if (row.attachments) {
-    try {
-      attachments = JSON.parse(row.attachments) as ChatMessageAttachment[];
-    } catch {
-      // Повреждённый JSON: вложения молча считаются отсутствующими.
-    }
-  }
-  return {
-    id: row.id,
-    sessionId: row.sessionId,
-    role: row.role,
-    content: row.content,
-    ...(attachments?.length ? { attachments } : {}),
-    createdAt: row.createdAt,
-  };
 }
 
 export function createChatSession(input: {

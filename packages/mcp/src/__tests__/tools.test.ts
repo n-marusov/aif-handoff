@@ -31,14 +31,14 @@ const {
   listTasks,
   listProjects,
   searchTasks,
-  toTaskResponse,
   touchLastSyncedAt,
   updateTaskStatus,
   setTaskFields,
   listTasksPaginated,
   searchTasksPaginated,
-  toTaskSummary,
 } = await import("@aif/data");
+
+const { toTaskResponse, toTaskSummary } = await import("@aif/shared");
 
 const { resolveConflict } = await import("../sync/conflictResolver.js");
 const { compactTaskResponse } = await import("../utils/compactResponse.js");

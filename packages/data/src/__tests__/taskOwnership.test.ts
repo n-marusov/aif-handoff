@@ -30,12 +30,11 @@ const {
   searchTasksPaginated,
   setTaskFields,
   transitionTaskStatus,
-  toCommentResponse,
-  toTaskResponse,
-  toTaskSummary,
   updateParticipant,
   updateTask,
 } = await import("../index.js");
+
+const { toCommentResponse, toTaskResponse, toTaskSummary } = await import("@aif/shared");
 
 const actor: AuditActor = {
   kind: "participant",

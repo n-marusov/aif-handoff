@@ -37,7 +37,7 @@ import {
   listCodexSessionFileStates,
   listCodexSessionFileStatesByPaths,
   listProjects,
-  listRuntimeProfileResponses,
+  listRuntimeProfilesWithUsage,
   pruneCodexLimitHistoryByHead,
   pruneCodexLimitRowsBeforeObservedAt,
   pruneStaleCodexSessionIndexRows,
@@ -422,16 +422,16 @@ export function createCodexIndexService(
     // этот индекс не описывает.
     let profileBroadcastCount = 0;
     for (const projectId of projectIds) {
-      const visibleProfiles = listRuntimeProfileResponses({
+      const visibleProfiles = listRuntimeProfilesWithUsage({
         projectId,
         includeGlobal: true,
         enabledOnly: true,
-      }).filter(isLocalCodexRuntimeProfile);
+      }).filter((entry) => isLocalCodexRuntimeProfile(entry.row));
 
       for (const profile of visibleProfiles) {
         notifyRuntimeLimitProjectUpdate({
           projectId,
-          runtimeProfileId: profile.id,
+          runtimeProfileId: profile.row.id,
           signature,
         });
         profileBroadcastCount += 1;

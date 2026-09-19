@@ -3,11 +3,9 @@
  */
 import { asc, eq } from "drizzle-orm";
 import {
-  parseAttachments,
   participants,
   taskComments,
   type ParticipantSummary,
-  type TaskComment,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 
@@ -16,21 +14,6 @@ export type CommentRow = typeof taskComments.$inferSelect;
 export type HydratedCommentRow = CommentRow & {
   participant: ParticipantSummary | null;
 };
-
-export function toCommentResponse(
-  comment: CommentRow & { participant?: ParticipantSummary | null },
-): TaskComment {
-  return {
-    id: comment.id,
-    taskId: comment.taskId,
-    author: comment.author,
-    participantId: comment.participantId,
-    participant: comment.participant ?? null,
-    message: comment.message,
-    attachments: parseAttachments(comment.attachments),
-    createdAt: comment.createdAt,
-  };
-}
 
 function taskCommentSelection() {
   return {

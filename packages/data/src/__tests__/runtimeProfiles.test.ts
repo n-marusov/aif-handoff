@@ -35,8 +35,7 @@ const {
   clearRuntimeProfileLimitSnapshot,
   deleteRuntimeProfile,
   listRuntimeProfiles,
-  getRuntimeProfileResponseById,
-  toRuntimeProfileResponse,
+  getRuntimeProfileWithUsageById,
   updateProjectRuntimeDefaults,
   updateTaskRuntimeOverride,
   persistTaskRuntimeLimitSnapshot,
@@ -44,12 +43,13 @@ const {
   blockTaskForRuntimeGateIfEligible,
   updateChatSessionRuntime,
   resolveEffectiveRuntimeProfile,
-  toTaskResponse,
   evaluateRuntimeLimitGate,
   upsertCodexLimitHeads,
   listCodexLimitHeadsForOverlay,
   findPreferredCodexLimitHeadForOverlay,
 } = dataModule;
+
+const { toRuntimeProfileResponse, toTaskResponse } = await import("@aif/shared");
 
 const dataModuleWithAppSettings = dataModule as unknown as {
   getAppSettings?: () => {
@@ -218,7 +218,8 @@ describe("runtime profiles data layer", () => {
       ])
       .run();
 
-    const resolved = getRuntimeProfileResponseById(profile!.id);
+    const resolvedEntry = getRuntimeProfileWithUsageById(profile!.id);
+    const resolved = resolvedEntry ? toRuntimeProfileResponse(resolvedEntry.row, resolvedEntry.usageState) : undefined;
 
     expect(resolved?.lastUsage).toEqual({
       inputTokens: 40,
@@ -282,7 +283,8 @@ describe("runtime profiles data layer", () => {
       .where(eq(runtimeProfiles.id, profile!.id))
       .run();
 
-    const resolved = getRuntimeProfileResponseById(profile!.id);
+    const resolvedEntry = getRuntimeProfileWithUsageById(profile!.id);
+    const resolved = resolvedEntry ? toRuntimeProfileResponse(resolvedEntry.row, resolvedEntry.usageState) : undefined;
 
     expect(resolved?.runtimeLimitSnapshot?.providerMeta).toEqual({
       accountLabel: "shared-account",

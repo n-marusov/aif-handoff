@@ -30,6 +30,7 @@ packages/
 │       ├── constants.ts     # App constants
 │       ├── env.ts           # Environment validation
 │       ├── logger.ts        # Pino logger setup
+│       ├── presenters.ts    # Row → view-model mappers (Node-only; delivery-side)
 │       ├── index.ts         # Node exports
 │       └── browser.ts       # Browser-safe exports
 ├── runtime/             # @aif/runtime — runtime/provider contracts, registry, validation/discovery services, adapters
@@ -53,13 +54,13 @@ packages/
 │           ├── claude/          # Claude adapter (Agent SDK transport)
 │           ├── codex/           # Codex adapter (CLI + API transports)
 │           └── openrouter/      # OpenRouter adapter (API transport)
-├── data/                # @aif/data — centralized data-access layer
+├── data/                 # @aif/data — centralized data-access module
 │   └── src/
 │       ├── participants.ts  # Participant lifecycle and admin invariants
 │       ├── authSessions.ts  # Password/session/CSRF persistence
-│       ├── taskOwnership.ts # Atomic handoff, assignments, executor history
+│       ├── taskOwnership.ts # Atomic handoff, assignment, executor history
 │       ├── taskTransitions.ts # Actor-aware atomic task transitions
-│       ├── audit.ts         # Immutable audit persistence
+│       ├── audit.ts         # Immutable audit writes
 │       ├── tasks.ts         # Task repository (CRUD, lists, sessions, heartbeat)
 │       ├── comments.ts      # Task comment repository
 │       ├── projects.ts      # Project repository (CRUD, overviews)
@@ -70,8 +71,11 @@ packages/
 │       ├── codexIndex.ts    # Codex session/limit index repository
 │       ├── usage.ts         # Usage events, sinks, aggregate increments
 │       ├── coordinatorClaims.ts # Coordinator claims, auto-queue, worktree/VCS sync
-│       ├── internal.ts      # Shared private parsers (not exported from barrel)
-│       └── index.ts         # Public re-export barrel (surface = tasks/comments/...)
+│       ├── internal.ts      # Shared private parsers (not re-exported)
+│       └── index.ts         # Public re-export barrel (surface = topic repositories)
+│
+// Примечание: view-модели (to*Response/to*ListItem) живут в @aif/shared/src/presenters.ts;
+// @aif/data возвращает только строки БД.
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
 │       ├── index.ts         # Server entry point

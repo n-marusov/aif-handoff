@@ -21,7 +21,13 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { getCanonicalPlanPath } from "@aif/shared";
+import {
+  getCanonicalPlanPath,
+  toCommentResponse,
+  toTaskListItem,
+  toTaskResponse,
+} from "@aif/shared";
+import type { AuditActor, ExecutionOwner, TaskAssigneeSummary, TaskStatus } from "@aif/shared";
 import {
   createTask,
   createTaskComment,
@@ -33,13 +39,10 @@ import {
   listTaskComments as listComments,
   listTasks,
   persistTaskPlanForTask,
-  toCommentResponse,
-  toTaskResponse,
   type TaskRow,
   type CommentRow,
   updateTask,
 } from "@aif/data";
-import type { AuditActor, ExecutionOwner, TaskAssigneeSummary, TaskStatus } from "@aif/shared";
 
 // Урезанная форма задачи для широковещательной рассылки. Полный ответ
 // строится отдельно (toTaskResponse) и содержит тяжелые поля, которые незачем
@@ -161,6 +164,7 @@ export function syncTaskPlanFromFile(taskId: string): { synced: boolean } | null
 export {
   toTaskResponse,
   toCommentResponse,
+  toTaskListItem,
   findTaskById,
   listTaskListItems,
   listTasks,

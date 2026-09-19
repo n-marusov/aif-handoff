@@ -78,7 +78,6 @@ const mockFindRuntimeProfileById = vi.fn();
 const mockFindTaskById = vi.fn();
 const mockGetAppDefaultRuntimeProfileId = vi.fn();
 const mockResolveEffectiveRuntimeProfile = vi.fn();
-const mockToRuntimeProfileResponse = vi.fn((row: unknown) => row);
 
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
@@ -86,6 +85,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
     ...actual,
     logger: vi.fn(() => mockLog),
     getEnv: () => mockGetEnv(),
+    toRuntimeProfileResponse: vi.fn((row: unknown) => row),
   };
 });
 
@@ -114,7 +114,6 @@ vi.mock("@aif/data", () => ({
   persistRuntimeProfileLimitSnapshot: mockPersistRuntimeProfileLimitSnapshot,
   getAppDefaultRuntimeProfileId: mockGetAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile: mockResolveEffectiveRuntimeProfile,
-  toRuntimeProfileResponse: mockToRuntimeProfileResponse,
   createDbUsageSink: () => ({ record: vi.fn() }),
 }));
 

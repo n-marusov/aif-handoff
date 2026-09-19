@@ -46,7 +46,13 @@ import {
   type RuntimeWorkflowSpec,
   type RuntimeSessionForkSkipReason,
 } from "@aif/runtime";
-import { DEFAULT_WARMUP_TARGET, WARMUP_TARGETS, getEnv, logger } from "@aif/shared";
+import {
+  DEFAULT_WARMUP_TARGET,
+  WARMUP_TARGETS,
+  getEnv,
+  logger,
+  toRuntimeProfileResponse,
+} from "@aif/shared";
 import type { WarmupTarget } from "@aif/shared";
 import {
   clearRuntimeProfileLimitSnapshot,
@@ -58,7 +64,6 @@ import {
   persistRuntimeProfileLimitSnapshot,
   getAppDefaultRuntimeProfileId,
   resolveEffectiveRuntimeProfile,
-  toRuntimeProfileResponse,
   type ProjectRow,
 } from "@aif/data";
 import { broadcast } from "../ws.js";

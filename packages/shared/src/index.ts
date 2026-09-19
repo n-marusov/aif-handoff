@@ -382,3 +382,23 @@ export {
 // модуле, а здесь только публикуются.
 import { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS } from "./loopDetection.js";
 export { isReadOnlyToolCall, READ_ONLY_TOOLS, READ_ONLY_BASH_PATTERNS };
+
+// Презентационные мапперы (только Node)
+// Преобразование строк БД в view-модели для HTTP/WebSocket/MCP. Модуль серверный:
+// использует pino и не входит в браузерный вход @aif/shared/browser.
+export {
+  parseRuntimeLimitSnapshot,
+  parseRuntimeObject,
+  parseTaskCurrentTool,
+  toAppSettingsResponse,
+  toChatMessageResponse,
+  toChatSessionResponse,
+  toCommentResponse,
+  toRuntimeProfileResponse,
+  toTaskListItem,
+  toTaskResponse,
+  toTaskSummary,
+  type RuntimeProfileUsageState,
+  type TaskListItemRow,
+  type TaskSummaryRow,
+} from "./presenters.js";
