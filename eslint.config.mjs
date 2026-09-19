@@ -1,6 +1,7 @@
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
+import { RUNTIME_CORE_FILES } from "./eslint/runtimeCoreFiles.mjs";
 
 export default tseslint.config(
   {
@@ -115,24 +116,10 @@ export default tseslint.config(
   },
   // Runtime CORE (вне adapters/**) не должен знать про конкретные адаптеры:
   // адаптеры-порты подключаются через registry/bootstrap, а не импортом.
+  // Список — единый источник в eslint/runtimeCoreFiles.mjs; его же проверяет
+  // guard-тест runtimeCoreGuard.test.ts, чтобы новый core-файл не проскочил молча.
   {
-    files: [
-      "packages/runtime/src/index.ts",
-      "packages/runtime/src/types.ts",
-      "packages/runtime/src/registry.ts",
-      "packages/runtime/src/bootstrap.ts",
-      "packages/runtime/src/resolution.ts",
-      "packages/runtime/src/capabilities.ts",
-      "packages/runtime/src/readiness.ts",
-      "packages/runtime/src/promptPolicy.ts",
-      "packages/runtime/src/workflowSpec.ts",
-      "packages/runtime/src/modelDiscovery.ts",
-      "packages/runtime/src/cache.ts",
-      "packages/runtime/src/errors.ts",
-      "packages/runtime/src/trust.ts",
-      "packages/runtime/src/module.ts",
-      "packages/runtime/src/timeouts.ts",
-    ],
+    files: RUNTIME_CORE_FILES,
     rules: {
       "no-restricted-imports": [
         "error",

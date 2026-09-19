@@ -7,15 +7,17 @@
  * «### Review scope rule») и кэшируются на процесс.
  *
  * Источник файла: каталог определений задаётся через AIF_AGENT_DEFINITIONS_DIR
- * (производство/docker/тесты), иначе по умолчанию ищется
- * `<cwd>/.claude/agents/plan-coordinator.md` (агент стартует из корня репозитория).
+ * (производство/docker/тесты) — это highest-priority override. Без него каталог
+ * резолвится от расположения модуля (packages/agent/src|dist → repo root/.claude/agents),
+ * а process.cwd() остаётся последним фолбэком: cwd дрейфует в контейнерах/тестах.
  *
  * Правила опциональны: если файл или секция отсутствуют, возвращается пустая
  * строка — scope-правило является поведенческой рамкой, а не критичным
  * контрактом, ломающим запуск.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getEnv, logger } from "@aif/shared";
 
 const log = logger("agent-scope-rules");
@@ -44,40 +46,69 @@ function extractSection(markdown: string, heading: string): string {
   return markdown.slice(bodyStart, bodyEnd).trim();
 }
 
-/** Каталог определений: env-переопределение или cwd/.claude/agents. */
-function definitionsDir(): string {
-  const override = getEnv().AIF_AGENT_DEFINITIONS_DIR;
-  if (override !== undefined && override.trim().length > 0) {
-    return override.trim();
+/** Каталог определений, привязанный к расположению модуля (не к cwd). */
+type DefinitionsSource = "env" | "module-anchor" | "cwd";
+
+/**
+ * Кандидаты каталога определений в порядке приоритета.
+ *
+ * Known issue: "agentScopeRules: определения резолвятся от process.cwd()". cwd
+ * дрейфует (тесты, контейнеры, супервизоры), поэтому основной фолбэк — от
+ * расположения модуля: `packages/agent/src|dist` → `../../../.claude/agents`.
+ * Явный env-override остаётся единственным кандидатом и побеждает всегда.
+ */
+function definitionsCandidates(): Array<{ source: DefinitionsSource; dir: string }> {
+  const override = getEnv().AIF_AGENT_DEFINITIONS_DIR?.trim();
+  if (override) {
+    return [{ source: "env", dir: override }];
   }
-  return join(process.cwd(), ".claude", "agents");
+  return [
+    {
+      source: "module-anchor",
+      dir: fileURLToPath(new URL("../../../.claude/agents", import.meta.url)),
+    },
+    { source: "cwd", dir: join(process.cwd(), ".claude", "agents") },
+  ];
 }
 
 /** Читает scope-секции из файла определений с кэшем на процесс. */
 export function getAgentScopeRules(): AgentScopeRules {
   if (cachedRules) return cachedRules;
 
-  const dir = definitionsDir();
-  try {
-    const filePath = join(dir, SCOPE_DEFINITION_FILE);
-    const content = readFileSync(filePath, "utf8");
-    cachedRules = {
-      projectScope: extractSection(content, PROJECT_SCOPE_HEADING),
-      reviewScope: extractSection(content, REVIEW_SCOPE_HEADING),
-    };
-    log.debug(
-      {
-        dir,
-        projectScopeLength: cachedRules.projectScope.length,
-        reviewScopeLength: cachedRules.reviewScope.length,
-        source: "definitions",
-      },
-      "Loaded agent scope rules from agent definitions",
-    );
-  } catch (error) {
-    log.warn({ error, dir }, "Agent scope rules unavailable; falling back to empty scope rules");
-    cachedRules = { projectScope: "", reviewScope: "" };
+  for (const candidate of definitionsCandidates()) {
+    const filePath = join(candidate.dir, SCOPE_DEFINITION_FILE);
+    if (!existsSync(filePath)) continue;
+    try {
+      const content = readFileSync(filePath, "utf8");
+      cachedRules = {
+        projectScope: extractSection(content, PROJECT_SCOPE_HEADING),
+        reviewScope: extractSection(content, REVIEW_SCOPE_HEADING),
+      };
+      log.debug(
+        {
+          source: candidate.source,
+          resolvedPath: filePath,
+          projectScopeLength: cachedRules.projectScope.length,
+          reviewScopeLength: cachedRules.reviewScope.length,
+        },
+        "Loaded agent scope rules from agent definitions",
+      );
+      return cachedRules;
+    } catch (error) {
+      log.warn(
+        { error, source: candidate.source, resolvedPath: filePath },
+        "Failed to read agent scope rules candidate",
+      );
+      // Пробуем следующий кандидат: один недоступный каталог не должен гасить правила.
+    }
   }
+
+  // WARN только когда исчерпаны все стратегии: это реальная деградация, а не шум.
+  log.warn(
+    { candidates: definitionsCandidates().map((candidate) => candidate.dir) },
+    "Agent scope rules unavailable; falling back to empty scope rules",
+  );
+  cachedRules = { projectScope: "", reviewScope: "" };
   return cachedRules;
 }
 
