@@ -1,35 +1,32 @@
 <a id="us-runtime.profile.configure-project-runtime"></a>
 
-# US-runtime.profile.configure-project-runtime: Настройка runtime-профиля для проекта
+# US-runtime.profile.configure-project-runtime: Настройка AI-runtime профиля проекта
 
 ```gherkin
 @US-runtime.profile.configure-project-runtime @HF3.1 @UC-runtime.profile.configure-project-runtime @P0 @runtime @profile @gui
-Feature: US-runtime.profile.configure-project-runtime Настройка runtime-профиля для проекта
+Feature: US-runtime.profile.configure-project-runtime Настройка AI-runtime профиля проекта
 
   Background:
-    Given пользователь имеет роль admin
-    and в системе доступны runtime-адаптеры (claude, codex, openrouter, opencode)
+    Given пользователь имеет права администратора проекта
 
-  Scenario: Администратор настраивает runtime-профиль проекта
-    Given пользователь открыл ProjectRuntimeSettings
-    When пользователь создаёт профиль с runtimeId, моделью и транспортом
-    Then профиль сохраняется (POST /api/runtime-profiles)
-    and профиль привязывается к стадиям проекта (task, plan, review, chat)
-    and API-ключ указывается как переменная окружения (apiKeyEnvVar)
+  Scenario: Администратор настраивает профиль выполнения для проекта
+    Given администратор открыл настройки runtime проекта
+    When администратор задаёт профиль выполнения для этапов проекта
+    Then профиль сохраняется
+    and новые запуски задач проекта используют выбранные настройки
 
-  Scenario: Администратор редактирует существующий профиль
-    Given профиль проекта уже существует
-    When пользователь изменяет модель или транспорт профиля
-    Then изменения сохраняются (PUT /api/runtime-profiles)
-    and новые задачи проекта используют обновлённый профиль
+  Scenario: Администратор обновляет профиль проекта
+    Given профиль проекта уже задан
+    When администратор изменяет модель или транспорт выполнения
+    Then обновлённые настройки применяются к следующим запускам задач
 
-  Scenario: Для проекта используется профиль по умолчанию
-    Given для проекта не указан собственный профиль
-    When задачи проекта выполняются
-    Then используется системный дефолт (getAppDefaultRuntimeProfileId)
+  Scenario: Проект использует системный профиль по умолчанию
+    Given для проекта не задан собственный профиль
+    When запускается выполнение задачи проекта
+    Then система применяет профиль по умолчанию
 
-  Scenario: Пользователь видит список доступных моделей
-    Given включён сервис Model Discovery
-    When администратор конфигурирует профиль
-    Then UI отображает список доступных моделей runtime-провайдера
+  Scenario: Администратор выбирает модель из доступного списка
+    Given система получила доступные модели выбранного runtime-провайдера
+    When администратор настраивает профиль
+    Then интерфейс показывает только доступные для выбора модели
 ```

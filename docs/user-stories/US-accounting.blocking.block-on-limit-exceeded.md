@@ -1,32 +1,28 @@
 <a id="us-accounting.blocking.block-on-limit-exceeded"></a>
 
-# US-accounting.blocking.block-on-limit-exceeded: Блокировка задачи при превышении лимита
+# US-accounting.blocking.block-on-limit-exceeded: Приостановка задач при исчерпании лимита
 
 ```gherkin
-@US-accounting.blocking.block-on-limit-exceeded @HF6.3 @UC-accounting.blocking.block-on-limit-exceeded @P1 @accounting @blocking
-Feature: US-accounting.blocking.block-on-limit-exceeded Блокировка задачи при превышении лимита
+@US-accounting.blocking.block-on-limit-exceeded @HF6.3 @UC-accounting.blocking.block-on-limit-exceeded @P1 @accounting @blocking @api
+Feature: US-accounting.blocking.block-on-limit-exceeded Приостановка задач при исчерпании лимита
 
   Background:
-    Given для проекта настроены лимиты использования
-    and Coordinator готовится запустить stage runner
+    Given для проекта настроены лимиты использования runtime
 
-  Scenario: Задача блокируется при превышении лимита
-    Given evaluateRuntimeLimitGate определяет, что окно лимита превышено (source=BLOCKED)
-    When Coordinator вызывает blockCandidateIfRuntimeLimited
-    Then задача переводится в blocked_external
-    and blockedFromStatus фиксирует текущий статус
-    and retryAfter вычисляется до времени сброса окна
-    and UI уведомляется через WebSocket-событие task:limitBroadcast
+  Scenario: Система приостанавливает автоматическую обработку при превышении лимита
+    Given проект исчерпал доступный лимит
+    When внешний инициатор запускает обработку задачи через API или ожидает плановый цикл
+    Then задача переводится в состояние внешней блокировки
+    and в задаче фиксируется причина блокировки и момент, когда возможна повторная попытка
 
-  Scenario: Задача близка к исчерпанию лимита (WARNING)
-    Given лимит близок к превышению, но не превышен
-    When Coordinator проверяет runtime-гейт
-    Then задача не блокируется
-    and в лог записывается предупреждение о близости к лимиту
+  Scenario: Предупреждение о близком лимите не останавливает задачу
+    Given лимит близок к исчерпанию, но ещё доступен
+    When система запускает задачу в обработку
+    Then задача продолжает выполняться
+    and внешний наблюдатель может получить предупреждение о риске исчерпания лимита
 
-  Scenario: Провайдер вернул rate limit
-    Given адаптер получил HTTP 429 с заголовком Retry-After
-    When ErrorClassifier обрабатывает ответ
-    Then категория rate_limit сохраняется
-    and retryAfter берётся из заголовков провайдера
+  Scenario: Повторный запуск возможен после окна восстановления
+    Given задача была заблокирована из-за лимита
+    When лимит восстановлен и внешний инициатор выполняет повторный запуск
+    Then система допускает задачу к дальнейшему выполнению
 ```

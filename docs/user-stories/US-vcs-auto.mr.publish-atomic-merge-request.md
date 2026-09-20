@@ -1,29 +1,29 @@
 <a id="us-vcs-auto.mr.publish-atomic-merge-request"></a>
 
-# US-vcs-auto.mr.publish-atomic-merge-request: Создание единого atomic MR/PR
+# US-vcs-auto.mr.publish-atomic-merge-request: Публикация единого MR/PR по задаче
 
 ```gherkin
-@US-vcs-auto.mr.publish-atomic-merge-request @HF4.3 @UC-vcs-auto.mr.publish-atomic-merge-request @P2 @vcs-auto @mr
-Feature: US-vcs-auto.mr.publish-atomic-merge-request Создание единого atomic MR/PR
+@US-vcs-auto.mr.publish-atomic-merge-request @HF4.3 @UC-vcs-auto.mr.publish-atomic-merge-request @P2 @vcs-auto @mr @agent
+Feature: US-vcs-auto.mr.publish-atomic-merge-request Публикация единого MR/PR по задаче
 
   Background:
-    Given проект подключён к GitHub или GitLab
-    and изменения задачи закоммичены в ветку
+    Given проект подключён к поддерживаемой VCS-платформе
+    and изменения по задаче подготовлены к публикации
 
-  Scenario: Coordinator создаёт единый atomic MR/PR
-    Given auto-commit завершён для ветки задачи
-    When Coordinator выполняет git push ветки в remote
-    Then создаётся PR/MR через REST API с заголовком и описанием (сводка Change Plan)
-    and ссылка (prUrl, prNumber) сохраняется в БД
+  Scenario: Система публикует единый MR/PR для изменений задачи
+    Given у задачи сформирован набор изменений для публикации
+    When запускается шаг публикации в VCS
+    Then создаётся один MR/PR для этой задачи
+    and в задаче сохраняется ссылка на опубликованный MR/PR
 
-  Scenario: PR/MR публикуется в режиме plan review
-    Given задача имеет planReviewState=published
-    When Coordinator публикует PR/MR
-    Then PR/MR создаётся в Draft-режиме с планом для утверждения
+  Scenario: Режим plan review публикует черновик для согласования
+    Given задача находится в режиме plan review
+    When система публикует изменение в VCS
+    Then MR/PR создаётся как черновик для проверки плана человеком
 
-  Scenario: VCS недоступен
-    Given GitHub/GitLab API не отвечает
-    When Coordinator публикует MR/PR
-    Then ошибка синхронизации сохраняется
-    and задача не переходит на следующую стадию
+  Scenario: Ошибка публикации не продвигает задачу в следующую стадию
+    Given внешняя VCS-система недоступна
+    When система пытается опубликовать MR/PR
+    Then задача остаётся в стадии ожидания публикации
+    and внешний наблюдатель видит диагностируемую причину ошибки
 ```

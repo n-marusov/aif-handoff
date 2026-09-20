@@ -43,7 +43,6 @@ US-<domain>.<subdomain>.<action>
 | ------------------------ | ----------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------- |
 | `stage`                  | HF1.1, HF1.6, HF5.1                 | Автоматическое продвижение по стадиям                               | `US-pipeline.stage.auto-advance-task`               |
 | `manual-override`        | HF1.7, HF5.2                        | Ручное вмешательство в стадию задачи с контролем гейтов             | `US-pipeline.manual-override.intervene-task-stage`  |
-| `gate`                   | HF5.1–HF5.3                         | Формальные гейты переходов                                          | `US-pipeline.gate.enforce-stage-transition-gate`    |
 | `board`                  | HF2.1                               | Просмотр колонок Kanban и карточек задач                            | `US-dashboard.board.view-kanban-columns`            |
 | `detail`                 | HF2.3                               | Просмотр деталей задачи                                             | `US-dashboard.detail.view-task-details`             |
 | `realtime`               | HF2.4                               | Получение live-обновлений статусов                                  | `US-dashboard.realtime.receive-live-status-updates` |
@@ -86,13 +85,12 @@ Feature: US-<domain>.<subdomain>.<action> <краткое название>
 
 ## Текущее состояние
 
-На дату актуализации (2026-09-20) каталог содержит **20 пользовательских историй** — только E2E-релевантный срез для подтверждения бизнес-пользы в сквозных GUI/API-путях.
+На дату актуализации (2026-09-20) каталог содержит **18 пользовательских историй** — E2E-релевантный срез для подтверждения бизнес-пользы в сквозных GUI/API/Agent-путях.
 
 Оставленные US:
 
 - `US-pipeline.stage.auto-advance-task`
 - `US-pipeline.manual-override.intervene-task-stage`
-- `US-pipeline.gate.enforce-stage-transition-gate`
 - `US-dashboard.board.view-kanban-columns`
 - `US-dashboard.detail.view-task-details`
 - `US-dashboard.realtime.receive-live-status-updates`
@@ -107,7 +105,6 @@ Feature: US-<domain>.<subdomain>.<action> <краткое название>
 - `US-audit.heartbeat.receive-agent-heartbeat`
 - `US-integration.issues.sync-github-issue`
 - `US-integration.issues.bootstrap-project-sync-and-create-task`
-- `US-integration.pr-mr.publish-github-pr`
 - `US-integration.pr-mr.resolve-review-decision`
 - `US-vcs-auto.mr.publish-atomic-merge-request`
 

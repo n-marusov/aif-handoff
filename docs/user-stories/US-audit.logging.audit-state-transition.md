@@ -1,30 +1,27 @@
 <a id="us-audit.logging.audit-state-transition"></a>
 
-# US-audit.logging.audit-state-transition: Иммутабельный аудит действий системы
+# US-audit.logging.audit-state-transition: Неизменяемый журнал ключевых действий по задачам
 
 ```gherkin
-@US-audit.logging.audit-state-transition @HF10.1 @UC-audit.logging.audit-state-transition @P0 @audit @logging
-Feature: US-audit.logging.audit-state-transition Иммутабельный аудит действий системы
+@US-audit.logging.audit-state-transition @HF10.1 @UC-audit.logging.audit-state-transition @P0 @audit @logging @api
+Feature: US-audit.logging.audit-state-transition Неизменяемый журнал ключевых действий по задачам
 
   Background:
-    Given система выполняет действие, изменяющее состояние задачи
+    Given в проекте выполняются изменения состояния задач
 
-  Scenario: Каждое действие записывается в иммутабельный аудит
-    Given Coordinator или API изменяет состояние задачи (например, переход стадии)
-    When действие завершено успешно
-    Then в таблицу auditEvents вставляется запись (action, entityType, entityId, actorKind)
-    and сохраняется snapshot статуса и assignees на момент действия
-    and запись содержит actorDisplayNameSnapshot (имя на момент действия)
-    and запись не может быть изменена или удалена
+  Scenario: Переход стадии фиксируется в журнале аудита
+    Given задача изменила стадию
+    When внешний наблюдатель запрашивает аудит задачи
+    Then в аудите есть запись о переходе стадии с контекстом исполнителя и времени
 
-  Scenario: Аудит фиксирует handoff
-    Given владение задачей передано через handoff
-    When запись аудита создаётся
-    Then action=TaskOwnershipTransferred
-    and metadata содержит ownershipRevision
+  Scenario: Передача ответственности фиксируется в журнале
+    Given для задачи выполнен handoff между исполнителями
+    When внешний наблюдатель запрашивает аудит задачи
+    Then в журнале есть отдельная запись о передаче ответственности с причиной
 
-  Scenario: Аудит фиксирует создание задачи
-    Given создаётся новая задача
-    When запись аудита создаётся
-    Then action=TaskCreated с entityId новой задачи
+  Scenario: Записи аудита недоступны для редактирования
+    Given в журнале уже есть запись по действию над задачей
+    When внешний инициатор пытается изменить или удалить эту запись
+    Then система отклоняет изменение
+    and ранее зафиксированная запись остаётся неизменной
 ```

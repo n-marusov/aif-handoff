@@ -1,37 +1,28 @@
 <a id="us-integration.pr-mr.resolve-review-decision"></a>
 
-# US-integration.pr-mr.resolve-review-decision: Обработка решения ревью по PR/MR
+# US-integration.pr-mr.resolve-review-decision: Применение решения ревью к жизненному циклу задачи
 
 ```gherkin
-@US-integration.pr-mr.resolve-review-decision @HF11.1 @HF11.2 @UC-integration.pr-mr.resolve-review-decision @P1 @integration @pr-mr
-Feature: US-integration.pr-mr.resolve-review-decision Обработка решения ревью по PR/MR
+@US-integration.pr-mr.resolve-review-decision @HF11.1 @HF11.2 @UC-integration.pr-mr.resolve-review-decision @P1 @integration @pr-mr @agent
+Feature: US-integration.pr-mr.resolve-review-decision Применение решения ревью к жизненному циклу задачи
 
   Background:
     Given задача связана с опубликованным PR/MR
-    and Coordinator периодически выполняет VCS sync
 
-  Scenario: Слияние GitLab MR завершает приём результата
-    Given связанный GitLab MR перешёл в состояние merged
-    When Coordinator считывает состояние MR через gitlabWorkflow
-    Then система сохраняет состояние MR как merged
-    and задача корректно переводится в финальный принятый результат (done → accepted)
-    and стадия ревью считается закрытой решением человека
+  Scenario: Одобрение ревью завершает путь задачи к принятию
+    Given во внешней VCS-системе PR/MR одобрен и успешно объединён
+    When система синхронизирует состояние ревью
+    Then задача переводится в финальное принятое состояние
+    and внешний наблюдатель видит согласованный результат в статусе задачи
 
-  Scenario: MR закрыт без слияния
-    Given связанный GitLab MR перешёл в состояние closed без merge
-    When Coordinator выполняет синхронизацию
-    Then задача не принимается
-    and система помечает задачу как приостановленную для ручного решения
+  Scenario: Запрос доработки возвращает задачу на доработку
+    Given по PR/MR получено решение с запросом изменений
+    When система синхронизирует решение ревью
+    Then задача возвращается в рабочую стадию доработки
+    and предыдущее решение не считается принятием результата
 
-  Scenario: Действующее решение ревьюера применяется к стадии задачи
-    Given у PR/MR есть несколько записей ревью
-    When Coordinator вычисляет последнее неотозванное решение ревьюера
-    Then одобрение открывает нужный гейт и продвигает задачу
-    and запрос изменений возвращает задачу на доработку
-
-  Scenario: Повторная синхронизация идемпотентна
-    Given решение ревью уже было успешно применено к задаче
-    When Coordinator выполняет следующую сверку того же PR/MR
-    Then одно и то же решение не применяется повторно
-    and состояние задачи не «откатывается» назад
+  Scenario: Повторная синхронизация не применяет одно и то же решение повторно
+    Given решение ревью уже было применено к задаче
+    When система выполняет повторную синхронизацию без нового решения
+    Then состояние задачи не изменяется повторно
 ```

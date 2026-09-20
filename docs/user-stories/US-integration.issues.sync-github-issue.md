@@ -1,35 +1,29 @@
 <a id="us-integration.issues.sync-github-issue"></a>
 
-# US-integration.issues.sync-github-issue: Синхронизация задач с GitHub Issues
+# US-integration.issues.sync-github-issue: Периодическая синхронизация задач с внешним трекером
 
 ```gherkin
-@US-integration.issues.sync-github-issue @HF11.1 @UC-integration.issues.sync-github-issue @P2 @integration @issues
-Feature: US-integration.issues.sync-github-issue Синхронизация задач с GitHub Issues
+@US-integration.issues.sync-github-issue @HF11.1 @UC-integration.issues.sync-github-issue @P2 @integration @issues @agent
+Feature: US-integration.issues.sync-github-issue Периодическая синхронизация задач с внешним трекером
 
   Background:
-    Given проект подключён к GitHub-репозиторию (githubRepositories)
-    and синхронизация включена (enabled=true)
+    Given проект подключён к внешнему трекеру задач
+    and синхронизация включена для проекта
 
-  Scenario: Coordinator синхронизирует задачи с GitHub Issues
-    Given Coordinator запускает синхронизацию (по расписанию или вручную)
-    When GitHubWorkflow запрашивает Issues через REST API
-    Then новые Issues добавляются, существующие обновляются в таблице githubIssues
-    and связанные задачи сопоставляются по title/description
-    and состояние Issues и PR сохраняется (prNumber, prState, prChecksStatus)
+  Scenario: Система обновляет локальное состояние задач из внешнего трекера
+    Given во внешнем трекере появились новые или изменённые issues
+    When запускается цикл синхронизации
+    Then локальное состояние проекта обновляется в соответствии с внешними изменениями
+    and внешний наблюдатель видит актуальные данные по связанным задачам
 
-  Scenario: Синхронизация GitLab
-    Given проект подключён к GitLab
+  Scenario: Отключённая синхронизация не запускается
+    Given синхронизация отключена в настройках проекта
+    When наступает плановый цикл синхронизации
+    Then система не выполняет синхронизацию для этого проекта
+
+  Scenario: Ошибка внешнего трекера не блокирует остальную работу системы
+    Given внешний трекер временно недоступен
     When запускается синхронизация
-    Then gitlabWorkflow синхронизирует Issues и MR аналогично GitHub
-
-  Scenario: Синхронизация отключена
-    Given githubRepositories.enabled=false
-    When Coordinator достигает шага синхронизации
-    Then синхронизация пропускается
-
-  Scenario: Ошибка синхронизации
-    Given GitHub API вернул ошибку
-    When Coordinator выполняет синхронизацию
-    Then syncError сохраняется для диагностики
-    and синхронизация не блокирует другие циклы Coordinator
+    Then система фиксирует диагностируемую ошибку синхронизации
+    and остальные задачи проекта продолжают обрабатываться
 ```

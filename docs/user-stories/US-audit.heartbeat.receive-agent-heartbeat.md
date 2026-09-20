@@ -1,28 +1,23 @@
 <a id="us-audit.heartbeat.receive-agent-heartbeat"></a>
 
-# US-audit.heartbeat.receive-agent-heartbeat: Получение хартбитов от выполняющихся агентов
+# US-audit.heartbeat.receive-agent-heartbeat: Наблюдаемость длительного выполнения задач
 
 ```gherkin
-@US-audit.heartbeat.receive-agent-heartbeat @HF10.2 @UC-audit.heartbeat.receive-agent-heartbeat @P1 @audit @heartbeat
-Feature: US-audit.heartbeat.receive-agent-heartbeat Получение хартбитов от выполняющихся агентов
+@US-audit.heartbeat.receive-agent-heartbeat @HF10.2 @UC-audit.heartbeat.receive-agent-heartbeat @P1 @audit @heartbeat @api
+Feature: US-audit.heartbeat.receive-agent-heartbeat Наблюдаемость длительного выполнения задач
 
   Background:
-    Given субагент выполняет длительный runtime-запрос
+    Given задача выполняется в длительном автоматическом режиме
 
-  Scenario: Адаптер отправляет хартбиты во время выполнения
-    Given runtime-адаптер поддерживает сигналы жизни (RuntimeSubagentStartCallback)
-    When адаптер отправляет хартбит (toolName, detail, startedAt)
-    Then Coordinator обновляет lastHeartbeatAt на задаче
-    and сохраняет текущий инструмент (currentToolJson)
+  Scenario: Внешний наблюдатель видит признаки активности выполняемой задачи
+    Given задача находится в in-progress состоянии
+    When внешний наблюдатель запрашивает статус задачи во время выполнения
+    Then статус содержит актуальный признак активности выполнения
+    and задача не воспринимается как зависшая
 
-  Scenario: UI отображает живой прогресс выполнения
-    Given хартбит получен Coordinator-ом
-    When WebSocket-событие task:heartbeat рассылается
-    Then UI отображает актуальный прогресс и текущий инструмент субагента
-
-  Scenario: Waitdog обнаруживает зависшую задачу
-    Given задача не отправляет хартбит дольше AGENT_STAGE_RUN_TIMEOUT_MS
-    When taskWatchdog выполняет listStaleInProgressTasks
-    Then задача считается зависшей
-    and блокируется в blocked_external с причиной «no heartbeat»
+  Scenario: Отсутствие активности переводит задачу в контролируемую блокировку
+    Given задача перестала подавать признаки активности дольше допустимого окна
+    When система выполняет проверку зависших задач
+    Then задача переводится в blocked_external
+    and причина блокировки явно указывает на отсутствие признаков активности
 ```

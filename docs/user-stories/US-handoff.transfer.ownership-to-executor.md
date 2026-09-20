@@ -1,39 +1,30 @@
 <a id="us-handoff.transfer.ownership-to-executor"></a>
 
-# US-handoff.transfer.ownership-to-executor: Передача владения изменением (handoff)
+# US-handoff.transfer.ownership-to-executor: Передача ответственности за задачу
 
 ```gherkin
 @US-handoff.transfer.ownership-to-executor @HF7.1 @UC-handoff.transfer.ownership-to-executor @P0 @handoff @transfer @gui
-Feature: US-handoff.transfer.ownership-to-executor Передача владения изменением (handoff)
+Feature: US-handoff.transfer.ownership-to-executor Передача ответственности за задачу
 
   Background:
-    Given пользователь открыл задачу и диалог «Assign / hand off»
-    and current ownership задачи известен (executionOwner, ownershipRevision)
+    Given пользователь открыл задачу и диалог передачи ответственности
 
-  Scenario: Пользователь передаёт владение задачей другому исполнителю
-    Given задача принадлежит текущему владельцу (revision совпадает)
-    When пользователь выбирает нового исполнителя (AI или Human) и указывает причину
-    Then API выполняет handoffTaskExecution с ownershipRevision
-    and executionOwner обновляется и ownershipRevision инкрементируется
-    and запись в taskExecutorHistory создаётся
-    and UI отображает нового владельца и причину handoff
-    and WebSocket-событие task:ownershipChanged рассылается
+  Scenario: Пользователь передаёт задачу другому исполнителю
+    Given задача находится в работе
+    When пользователь выбирает нового исполнителя и подтверждает передачу с причиной
+    Then у задачи обновляется ответственный исполнитель
+    and в задаче сохраняется история передачи с указанной причиной
+    and все наблюдатели задачи видят обновлённого исполнителя
 
-  Scenario: Handoff отклоняется при конфликте ревизии
-    Given ownershipRevision задачи изменился (конкурентное изменение)
-    When пользователь отправляет handoff
-    Then API возвращает 409 Conflict (TaskOwnershipConflict)
-    and владение не изменяется
+  Scenario: Передача отклоняется при конкурентном изменении
+    Given ответственность задачи уже была изменена другим участником
+    When пользователь отправляет устаревший запрос на передачу
+    Then система отклоняет передачу без изменения текущего владельца
+    and пользователь получает сообщение о конфликте и необходимости обновить данные
 
-  Scenario: Автоматический handoff AI → Human при эскалации
-    Given задача эскалирована (исчерпаны попытки исправления)
-    When Coordinator выполняет handoff
-    Then executionOwner устанавливается в human
-    and в taskExecutorHistory фиксируется передача с указанием причины
-
-  Scenario: Human → AI handoff через manual action
-    Given задача принадлежит человеку
-    When пользователь выполняет действие start_ai
-    Then executionOwner устанавливается в ai
-    and Coordinator продолжает выполнение конвейера
+  Scenario: Эскалация возвращает задачу человеку
+    Given автоматическое выполнение не может завершить задачу
+    When система выполняет эскалацию
+    Then задача назначается человеку для ручного решения
+    and причина эскалации фиксируется в истории задачи
 ```

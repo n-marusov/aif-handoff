@@ -1,29 +1,27 @@
 <a id="us-accounting.tracking.record-runtime-call"></a>
 
-# US-accounting.tracking.record-runtime-call: Учёт каждого вызова runtime
+# US-accounting.tracking.record-runtime-call: Учёт использования AI-runtime по проекту и задачам
 
 ```gherkin
-@US-accounting.tracking.record-runtime-call @HF6.1 @UC-accounting.tracking.record-runtime-call @P0 @accounting @tracking
-Feature: US-accounting.tracking.record-runtime-call Учёт каждого вызова runtime
+@US-accounting.tracking.record-runtime-call @HF6.1 @UC-accounting.tracking.record-runtime-call @P0 @accounting @tracking @api
+Feature: US-accounting.tracking.record-runtime-call Учёт использования AI-runtime по проекту и задачам
 
   Background:
-    Given runtime-адаптер выполняет запрос к AI-провайдеру
-    and usage sink подключён к БД
+    Given проект выполняет задачи через AI-runtime
 
-  Scenario: Каждый вызов runtime фиксируется в UsageEvent
-    Given RuntimeAdapter завершает выполнение runtime-запроса
-    When адаптер вызывает usageSink.record(usageEvent)
-    Then в таблицу usageEvents вставляется запись с source, runtimeId, providerId, projectId и taskId
-    and счётчики токенов и стоимости задачи инкрементируются
-    and счётчики токенов и стоимости проекта инкрементируются
+  Scenario: Использование runtime отражается в задаче после выполнения
+    Given задача завершает очередной runtime-вызов
+    When внешний наблюдатель запрашивает состояние задачи
+    Then в задаче отображаются обновлённые показатели использования (токены и стоимость)
 
-  Scenario: UI отображает использование runtime задачи
-    Given использование задачи обновлено
-    When Coordinator отправляет WebSocket-событие task:usage
-    Then UI отображает актуальные значения usage в RuntimeUsageDialog
+  Scenario: Использование агрегируется на уровне проекта
+    Given в проекте выполнены runtime-вызовы по нескольким задачам
+    When внешний наблюдатель запрашивает агрегированные показатели проекта
+    Then система возвращает актуальные суммарные значения использования
 
-  Scenario: Учёт использования чат-сессии
-    Given пользователь взаимодействует с AI-ассистентом в чате
-    When runtime-запрос завершается
-    Then usage записывается на chatSessions (incrementChatSessionTokenUsage)
+  Scenario: Отсутствие usage-данных не ломает основной поток
+    Given runtime-вызов завершён без доступных метрик использования
+    When внешний наблюдатель проверяет результат выполнения
+    Then задача остаётся в согласованном состоянии
+    and система явно показывает, что метрики usage недоступны для этого запуска
 ```
