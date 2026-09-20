@@ -1,0 +1,183 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix qa: <http://aif-handoff.dev/qa#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+qa:Artifact a rdfs:Class ;
+    rdfs:label "Артефакт проекта"@ru .
+
+qa:Ontology a owl:Ontology ;
+    rdfs:label "Граф зависимостей артефактов — AIF Handoff: система автономного управления задачами (aif-handoff)"@ru ;
+    rdfs:comment "Ациклический граф зависимостей артефактов проекта. Семантика: X dependsOn Y означает, что артефакт X производится/требует/детализирует артефакт Y (Y — источник). Модель требований: vision (HF1–HF12) -> US (язык бизнеса) -> UC (анализ, зависит от US) -> FR/NFR; далее контракты, ADR, C4, QA (test-plan/test-cases/e2e-кейсы/гейты), код пакетов и автотесты (Vitest/Playwright); ROADMAP зависит от FR и QA-гайдов; пользовательская документация (userDocs) и проектная документация для разработчиков (developerDocs) — производные артефакты. Граф ацикличен (DAG)."@ru .
+
+qa:dependsOn a rdf:Property ;
+    rdfs:label "Зависит от (требует/производится из)"@ru ;
+    rdfs:domain qa:Artifact ;
+    rdfs:range qa:Artifact .
+
+qa:e2eTestCaseCatalog a qa:Artifact ;
+    rdfs:label "E2E-кейсы из UC/US — выводятся по формальным правилам aif-qa (раздел каталога .ai-factory/qa/<ветка>/test-cases.md)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:contracts,
+        qa:functionalRequirements,
+        qa:glossary,
+        qa:nonFunctionalRequirements,
+        qa:qaGuides,
+        qa:qaMethodology,
+        qa:testPlan,
+        qa:useCases,
+        qa:userStories .
+
+qa:developerDocs a qa:Artifact ;
+    rdfs:label "Проектная документация для разработчиков — полная картина проекта: README.md, требования (vision/US/UC/FR/NFR/BR), архитектура (C4/ADR/domain), контракты, QA, код и автотесты"@ru ;
+    qa:dependsOn qa:adr,
+        qa:architectureC4,
+        qa:automatedTests,
+        qa:businessRules,
+        qa:contracts,
+        qa:domainModel,
+        qa:e2eTestCaseCatalog,
+        qa:functionalRequirements,
+        qa:glossary,
+        qa:nonFunctionalRequirements,
+        qa:qaGuides,
+        qa:qaMethodology,
+        qa:qualityGates,
+        qa:roadmap,
+        qa:sourceCode,
+        qa:testCaseCatalog,
+        qa:testPlan,
+        qa:useCases,
+        qa:userDocs,
+        qa:userStories,
+        qa:vision .
+
+qa:adr a qa:Artifact ;
+    rdfs:label "docs/adr/ — архитектурные решения (ADR-*)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:contracts,
+        qa:domainModel,
+        qa:functionalRequirements,
+        qa:nonFunctionalRequirements .
+
+qa:architectureC4 a qa:Artifact ;
+    rdfs:label "docs/c4/ — C4-модель (контекст/контейнеры/компоненты)"@ru ;
+    qa:dependsOn qa:contracts,
+        qa:domainModel,
+        qa:vision .
+
+qa:qualityGates a qa:Artifact ;
+    rdfs:label "docs/qa/gates.md — гейты G1-*/G2-*/G3-*/FG-*/AG-*"@ru ;
+    qa:dependsOn qa:qaMethodology,
+        qa:testCaseCatalog,
+        qa:testPlan .
+
+qa:roadmap a qa:Artifact ;
+    rdfs:label ".ai-factory/ROADMAP.md — вехи продукта (Фазы 1–5, vision.md §2.5)"@ru ;
+    qa:dependsOn qa:functionalRequirements,
+        qa:qaGuides .
+
+qa:sourceCode a qa:Artifact ;
+    rdfs:label "packages/{shared,runtime,data,api,web,agent,mcp} — реализация (Turborepo, TypeScript)"@ru ;
+    qa:dependsOn qa:automatedTests,
+        qa:businessRules,
+        qa:contracts,
+        qa:functionalRequirements,
+        qa:nonFunctionalRequirements .
+
+qa:userDocs a qa:Artifact ;
+    rdfs:label "Пользовательская документация — README.md и пользовательские гайды (getting-started, runbook-демо GitHub/GitLab/Dev GUI, mcp-sync)"@ru ;
+    qa:dependsOn qa:functionalRequirements,
+        qa:useCases,
+        qa:userStories,
+        qa:vision .
+
+qa:automatedTests a qa:Artifact ;
+    rdfs:label "packages/* — автотесты Vitest (*.test.ts) + Playwright E2E (packages/web/e2e), unit/integration"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:contracts,
+        qa:functionalRequirements,
+        qa:nonFunctionalRequirements,
+        qa:testCaseCatalog .
+
+qa:qaGuides a qa:Artifact ;
+    rdfs:label "docs/qa/{unit-testing,integration,smoke-testing,e2e-api-testing,e2e-gui-testing}.md — гайды по уровням"@ru ;
+    qa:dependsOn qa:qaMethodology,
+        qa:testPlan .
+
+qa:testCaseCatalog a qa:Artifact ;
+    rdfs:label ".ai-factory/qa/<ветка>/test-cases.md — каталог TC (трассируемый, артефакты aif-qa)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:contracts,
+        qa:functionalRequirements,
+        qa:glossary,
+        qa:nonFunctionalRequirements,
+        qa:qaMethodology,
+        qa:testPlan,
+        qa:useCases,
+        qa:userStories .
+
+qa:domainModel a qa:Artifact ;
+    rdfs:label "docs/domain/ — DDD-модель (context-map, aggregates, domain-events, data-dictionary, ontology.ttl)"@ru ;
+    qa:dependsOn qa:glossary,
+        qa:useCases,
+        qa:vision .
+
+qa:testPlan a qa:Artifact ;
+    rdfs:label ".ai-factory/qa/<ветка>/test-plan.md — мастер-план тестирования (артефакты aif-qa)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:contracts,
+        qa:functionalRequirements,
+        qa:nonFunctionalRequirements,
+        qa:qaMethodology,
+        qa:useCases,
+        qa:userStories .
+
+qa:qaMethodology a qa:Artifact ;
+    rdfs:label "docs/qa/README.md — методология контроля качества"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:contracts,
+        qa:functionalRequirements,
+        qa:nonFunctionalRequirements,
+        qa:useCases,
+        qa:userStories,
+        qa:vision .
+
+qa:glossary a qa:Artifact ;
+    rdfs:label "docs/glossary.md — термины (единый язык)"@ru .
+
+qa:userStories a qa:Artifact ;
+    rdfs:label "docs/user-stories/ — US-* (язык бизнеса, Gherkin; каталог — целевое состояние, README актуален)"@ru ;
+    qa:dependsOn qa:glossary,
+        qa:vision .
+
+qa:useCases a qa:Artifact ;
+    rdfs:label "docs/use-cases/ — UC-* + USE-CASES-INDEX.md (анализ, детализация US)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:glossary,
+        qa:userStories,
+        qa:vision .
+
+qa:contracts a qa:Artifact ;
+    rdfs:label "docs/contracts/ — реестр контрактов (contract-aif-* + INDEX.yaml: runtime, REST, WS, data, db-schema, scheduler, github/gitlab, worktree)"@ru ;
+    qa:dependsOn qa:domainModel,
+        qa:functionalRequirements,
+        qa:nonFunctionalRequirements .
+
+qa:nonFunctionalRequirements a qa:Artifact ;
+    rdfs:label "docs/nonfun-req/ — REQ-NFR-* (границы качества)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:functionalRequirements,
+        qa:vision .
+
+qa:vision a qa:Artifact ;
+    rdfs:label "docs/vision.md — бизнес-требования (HF1–HF12, G1–G7, MVP, roadmap, роли §3.1)"@ru .
+
+qa:businessRules a qa:Artifact ;
+    rdfs:label "docs/business-rules/ — BR-* (политики и ограничения)"@ru .
+
+qa:functionalRequirements a qa:Artifact ;
+    rdfs:label "docs/fun-req/ — REQ-FR-* (детализация UC)"@ru ;
+    qa:dependsOn qa:businessRules,
+        qa:glossary,
+        qa:useCases .
