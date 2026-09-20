@@ -89,6 +89,12 @@ docs-html/
 # Local scratch
 # flow.md
 
+# AI Factory tmp extraction (raw scraped sources for distillation)
+.ai-factory/tmp/
+
+# Scratch decoder helper at repo root
+.tmp-decode.js
+
 # Attachment files (stored inside project .ai-factory/files/)
 .ai-factory/files/
 .ai-factory/PLAN.md
