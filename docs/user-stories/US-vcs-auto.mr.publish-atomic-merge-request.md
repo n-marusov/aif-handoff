@@ -3,7 +3,7 @@
 # US-vcs-auto.mr.publish-atomic-merge-request: Публикация единого MR/PR по задаче
 
 ```gherkin
-@US-vcs-auto.mr.publish-atomic-merge-request @HF4.3 @UC-vcs-auto.mr.publish-atomic-merge-request @P2 @vcs-auto @mr @agent
+@US-vcs-auto.mr.publish-atomic-merge-request @HF4.3 @HF4.4 @UC-vcs-auto.mr.publish-atomic-merge-request @P2 @vcs-auto @mr @agent
 Feature: US-vcs-auto.mr.publish-atomic-merge-request Публикация единого MR/PR по задаче
 
   Background:

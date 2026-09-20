@@ -3,7 +3,7 @@
 # US-integration.pr-mr.resolve-review-decision: Применение решения ревью к жизненному циклу задачи
 
 ```gherkin
-@US-integration.pr-mr.resolve-review-decision @HF11.1 @HF11.2 @UC-integration.pr-mr.resolve-review-decision @P1 @integration @pr-mr @agent
+@US-integration.pr-mr.resolve-review-decision @HF11.2 @HF1.6 @UC-integration.pr-mr.resolve-review-decision @P1 @integration @pr-mr @agent
 Feature: US-integration.pr-mr.resolve-review-decision Применение решения ревью к жизненному циклу задачи
 
   Background:

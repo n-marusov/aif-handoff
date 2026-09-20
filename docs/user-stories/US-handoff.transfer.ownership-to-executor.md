@@ -3,7 +3,7 @@
 # US-handoff.transfer.ownership-to-executor: Передача ответственности за задачу
 
 ```gherkin
-@US-handoff.transfer.ownership-to-executor @HF7.1 @UC-handoff.transfer.ownership-to-executor @P0 @handoff @transfer @gui
+@US-handoff.transfer.ownership-to-executor @HF7.1 @HF7.3 @UC-handoff.transfer.ownership-to-executor @P0 @handoff @transfer @gui
 Feature: US-handoff.transfer.ownership-to-executor Передача ответственности за задачу
 
   Background:

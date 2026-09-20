@@ -3,7 +3,7 @@
 # US-dashboard.detail.view-task-details: Детальный просмотр задачи
 
 ```gherkin
-@US-dashboard.detail.view-task-details @HF2.3 @UC-dashboard.detail.view-task-details @P0 @dashboard @detail @gui
+@US-dashboard.detail.view-task-details @HF2.3 @HF6.1 @UC-dashboard.detail.view-task-details @P0 @dashboard @detail @gui
 Feature: US-dashboard.detail.view-task-details Детальный просмотр задачи
 
   Background:
