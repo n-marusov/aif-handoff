@@ -74,16 +74,16 @@ REQ-FR-<L1>.<L2>.<action>
 
 ## Текущее состояние
 
-На 2026-09-18 в каталоге **49 FR**: FR детализируют 46 UC системы (включая 2 proposed `audit.telemetry`, Фаза 5) и 2 дополнительных требования, выявленных из анализа реализации (создание workspace-файлов стадии реализации, инициализация AI Factory scaffold).
+На 2026-09-20 в каталоге **50 FR**: FR детализируют 47 UC системы (включая 2 proposed `audit.telemetry`, Фаза 5) и 2 дополнительных требования, выявленных из анализа реализации (создание workspace-файлов стадии реализации, инициализация AI Factory scaffold).
 
 | Показатель                   | Значение                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| FR всего (файлов)            | 49                                                                                                                  |
-| По приоритетам               | P0 — 14 · P1 — 26 · P2 — 9                                                                                          |
-| По классу                    | `as is` — 45 · `to be` — 4                                                                                          |
+| FR всего (файлов)            | 50                                                                                                                  |
+| По приоритетам               | P0 — 14 · P1 — 27 · P2 — 9                                                                                          |
+| По классу                    | `as is` — 46 · `to be` — 4                                                                                          |
 | Покрытие доменов (L1)        | все 11 доменов: pipeline, dashboard, runtime, vcs-auto, accounting, handoff, chat, auth, audit, integration, warmup |
 | Покрытие поддоменов (L2)     | все 36 поддоменов (полное покрытие; добавлен `audit.telemetry`)                                                     |
-| UC-источников (`use-cases/`) | 46 UC (44 `as is` + 2 `to be` — `audit.telemetry`): все домены L1 покрыты                                           |
+| UC-источников (`use-cases/`) | 47 UC (45 `as is` + 2 `to be` — `audit.telemetry`): все домены L1 покрыты                                           |
 
 Все FR верифицированы на соответствие исходному коду: state machine (`packages/shared/src/stateMachine.ts`), data layer (`packages/data/src/taskTransitions.ts`, `taskOwnership.ts`, `audit.ts`, `participants.ts`, `authSessions.ts`), coordinator (`packages/agent/src/coordinator.ts`), runtime (`packages/runtime/src/errors.ts`, `usageSink.ts`, `registry.ts`, `resolution.ts`, `bootstrap.ts`), API routes (`packages/api/src/routes/`) и subagents (`packages/agent/src/subagents/`).
 

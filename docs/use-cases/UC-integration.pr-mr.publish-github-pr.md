@@ -1,4 +1,4 @@
-[← UC-integration.issues.sync-github-issue](UC-integration.issues.sync-github-issue.md) · [Back to README](../README.md) · [UC-integration.pr-mr.resolve-review-decision →](UC-integration.pr-mr.resolve-review-decision.md)
+[← UC-integration.issues.bootstrap-project-sync-and-create-task](UC-integration.issues.bootstrap-project-sync-and-create-task.md) · [Back to README](../README.md) · [UC-integration.pr-mr.resolve-review-decision →](UC-integration.pr-mr.resolve-review-decision.md)
 
 # UC-integration.pr-mr.publish-github-pr: Публикация Pull Request на GitHub
 
