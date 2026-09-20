@@ -47,7 +47,10 @@ test.skip("L-06: управление ролями участников — тр
   // проверить сохранение через PUT /participants/:id.
 });
 
-// Дополнительная проверка: участники выключены — participant-меню недоступно (negative).
+// Дополнительная проверка (negative): участники выключены — participant-меню недоступно.
+// KI: «E2E GUI: сценарии auth/roles (L-08, L-06) невыполнимы на стенде с
+// PARTICIPANTS_MODE_ENABLED=false» — компенсирующий UI-тест состояния без UC/US
+// (явное исключение §4, аналог participants-mode.spec.ts).
 test("L-06b: при выключенных участниках отсутствует participant-меню (negative)", async ({
   page,
 }) => {

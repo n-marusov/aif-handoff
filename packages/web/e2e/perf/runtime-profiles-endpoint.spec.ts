@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { PERF_BUDGETS, recordNetwork } from "./utils";
 
+// Явное исключение §4 (docs/qa/e2e-gui-testing.md): perf-бюджет эндпоинта
+// runtime-профилей — техническое поведение без UC/US, инфраструктурная
+// проверка (аналог L-01d).
 // Измеряет запрос `/runtime-profiles` изнутри браузера: это реальный путь
 // пользователя (fetch -> React Query -> render), а не сырой curl.
 // Запрос выполняется дважды: первый вызов проверяет холодный кеш

@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+// Явное исключение §4 (docs/qa/e2e-gui-testing.md): компенсирующий UI-тест
+// participants-режима, пока L-06/L-08 заблокированы стендом (см. KI в
+// docs/known-issues.md). Стенд на текущем стенде не поднимает participants-режим
+// (PARTICIPANTS_MODE_ENABLED=true не включён), поэтому кейс использует моки;
+// после включения режима на стенде переписать на реальный стек и удалить моки.
+// Явное исключение §4 — моки в happy path без UC/US-trace.
+
 const PROJECT_ID = "00000000-0000-4000-8000-000000000159";
 const PARTICIPANT_ID = "00000000-0000-4000-8000-000000000001";
 
