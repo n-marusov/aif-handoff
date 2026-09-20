@@ -182,6 +182,7 @@ data/                    # SQLite database files (gitignored)
 | Contracts           | docs/contracts/README.md      | Inter-package contracts, API, WebSocket, and adapter interfaces |
 | Business Rules      | docs/business-rules/README.md | Task lifecycle, authorization, and automation policies          |
 | Vision & Scope      | docs/vision.md                | Product vision, scope, and business context                     |
+| Domain Model (DDD)  | docs/domain/README.md         | Bounded contexts, aggregates, events, ontology                  |
 
 ## AI Context Files
 

@@ -1,0 +1,261 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix aif: <http://aif-handoff.dev/ontology#> .
+
+# ====================================================================
+# Ontology: AIF Handoff — DDD Domain Model
+# Description: Bounded contexts, aggregates, domain events, relationships
+# Date: 2026-09-20
+# Sources: docs/domain/*.md, docs/vision.md, docs/business-rules/*,
+#          docs/contracts/*, packages/shared|data|runtime|api|agent
+# ====================================================================
+
+aif:Ontology a owl:Ontology ;
+    rdfs:label "Онтология предметной области AIF Handoff"@ru ;
+    rdfs:label "AIF Handoff Domain Ontology"@en ;
+    rdfs:comment "DDD-модель автономного task handoff: lifecycle задач, runtime-оркестрация, collaboration governance и интеграционный sync-контур"@ru .
+
+# ====================================================================
+# Bounded contexts
+# ====================================================================
+
+aif:DomainContext a rdfs:Class ;
+    rdfs:label "Ограниченный контекст"@ru ;
+    rdfs:label "Bounded Context"@en .
+
+aif:CoreContext a rdfs:Class ;
+    rdfs:subClassOf aif:DomainContext ;
+    rdfs:label "Ключевая подобласть"@ru ;
+    rdfs:label "Core Subdomain"@en .
+
+aif:SupportingContext a rdfs:Class ;
+    rdfs:subClassOf aif:DomainContext ;
+    rdfs:label "Поддерживающая подобласть"@ru ;
+    rdfs:label "Supporting Subdomain"@en .
+
+aif:TaskLifecycleContext a aif:CoreContext ;
+    rdfs:label "Жизненный цикл задач"@ru ;
+    rdfs:label "Task Lifecycle"@en .
+
+aif:RuntimeOrchestrationContext a aif:CoreContext ;
+    rdfs:label "Оркестрация runtime"@ru ;
+    rdfs:label "Runtime Orchestration"@en .
+
+aif:CollaborationGovernanceContext a aif:SupportingContext ;
+    rdfs:label "Участники и governance"@ru ;
+    rdfs:label "Collaboration Governance"@en .
+
+aif:IntegrationSyncContext a aif:SupportingContext ;
+    rdfs:label "Интеграции и синхронизация"@ru ;
+    rdfs:label "Integration Sync"@en .
+
+# ====================================================================
+# External systems
+# ====================================================================
+
+aif:ExternalSystem a rdfs:Class ;
+    rdfs:label "Внешняя система"@ru ;
+    rdfs:label "External System"@en .
+
+aif:RuntimeProvider a rdfs:Class ;
+    rdfs:subClassOf aif:ExternalSystem ;
+    rdfs:label "Runtime-провайдер"@ru ;
+    rdfs:label "Runtime Provider"@en .
+
+aif:GitHosting a rdfs:Class ;
+    rdfs:subClassOf aif:ExternalSystem ;
+    rdfs:label "VCS-хостинг"@ru ;
+    rdfs:label "Git Hosting"@en .
+
+aif:McpClient a rdfs:Class ;
+    rdfs:subClassOf aif:ExternalSystem ;
+    rdfs:label "MCP-клиент"@ru ;
+    rdfs:label "MCP Client"@en .
+
+# ====================================================================
+# Aggregates / entities / value objects
+# ====================================================================
+
+aif:AggregateRoot a rdfs:Class ;
+    rdfs:label "Корень агрегата"@ru ;
+    rdfs:label "Aggregate Root"@en .
+
+aif:Task a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Задача"@ru ;
+    rdfs:label "Task"@en .
+
+aif:TaskPlan a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "План задачи"@ru ;
+    rdfs:label "Task Plan"@en .
+
+aif:CoordinatorClaim a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Claim координатора"@ru ;
+    rdfs:label "Coordinator Claim"@en .
+
+aif:RuntimeProfile a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Runtime профиль"@ru ;
+    rdfs:label "Runtime Profile"@en .
+
+aif:RuntimeLimitPolicy a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Политика runtime-лимитов"@ru ;
+    rdfs:label "Runtime Limit Policy"@en .
+
+aif:Participant a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Участник"@ru ;
+    rdfs:label "Participant"@en .
+
+aif:TaskOwnership a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Владение задачей"@ru ;
+    rdfs:label "Task Ownership"@en .
+
+aif:ExternalSyncSession a rdfs:Class ;
+    rdfs:subClassOf aif:AggregateRoot ;
+    rdfs:label "Сеанс внешней синхронизации"@ru ;
+    rdfs:label "External Sync Session"@en .
+
+# Value objects
+
+aif:StageTransition a rdfs:Class ;
+    rdfs:label "Переход стадии"@ru ;
+    rdfs:label "Stage Transition"@en .
+
+aif:ExecutionIntent a rdfs:Class ;
+    rdfs:label "Намерение исполнения"@ru ;
+    rdfs:label "Execution Intent"@en .
+
+aif:RuntimeCapabilities a rdfs:Class ;
+    rdfs:label "Способности runtime"@ru ;
+    rdfs:label "Runtime Capabilities"@en .
+
+# ====================================================================
+# Domain events
+# ====================================================================
+
+aif:DomainEvent a rdfs:Class ;
+    rdfs:label "Доменное событие"@ru ;
+    rdfs:label "Domain Event"@en .
+
+aif:TaskCreated a aif:DomainEvent ;
+    rdfs:label "Задача создана"@ru ;
+    rdfs:label "Task Created"@en .
+
+aif:TaskStageTransitionApplied a aif:DomainEvent ;
+    rdfs:label "Переход стадии применён"@ru ;
+    rdfs:label "Task Stage Transition Applied"@en .
+
+aif:TaskPlanGenerated a aif:DomainEvent ;
+    rdfs:label "План сформирован"@ru ;
+    rdfs:label "Task Plan Generated"@en .
+
+aif:TaskImplementationStarted a aif:DomainEvent ;
+    rdfs:label "Реализация запущена"@ru ;
+    rdfs:label "Task Implementation Started"@en .
+
+aif:TaskVerifyCompleted a aif:DomainEvent ;
+    rdfs:label "Проверка завершена"@ru ;
+    rdfs:label "Task Verify Completed"@en .
+
+aif:TaskReviewEscalatedToManual a aif:DomainEvent ;
+    rdfs:label "Ревью эскалировано человеку"@ru ;
+    rdfs:label "Task Review Escalated To Manual"@en ;
+    aif:eventKey "task.review.manual-required" .
+
+aif:RuntimeExecutionFailed a aif:DomainEvent ;
+    rdfs:label "Исполнение runtime завершилось ошибкой"@ru ;
+    rdfs:label "Runtime Execution Failed"@en .
+
+aif:PlanReviewPublished a aif:DomainEvent ;
+    rdfs:label "Plan review опубликован"@ru ;
+    rdfs:label "Plan Review Published"@en ;
+    aif:eventKey "task.plan.review.published" .
+
+aif:TaskSyncedViaMcp a aif:DomainEvent ;
+    rdfs:label "Задача синхронизирована через MCP"@ru ;
+    rdfs:label "Task Synced Via MCP"@en ;
+    aif:eventKey "task.sync.mcp" .
+
+# ====================================================================
+# Object properties
+# ====================================================================
+
+aif:domainRelation a owl:ObjectProperty ;
+    rdfs:label "Доменная связь"@ru ;
+    rdfs:label "Domain Relation"@en .
+
+aif:contextRelation a owl:ObjectProperty ;
+    rdfs:subPropertyOf aif:domainRelation ;
+    rdfs:label "Связь контекстов"@ru ;
+    rdfs:label "Context Relation"@en .
+
+aif:structuralRelation a owl:ObjectProperty ;
+    rdfs:subPropertyOf aif:domainRelation ;
+    rdfs:label "Структурная связь"@ru ;
+    rdfs:label "Structural Relation"@en .
+
+aif:eventRelation a owl:ObjectProperty ;
+    rdfs:subPropertyOf aif:domainRelation ;
+    rdfs:label "Событийная связь"@ru ;
+    rdfs:label "Event Relation"@en .
+
+aif:governs a owl:ObjectProperty ;
+    rdfs:subPropertyOf aif:contextRelation ;
+    rdfs:domain aif:CollaborationGovernanceContext ;
+    rdfs:range aif:TaskLifecycleContext ;
+    rdfs:label "управляет политиками"@ru ;
+    rdfs:label "governs"@en .
+
+aif:triggers a owl:ObjectProperty ;
+    rdfs:subPropertyOf aif:eventRelation ;
+    rdfs:domain aif:DomainEvent ;
+    rdfs:range aif:DomainEvent ;
+    rdfs:label "вызывает"@ru ;
+    rdfs:label "triggers"@en .
+
+aif:publishesTo a owl:ObjectProperty ;
+    rdfs:subPropertyOf aif:contextRelation ;
+    rdfs:domain aif:IntegrationSyncContext ;
+    rdfs:range aif:ExternalSystem ;
+    rdfs:label "публикует во внешнюю систему"@ru ;
+    rdfs:label "publishes to external"@en .
+
+# ====================================================================
+# Data properties
+# ====================================================================
+
+aif:isAggregateRoot a owl:DatatypeProperty ;
+    rdfs:domain rdfs:Class ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "Является корнем агрегата"@ru ;
+    rdfs:label "Is Aggregate Root"@en .
+
+aif:eventKey a owl:DatatypeProperty ;
+    rdfs:domain aif:DomainEvent ;
+    rdfs:range xsd:string ;
+    rdfs:label "Внешний ключ события"@ru ;
+    rdfs:label "Event Key"@en .
+
+aif:errorCategory a owl:DatatypeProperty ;
+    rdfs:domain aif:RuntimeExecutionFailed ;
+    rdfs:range xsd:string ;
+    rdfs:label "Категория ошибки"@ru ;
+    rdfs:label "Error Category"@en .
+
+# Aggregate root markers
+
+aif:Task aif:isAggregateRoot true .
+aif:TaskPlan aif:isAggregateRoot true .
+aif:CoordinatorClaim aif:isAggregateRoot true .
+aif:RuntimeProfile aif:isAggregateRoot true .
+aif:RuntimeLimitPolicy aif:isAggregateRoot true .
+aif:Participant aif:isAggregateRoot true .
+aif:TaskOwnership aif:isAggregateRoot true .
+aif:ExternalSyncSession aif:isAggregateRoot true .
