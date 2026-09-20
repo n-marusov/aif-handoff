@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   API_URL,
+  PROJECT_ID,
   STATUS_COLUMN_LABELS,
   createTaskViaApi,
   deleteTaskViaApi,
@@ -117,4 +118,111 @@ test("L-01d: API стенда отвечает на health-check", async ({ requ
   expect(response.ok()).toBe(true);
   const body = (await response.json()) as { status: string };
   expect(body.status).toBe("ok");
+});
+
+// US-dashboard.board.view-kanban-columns: пользователь меняет порядок задач в колонке (основной источник).
+// HF2.1: просмотр изменений по стадиям (контекст).
+// contract-aif-rest-api: PATCH /tasks/:id/position, GET /tasks?projectId=X — внешний oracle (контекст).
+// Примечание: реордеринг реализован кнопками «Move task up/down» (useReorderTask),
+// а не drag&-drop; различие зафиксировано в docs/known-issues.md (Task 8).
+test("L-01e: реордеринг карточки в Backlog меняет position и сохраняется после reload", async ({
+  page,
+  request,
+}) => {
+  const suffix = runId();
+  const first = await createTaskViaApi(request, {
+    title: `e2e-reorder-first-${suffix}`,
+    autoMode: false,
+    paused: true,
+  });
+  const second = await createTaskViaApi(request, {
+    title: `e2e-reorder-second-${suffix}`,
+    autoMode: false,
+    paused: true,
+  });
+
+  try {
+    // Текущий максимум position в backlog (общий стенд может содержать другие задачи).
+    const beforeTasks = (await (
+      await request.get(`${API_URL}/tasks?projectId=${PROJECT_ID}`)
+    ).json()) as Array<{ id: string; status: string; position: number }>;
+    const maxPosition = Math.max(
+      0,
+      ...beforeTasks.filter((row) => row.status === "backlog").map((row) => row.position),
+    );
+
+    // Размещаем пару выше всех существующих: first выше, second ниже.
+    // Гарантия: при клике «Move task up» на second новый position всегда
+    // оказывается меньше first (midpoint с соседом сверху или first-100),
+    // независимо от остальных задач на стенде.
+    const setFirst = await request.patch(`${API_URL}/tasks/${first.id}/position`, {
+      data: { position: maxPosition + 1000 },
+    });
+    const setSecond = await request.patch(`${API_URL}/tasks/${second.id}/position`, {
+      data: { position: maxPosition + 2000 },
+    });
+    expect(setFirst.ok()).toBe(true);
+    expect(setSecond.ok()).toBe(true);
+
+    await openProjectBoard(page);
+
+    const firstCard = page
+      .getByText(first.title, { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'cursor-pointer')][1]");
+    const secondCard = page
+      .getByText(second.title, { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'cursor-pointer')][1]");
+
+    // Исходный порядок: first выше second в колонке Backlog.
+    const before = await firstCard.boundingBox();
+    const beforeSecond = await secondCard.boundingBox();
+    expect(before).not.toBeNull();
+    expect(beforeSecond).not.toBeNull();
+    expect(before!.y).toBeLessThan(beforeSecond!.y);
+
+    // Пользовательский путь: перемещаем second выше через кнопку Move task up.
+    await secondCard.getByRole("button", { name: "Move task up" }).click();
+
+    // После реордеринга second отображается выше first.
+    await expect
+      .poll(async () => {
+        const afterSecond = await secondCard.boundingBox();
+        const afterFirst = await firstCard.boundingBox();
+        if (!afterSecond || !afterFirst) return false;
+        return afterSecond.y < afterFirst.y;
+      })
+      .toBe(true);
+
+    // Oracle: position second стал меньше position first.
+    const tasksResponse = await request.get(`${API_URL}/tasks?projectId=${PROJECT_ID}`);
+    expect(tasksResponse.ok()).toBe(true);
+    const tasks = (await tasksResponse.json()) as Array<{
+      id: string;
+      position: number;
+    }>;
+    const firstRow = tasks.find((row) => row.id === first.id);
+    const secondRow = tasks.find((row) => row.id === second.id);
+    expect(firstRow).toBeDefined();
+    expect(secondRow).toBeDefined();
+    expect(secondRow!.position).toBeLessThan(firstRow!.position);
+
+    // Порядок сохраняется после reload (персистентность position).
+    await page.reload();
+    await expect(page.getByText(second.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(first.title, { exact: true })).toBeVisible();
+    const afterReloadFirst = await page
+      .getByText(first.title, { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'cursor-pointer')][1]")
+      .boundingBox();
+    const afterReloadSecond = await page
+      .getByText(second.title, { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'cursor-pointer')][1]")
+      .boundingBox();
+    expect(afterReloadFirst).not.toBeNull();
+    expect(afterReloadSecond).not.toBeNull();
+    expect(afterReloadSecond!.y).toBeLessThan(afterReloadFirst!.y);
+  } finally {
+    await deleteTaskViaApi(request, first.id);
+    await deleteTaskViaApi(request, second.id);
+  }
 });
