@@ -11,7 +11,9 @@ regressions, and enforces latency budgets.
 npm run perf:install --workspace=@aif/web
 
 # then — from the repo root OR from packages/web
-npm run perf --workspace=@aif/web
+npm run e2e:gui --workspace=@aif/web    # GUI-спектры (e2e/gui)
+npm run e2e:api --workspace=@aif/web    # API-спектры (e2e/api, REST+WS напрямую в сервис api)
+npm run perf --workspace=@aif/web      # полный набор (GUI + perf-бюджеты + scroll/participants)
 ```
 
 The config launches `npm run dev` at the repo root via `webServer` and reuses

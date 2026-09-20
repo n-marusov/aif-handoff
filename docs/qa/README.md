@@ -367,7 +367,7 @@ lint (ESLint/Prettier/tsc) → unit (vitest + coverage 70%)
 - [Процедура интеграционного тестирования](integration.md) — стенды, заглушки и процедура на основе контрактов
 - [Smoke-тестирование](smoke-testing.md) — виды (build/install/deployment), процедура, стенды и каталог сценариев
 - [E2E-тестирование GUI](e2e-gui-testing.md) — сквозные сценарии через React SPA (Playwright)
-- [Каталог E2E GUI](../../packages/web/e2e/README.md) — окружение, спектры, запуск (`npm run perf --workspace=@aif/web`)
+- [Каталог E2E GUI](../../packages/web/e2e/README.md) — окружение, спектры, запуск (`npm run e2e:gui --workspace=@aif/web`)
 - [E2E-тестирование API](e2e-api-testing.md) — сквозные контракты REST/WS/RuntimeAdapter/VCS
 - [Модульное тестирование](unit-testing.md) — конвенции, изоляция, шаблоны тестов
 - [Гейты AI Factory](gates.md) — гейты для LLM-генерации артефактов и подтверждения достижения требований

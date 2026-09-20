@@ -123,6 +123,35 @@ coverage: ## Полный прогон тестов с покрытием (FG-CO
 	@$(NPX_CMD) turbo coverage --concurrency=1
 	@echo coverage: OK, coverage report generated
 
+.PHONY: e2e
+e2e: e2e-gui e2e-api ## E2E-тесты Playwright: GUI + API против локального dev-стека
+	@echo e2e: OK, all e2e tests passed
+
+.PHONY: e2e-gui
+e2e-gui: ## E2E GUI-спектры в браузере (npm run e2e:gui --workspace=@aif/web)
+	@$(NPM_CMD) run e2e:gui --workspace=@aif/web
+	@echo e2e-gui: OK, all GUI e2e tests passed
+
+.PHONY: e2e-api
+e2e-api: ## E2E API-спектры: REST+WS напрямую в сервис api (npm run e2e:api --workspace=@aif/web)
+	@$(NPM_CMD) run e2e:api --workspace=@aif/web
+	@echo e2e-api: OK, all API e2e tests passed
+
+.PHONY: e2e-full
+e2e-full: ## Полный Playwright-набор с perf-бюджетами (npm run perf --workspace=@aif/web)
+	@$(NPM_CMD) run perf --workspace=@aif/web
+	@echo e2e-full: OK, full Playwright suite passed
+
+.PHONY: e2e-install
+e2e-install: ## Установить браузеры Playwright (npm run perf:install --workspace=@aif/web)
+	@$(NPM_CMD) run perf:install --workspace=@aif/web
+	@echo e2e-install: OK, playwright browsers installed
+
+.PHONY: e2e-report
+e2e-report: ## Открыть HTML-отчёт Playwright (npm run perf:report --workspace=@aif/web)
+	@$(NPM_CMD) run perf:report --workspace=@aif/web
+	@echo e2e-report: OK
+
 .PHONY: mutation
 mutation: ## Stryker mutation testing (полный прогон)
 	@$(NPM_CMD) run mutation

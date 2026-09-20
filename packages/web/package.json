@@ -17,7 +17,9 @@
     "perf": "node ./scripts/run-perf.mjs",
     "perf:ui": "playwright test --config=playwright.config.ts --ui",
     "perf:report": "playwright show-report playwright-report",
-    "perf:install": "playwright install chromium"
+    "perf:install": "playwright install chromium",
+    "e2e:gui": "playwright test --config=playwright.config.ts e2e/gui",
+    "e2e:api": "playwright test --config=playwright.config.ts e2e/api"
   },
   "dependencies": {
     "@aif/shared": "*",
@@ -42,11 +44,13 @@
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^29.0.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
     "vite": "^8.0.3",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.2",
+    "ws": "^8.20.0"
   }
 }

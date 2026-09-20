@@ -527,9 +527,10 @@ Fresh-context reviewer проверяет: требование/контракт
 - E2E GUI: Playwright (`packages/web/playwright.config.ts`, `testDir: ./e2e`):
 
 ```sh
-npm run perf:install --workspace=@aif/web   # установка chromium (один раз)
-npm run perf --workspace=@aif/web           # запуск спектров (webServer авто-старт dev-стека)
-npm run perf:report --workspace=@aif/web    # HTML-отчёт
+npm run perf:install --workspace=@aif/web    # установка chromium (один раз)
+npm run e2e:gui --workspace=@aif/web         # GUI-спектры (webServer авто-старт dev-стека)
+npm run perf --workspace=@aif/web            # полный E2E-набор (GUI + perf-бюджеты + scroll/participants)
+npm run perf:report --workspace=@aif/web     # HTML-отчёт
 ```
 
 - переменные окружения: `AIF_SKIP_DEV_SERVER=1` (не поднимать dev-сервер), `AIF_WEB_URL` (внешний URL web), `AIF_E2E_ISOLATED_UI=true` (изолированный web dev);

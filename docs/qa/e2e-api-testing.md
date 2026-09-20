@@ -758,13 +758,15 @@ npm run ai:protocol                      # protocol-проверка codex-ко�
 
 Ожидаемый результат: типы/схемы контрактов (`docs/contracts/`) синхронизированы с реализацией `packages/*/src`.
 
-### 17.2. E2E API-тесты (Vitest)
+### 17.2. E2E API-тесты (Playwright, реальный стек)
 
-Рекомендуемый паттерн — суффикс `.e2e.test.ts`/`.integration.test.ts` (для путей, требующих стенда):
+Настоящий E2E API-уровень — Playwright-спектры `packages/web/e2e/api/*.spec.ts`, которые ходят в сервис `api` напрямую (REST + WS через внешний клиент, без браузера UI):
 
 ```sh
-npm run test --workspace=@aif/api
-docker compose up -d   # полный контур (целевое для E2E API)
+npm run e2e:api --workspace=@aif/web   # E2E API-спектры (health, task lifecycle, handoff, comments, WS, projects, runtime)
+npm run e2e:gui --workspace=@aif/web   # GUI-спектры (браузер)
+npm run test --workspace=@aif/api      # unit + in-process интеграционные (.integration.test.ts / .e2e.test.ts)
+docker compose up -d                    # полный контур (целевое для E2E API)
 ```
 
 Правила:
