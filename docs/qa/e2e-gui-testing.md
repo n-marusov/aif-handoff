@@ -165,14 +165,15 @@ it("отображает колонки Kanban и карточки задач", 
 
 ### 6.1. Элементы интерфейса как контракт UI
 
-| Элемент        | Реализация                                                                                                            | Ключевые состояния/значения                                                           | Сценарии      |
-| -------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------- |
-| Kanban-доска   | `Board`, `Column`, `TaskCard`, `AddTaskForm`                                                                          | колонки по стадиям, карточки (приоритет/владелец/гейты), создание задачи, drag & drop | L-01, L-02    |
-| Детали задачи  | `TaskDetail`, ownership/handoff, `ExecutorTimeline`, план, комментарии, логи                                          | поля, переходы стадий, handoff, комментарии, история                                  | L-03, L-04    |
-| Диалоги        | `ParticipantManagementDialog`, `ProjectRuntimeSettings`, `RuntimeProfileForm`, `GlobalSettingsDialog`, `WarmupDialog` | валидация, сохранение, ошибки                                                         | L-05, L-06    |
-| Real-time      | `useWebSocket`, notifications                                                                                         | обновление статусов без перезагрузки, реконнект                                       | L-07          |
-| Аутентификация | `LoginPage`, session/CSRF                                                                                             | вход/выход, ошибки, редиректы                                                         | L-08          |
-| UI-примитивы   | `components/ui/*`                                                                                                     | поведение, доступность (целевое)                                                      | фон всех L-\* |
+| Элемент        | Реализация                                                                                                            | Ключевые состояния/значения                                                          | Сценарии                             |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------ |
+| Kanban-доска   | `Board`, `Column`, `TaskCard`, `AddTaskForm`                                                                          | колонки по стадиям, карточки (приоритет/владелец/гейты), создание задачи, реордеринг | L-01, L-01b, L-01c, L-01e, L-02-form |
+| Детали задачи  | `TaskDetail`, ownership/handoff, `ExecutorTimeline`, план, комментарии, логи, `TaskSettings`                          | поля, переходы стадий, handoff, комментарии, история, task-level runtime override    | L-02, L-02b, L-03, L-04, L-05c       |
+| Диалоги        | `ParticipantManagementDialog`, `ProjectRuntimeSettings`, `RuntimeProfileForm`, `GlobalSettingsDialog`, `WarmupDialog` | валидация, сохранение, ошибки                                                        | L-05, L-06                           |
+| Real-time      | `useWebSocket`, notifications                                                                                         | обновление статусов без перезагрузки, реконнект                                      | L-07                                 |
+| Аутентификация | `LoginPage`, session/CSRF                                                                                             | вход/выход, ошибки, редиректы                                                        | L-08                                 |
+| Чат            | `ChatBubble`, `ChatPanel`, sessions/messages                                                                          | открытие, отправка вопроса, ответ ассистента, история сессии                         | L-08c, L-08d                         |
+| UI-примитивы   | `components/ui/*`                                                                                                     | поведение, доступность (целевое)                                                     | фон всех L-\*                        |
 
 ### 6.2. Сквозные GUI-пути как объект проверки
 
@@ -393,14 +394,21 @@ Harness-правило для каждого GUI-пути:
 
 Свод идентификаторов с уровнем `E2E GUI`: сценарии — `test-plan.md` (артефакты `aif-qa`), ID набора `L-*`:
 
-| Область                                                 | Источник (основной trace)                                                                       | Идентификаторы сценариев (примеры) |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------- |
-| Kanban-доска: просмотр, создание, drag & drop           | `UC-dashboard.board.view-kanban-columns`, `UC-dashboard.detail.view-task-details`               | L-01, L-02                         |
-| Детали задачи: переходы, handoff, комментарии           | `UC-pipeline.manual-override.intervene-task-stage`, `UC-handoff.transfer.ownership-to-executor` | L-03, L-04                         |
-| Диалоги: участники, настройки проектов, runtime-профили | `UC-runtime.profile.configure-project-runtime`, `UC-auth.roles.assign-participant-role`         | L-05, L-06                         |
-| Real-time: статусы/гейты, реконнект                     | `UC-dashboard.realtime.receive-live-status-updates`                                             | L-07                               |
-| Аутентификация                                          | `UC-auth.registration.sign-up-participant`, `BR-constraint.auth.sessions`                       | L-08                               |
-| a11y (план)                                             | WCAG, keyboard-only                                                                             | L-09 (целевое)                     |
+| Область                                                    | Источник (основной trace)                                                                                | Идентификаторы сценариев (примеры) |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| Kanban-доска: просмотр/фильтр                              | `UC-dashboard.board.view-kanban-columns`                                                                 | L-01, L-01b, L-01c                 |
+| Kanban-доска: создание задачи через форму                  | `UC-dashboard.board.view-kanban-columns`, `UC-integration.issues.bootstrap-project-sync-and-create-task` | L-02-form                          |
+| Kanban-доска: реордеринг карточек (кнопка, не drag & drop) | `UC-dashboard.board.view-kanban-columns`                                                                 | L-01e                              |
+| Детали задачи: просмотр                                    | `UC-dashboard.detail.view-task-details`                                                                  | L-02                               |
+| Детали задачи: комментарии                                 | `UC-dashboard.detail.view-task-details`                                                                  | L-02b                              |
+| Детали задачи: переходы, handoff                           | `UC-pipeline.manual-override.intervene-task-stage`, `UC-handoff.transfer.ownership-to-executor`          | L-03, L-04                         |
+| Задачи: task-level runtime override                        | `UC-runtime.override.override-profile-for-task`                                                          | L-05c                              |
+| Чат с AI-ассистентом (проект/задача)                       | `UC-chat.project-context.consult-ai-assistant`, `UC-chat.task-context.discuss-task-with-ai`              | L-08c, L-08d                       |
+| Диалоги: участники, настройки проектов, runtime-профили    | `UC-runtime.profile.configure-project-runtime`, `UC-auth.roles.assign-participant-role`                  | L-05, L-06                         |
+| Real-time: статусы/гейты, реконнект                        | `UC-dashboard.realtime.receive-live-status-updates`                                                      | L-07                               |
+| Аутентификация                                             | `UC-auth.registration.sign-up-participant`, `BR-constraint.auth.sessions`                                | L-08                               |
+| Инфраструктура стенда (health-check)                       | без UC/US — явное исключение §4 (аналог L-08)                                                            | L-01d                              |
+| a11y (план)                                                | WCAG, keyboard-only                                                                                      | L-09 (целевое)                     |
 
 Правила:
 
@@ -630,12 +638,22 @@ Red-first/sabotage; unit/integration; E2E GUI на стенде; negative; CI. �
 ```ts
 import { test, expect } from "@playwright/test";
 
-test("L-02: создание задачи через форму", async ({ page }) => {
-  // arrange: открыть web (baseURL), залогиниться, очистить БД
+test("L-02: открывает детали задачи", async ({ page }) => {
+  // arrange: открыть web (baseURL), залогиниться, очистить БД,
+  //        создать задачу через реальный API (oracle `createTaskViaApi`)
+  // act: кликнуть по карточке задачи на доске
+  // assert: детали открыты; секции согласованы с API (oracle GET /tasks/:id)
+});
+
+test("L-02-form: создание задачи через форму", async ({ page }) => {
+  // arrange: открыть web (baseURL), залогиниться, открыть колонку Backlog
   // act: ввести название в AddTaskForm и сохранить
-  // assert: карточка появилась в Backlog; API 201; аудит записан
+  // assert: карточка появилась в Backlog; oracle GET /tasks подтверждает создание
 });
 ```
+
+> Именование кейсов: суффикс `-form` / `-b` / `-c` / `-e` разводит сценарии одного источника
+> (форма, комментарии, вьюхи), базовый ID (`L-01`, `L-02`) остаётся за основным сценарием.
 
 ### 21.3. Отчёт ручного прогона
 
