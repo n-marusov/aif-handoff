@@ -175,6 +175,7 @@ data/                    # SQLite database files (gitignored)
 | GitLab Demo         | docs/gitlab-demo.md           | End-to-end GitLab.com + router.ai demo runbook                  |
 | Dev GUI Demo        | docs/dev-gui-demo.md          | Local dev + Web UI GitLab/router.ai runbook                     |
 | Known Issues        | docs/known-issues.md          | Known problems, workarounds, and deferred fixes                 |
+| User Stories        | docs/user-stories/README.md   | Gherkin US format; semantic classification mapped to HF1–HF12   |
 | Use Cases           | docs/use-cases/README.md      | Use case index with 46 UC files mapped to HF1–HF12              |
 | Functional Reqs     | docs/fun-req/README.md        | 49 FR files generated from 46 UC, mapped to HF1–HF12            |
 | Non-Functional Reqs | docs/nonfun-req/README.md     | NFR specification: areas, quality criteria, project constraints |
