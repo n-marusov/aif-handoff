@@ -1,4 +1,4 @@
-[← UC-pipeline.sidecar.review-with-sidecar-agent](UC-pipeline.sidecar.review-with-sidecar-agent.md) · [Back to README](../README.md) · [UC-pipeline.independent-verification.verify-independently →](UC-pipeline.independent-verification.verify-independently.md)
+[← UC-pipeline.sidecar.review-with-sidecar-agent](UC-pipeline.sidecar.review-with-sidecar-agent.md) · [Back to README](README.md) · [UC-pipeline.independent-verification.verify-independently →](UC-pipeline.independent-verification.verify-independently.md)
 
 # UC-pipeline.review-loop.iterate-review-feedback: Циклическое авторевью с итерациями доработки
 

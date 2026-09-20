@@ -1,4 +1,4 @@
-[← UC-vcs-auto.isolation.create-worktree](UC-vcs-auto.isolation.create-worktree.md) · [Back to README](../README.md) · [UC-vcs-auto.mr.publish-atomic-merge-request →](UC-vcs-auto.mr.publish-atomic-merge-request.md)
+[← UC-vcs-auto.isolation.execute-task-in-worktree](UC-vcs-auto.isolation.execute-task-in-worktree.md) · [Back to README](README.md) · [UC-vcs-auto.mr.publish-atomic-merge-request →](UC-vcs-auto.mr.publish-atomic-merge-request.md)
 
 # UC-vcs-auto.isolation.init-submodules: Инициализация субмодулей при подготовке репозитория
 

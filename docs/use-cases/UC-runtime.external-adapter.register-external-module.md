@@ -1,4 +1,4 @@
-[← UC-runtime.override.override-profile-for-task](UC-runtime.override.override-profile-for-task.md) · [Back to README](../README.md) · [UC-vcs-auto.isolation.execute-task-in-worktree →](UC-vcs-auto.isolation.execute-task-in-worktree.md)
+[← UC-runtime.override.override-profile-for-task](UC-runtime.override.override-profile-for-task.md) · [Back to README](README.md) · [UC-vcs-auto.isolation.execute-task-in-worktree →](UC-vcs-auto.isolation.execute-task-in-worktree.md)
 
 # UC-runtime.external-adapter.register-external-module: Подключение внешнего runtime-адаптера
 

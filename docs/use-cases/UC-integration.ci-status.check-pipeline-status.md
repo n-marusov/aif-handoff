@@ -1,4 +1,4 @@
-[← UC-integration.pr-mr.resolve-review-decision](UC-integration.pr-mr.resolve-review-decision.md) · [Back to README](../README.md) · [UC-warmup.preheat.warmup-runtime-session →](UC-warmup.preheat.warmup-runtime-session.md)
+[← UC-integration.pr-mr.resolve-review-decision](UC-integration.pr-mr.resolve-review-decision.md) · [Back to README](README.md) · [UC-warmup.preheat.warmup-runtime-session →](UC-warmup.preheat.warmup-runtime-session.md)
 
 # UC-integration.ci-status.check-pipeline-status: Проверка CI-статусов PR/MR
 

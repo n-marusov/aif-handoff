@@ -1,4 +1,4 @@
-[← UC-pipeline.manual-override.intervene-task-stage](UC-pipeline.manual-override.intervene-task-stage.md) · [Back to README](../README.md) · [UC-pipeline.sidecar.review-with-sidecar-agent →](UC-pipeline.sidecar.review-with-sidecar-agent.md)
+[← UC-pipeline.manual-override.intervene-task-stage](UC-pipeline.manual-override.intervene-task-stage.md) · [Back to README](README.md) · [UC-pipeline.sidecar.review-with-sidecar-agent →](UC-pipeline.sidecar.review-with-sidecar-agent.md)
 
 # UC-pipeline.gate.enforce-stage-transition-gate: Формальные гейты переходов между стадиями
 

@@ -1,4 +1,4 @@
-[← UC-chat.task-context.discuss-task-with-ai](UC-chat.task-context.discuss-task-with-ai.md) · [Back to README](../README.md) · [UC-auth.roles.assign-participant-role →](UC-auth.roles.assign-participant-role.md)
+[← UC-chat.task-context.discuss-task-with-ai](UC-chat.task-context.discuss-task-with-ai.md) · [Back to README](README.md) · [UC-auth.roles.assign-participant-role →](UC-auth.roles.assign-participant-role.md)
 
 # UC-auth.registration.sign-up-participant: Регистрация и вход участника
 

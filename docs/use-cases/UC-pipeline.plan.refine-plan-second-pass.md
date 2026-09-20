@@ -1,4 +1,4 @@
-[← UC-pipeline.plan.generate-change-plan](UC-pipeline.plan.generate-change-plan.md) · [Back to README](../README.md) · [UC-pipeline.implementation.execute-change-in-isolation →](UC-pipeline.implementation.execute-change-in-isolation.md)
+[← UC-pipeline.plan.generate-change-plan](UC-pipeline.plan.generate-change-plan.md) · [Back to README](README.md) · [UC-pipeline.implementation.execute-change-in-isolation →](UC-pipeline.implementation.execute-change-in-isolation.md)
 
 # UC-pipeline.plan.refine-plan-second-pass: Уточнение плана вторым проходом (Improve)
 

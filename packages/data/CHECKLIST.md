@@ -6,5 +6,7 @@ Run through this list whenever you touch anything under `packages/data/`.
 - [x] If you added a new repository function, keep it cohesive with the existing repository-style API (one function = one intent). (`gitlab.ts` mirrors `github.ts`)
 - [x] If `@aif/shared/schema.ts` changed, update the affected repository functions here in the same PR.
 - [x] Add unit tests covering new query paths and edge cases (empty result, conflict, update of missing row). (`packages/data/src/__tests__/gitlab.test.ts` incl. `markGitLabRepositoryPrepared` round-trip)
+- [x] Avoid trivial always-pass asserts (`expect(true).toBe(true)`) — they are flagged by the `FG-TEST-QUALITY` gate (`make gate-fg`). Use real assertions (described at `docs/qa/unit-testing.md`).
 - [x] `npm run lint`
 - [x] `npm test`
+- [x] `npm run gates:fg` — test-quality gates pass for changed tests

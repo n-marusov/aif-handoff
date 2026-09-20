@@ -1,4 +1,4 @@
-[← UC-auth.registration.sign-up-participant](UC-auth.registration.sign-up-participant.md) · [Back to README](../README.md) · [UC-audit.logging.audit-state-transition →](UC-audit.logging.audit-state-transition.md)
+[← UC-auth.registration.sign-up-participant](UC-auth.registration.sign-up-participant.md) · [Back to README](README.md) · [UC-audit.logging.audit-state-transition →](UC-audit.logging.audit-state-transition.md)
 
 # UC-auth.roles.assign-participant-role: Разграничение ролей и прав участников
 

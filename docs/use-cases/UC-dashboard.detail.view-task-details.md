@@ -1,4 +1,4 @@
-[← UC-dashboard.gate-status.view-gate-results](UC-dashboard.gate-status.view-gate-results.md) · [Back to README](../README.md) · [UC-dashboard.realtime.receive-live-status-updates →](UC-dashboard.realtime.receive-live-status-updates.md)
+[← UC-dashboard.gate-status.view-gate-results](UC-dashboard.gate-status.view-gate-results.md) · [Back to README](README.md) · [UC-dashboard.realtime.receive-live-status-updates →](UC-dashboard.realtime.receive-live-status-updates.md)
 
 # UC-dashboard.detail.view-task-details: Детальный просмотр изменения
 

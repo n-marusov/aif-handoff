@@ -1,4 +1,4 @@
-[← UC-handoff.diagnostics.receive-escalation-diagnostics](UC-handoff.diagnostics.receive-escalation-diagnostics.md) · [Back to README](../README.md) · [UC-chat.task-context.discuss-task-with-ai →](UC-chat.task-context.discuss-task-with-ai.md)
+[← UC-handoff.diagnostics.receive-escalation-diagnostics](UC-handoff.diagnostics.receive-escalation-diagnostics.md) · [Back to README](README.md) · [UC-chat.task-context.discuss-task-with-ai →](UC-chat.task-context.discuss-task-with-ai.md)
 
 # UC-chat.project-context.consult-ai-assistant: Диалог с AI-ассистентом в контексте проекта
 

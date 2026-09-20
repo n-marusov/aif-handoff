@@ -143,19 +143,20 @@ data/                    # SQLite database files (gitignored)
 
 ## Key Entry Points
 
-| File                                    | Purpose                                 |
-| --------------------------------------- | --------------------------------------- |
-| `packages/api/src/index.ts`             | API server entry (Hono, port 3009)      |
-| `packages/web/src/main.tsx`             | Web app entry (React, port 5180)        |
-| `packages/agent/src/index.ts`           | Agent coordinator entry                 |
-| `packages/agent/src/autoQueueCommit.ts` | Auto-queue completion commit gate       |
-| `packages/agent/src/subagentQuery.ts`   | Runtime-aware subagent execution path   |
-| `packages/runtime/src/index.ts`         | Shared runtime/provider contracts       |
-| `packages/data/src/index.ts`            | Data-access barrel (topic repositories) |
-| `packages/shared/src/schema.ts`         | Database schema (drizzle-orm)           |
-| `packages/shared/src/stateMachine.ts`   | Task state transitions                  |
-| `Makefile`                              | Build automation (Linux/macOS/Windows)  |
-| `turbo.json`                            | Turborepo task definitions              |
+| File                                    | Purpose                                                      |
+| --------------------------------------- | ------------------------------------------------------------ |
+| `packages/api/src/index.ts`             | API server entry (Hono, port 3009)                           |
+| `packages/web/src/main.tsx`             | Web app entry (React, port 5180)                             |
+| `packages/agent/src/index.ts`           | Agent coordinator entry                                      |
+| `packages/agent/src/autoQueueCommit.ts` | Auto-queue completion commit gate                            |
+| `packages/agent/src/subagentQuery.ts`   | Runtime-aware subagent execution path                        |
+| `packages/runtime/src/index.ts`         | Shared runtime/provider contracts                            |
+| `packages/data/src/index.ts`            | Data-access barrel (topic repositories)                      |
+| `packages/shared/src/schema.ts`         | Database schema (drizzle-orm)                                |
+| `packages/shared/src/stateMachine.ts`   | Task state transitions                                       |
+| `Makefile`                              | Build automation (Linux/macOS/Windows)                       |
+| `turbo.json`                            | Turborepo task definitions                                   |
+| `scripts/gates/run.mjs`                 | Deterministic gate suite (G1/AG/FG) + `aif-gate-result.json` |
 
 ## Documentation
 

@@ -1,4 +1,4 @@
-[← UC-vcs-auto.commit.auto-commit-before-completion](UC-vcs-auto.commit.auto-commit-before-completion.md) · [Back to README](../README.md) · [UC-vcs-auto.plan-review.publish-plan-for-approval →](UC-vcs-auto.plan-review.publish-plan-for-approval.md)
+[← UC-vcs-auto.commit.auto-commit-before-completion](UC-vcs-auto.commit.auto-commit-before-completion.md) · [Back to README](README.md) · [UC-vcs-auto.plan-review.publish-plan-for-approval →](UC-vcs-auto.plan-review.publish-plan-for-approval.md)
 
 # UC-vcs-auto.mr.publish-atomic-merge-request: Создание единого atomic MR/PR
 

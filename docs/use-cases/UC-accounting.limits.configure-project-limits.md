@@ -1,4 +1,4 @@
-[← UC-accounting.tracking.record-runtime-call](UC-accounting.tracking.record-runtime-call.md) · [Back to README](../README.md) · [UC-accounting.blocking.block-on-limit-exceeded →](UC-accounting.blocking.block-on-limit-exceeded.md)
+[← UC-accounting.tracking.record-runtime-call](UC-accounting.tracking.record-runtime-call.md) · [Back to README](README.md) · [UC-accounting.blocking.block-on-limit-exceeded →](UC-accounting.blocking.block-on-limit-exceeded.md)
 
 # UC-accounting.limits.configure-project-limits: Конфигурация лимитов использования на уровне проекта
 

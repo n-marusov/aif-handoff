@@ -1,4 +1,4 @@
-[← UC-handoff.history.view-executor-timeline](UC-handoff.history.view-executor-timeline.md) · [Back to README](../README.md) · [UC-chat.project-context.consult-ai-assistant →](UC-chat.project-context.consult-ai-assistant.md)
+[← UC-handoff.history.view-executor-timeline](UC-handoff.history.view-executor-timeline.md) · [Back to README](README.md) · [UC-chat.project-context.consult-ai-assistant →](UC-chat.project-context.consult-ai-assistant.md)
 
 # UC-handoff.diagnostics.receive-escalation-diagnostics: Получение диагностики эскалации
 

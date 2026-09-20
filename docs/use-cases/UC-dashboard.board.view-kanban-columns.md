@@ -1,4 +1,4 @@
-[← UC-pipeline.escalation.escalate-after-exhausted-retries](UC-pipeline.escalation.escalate-after-exhausted-retries.md) · [Back to README](../README.md) · [UC-dashboard.gate-status.view-gate-results →](UC-dashboard.gate-status.view-gate-results.md)
+[← UC-pipeline.escalation.escalate-after-exhausted-retries](UC-pipeline.escalation.escalate-after-exhausted-retries.md) · [Back to README](README.md) · [UC-dashboard.gate-status.view-gate-results →](UC-dashboard.gate-status.view-gate-results.md)
 
 # UC-dashboard.board.view-kanban-columns: Просмотр изменений по стадиям в Kanban-доске
 

@@ -1,4 +1,4 @@
-[← UC-handoff.transfer.ownership-to-executor](UC-handoff.transfer.ownership-to-executor.md) · [Back to README](../README.md) · [UC-handoff.history.view-executor-timeline →](UC-handoff.history.view-executor-timeline.md)
+[← UC-handoff.transfer.ownership-to-executor](UC-handoff.transfer.ownership-to-executor.md) · [Back to README](README.md) · [UC-handoff.history.view-executor-timeline →](UC-handoff.history.view-executor-timeline.md)
 
 # UC-handoff.escalation.escalate-unresolvable-decision: Эскалация решения вне правил
 

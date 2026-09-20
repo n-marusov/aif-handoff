@@ -39,6 +39,9 @@ logs/
 coverage/
 /packages/web/.perf-project/
 
+# Gates runner output (generated)
+/scripts/gates/results/
+
 # Astro (generated)
 .astro/
 

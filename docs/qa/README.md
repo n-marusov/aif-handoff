@@ -371,5 +371,6 @@ lint (ESLint/Prettier/tsc) → unit (vitest + coverage 70%)
 - [E2E-тестирование API](e2e-api-testing.md) — сквозные контракты REST/WS/RuntimeAdapter/VCS
 - [Модульное тестирование](unit-testing.md) — конвенции, изоляция, шаблоны тестов
 - [Гейты AI Factory](gates.md) — гейты для LLM-генерации артефактов и подтверждения достижения требований
+- [Запуск детерминированных гейтов](gates-run.md) — командный референс `make gate-*` / `npm run gates:*`, формат `aif-gate-result.json`
 
 > Каталоги требований существуют и связаны с этой матрицей: [Прецеденты](../use-cases/README.md) — `UC-*`; [Бизнес-правила](../business-rules/README.md) — `BR-*`; [Функциональные требования](../fun-req/README.md) — `REQ-FR-*`; [Нефункциональные требования](../nonfun-req/README.md) — `REQ-NFR-*`; [Контракты](../contracts/README.md) — реестр и профили; [ADR](../adr/README.md) — реестр архитектурных решений. QA-артефакты веток (`change-summary`/`test-plan`/`test-cases`) ведутся скиллом `aif-qa` в `.ai-factory/qa/<ветка>/`. Каталоги `domain/` и `user-stories/` — целевое состояние.

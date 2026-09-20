@@ -1,4 +1,4 @@
-[← UC-pipeline.verification.verify-change-result](UC-pipeline.verification.verify-change-result.md) · [Back to README](../README.md) · [UC-pipeline.manual-override.intervene-task-stage →](UC-pipeline.manual-override.intervene-task-stage.md)
+[← UC-pipeline.verification.verify-change-result](UC-pipeline.verification.verify-change-result.md) · [Back to README](README.md) · [UC-pipeline.manual-override.intervene-task-stage →](UC-pipeline.manual-override.intervene-task-stage.md)
 
 # UC-pipeline.completion.auto-complete-pipeline: Автоматическое завершение конвейера
 

@@ -1,4 +1,4 @@
-[← UC-integration.ci-status.check-pipeline-status](UC-integration.ci-status.check-pipeline-status.md) · [Back to README](../README.md)
+[← UC-integration.ci-status.check-pipeline-status](UC-integration.ci-status.check-pipeline-status.md) · [Back to README](README.md)
 
 # UC-warmup.preheat.warmup-runtime-session: Предварительный разогрев сессий runtime
 

@@ -1,4 +1,4 @@
-[← UC-pipeline.plan.refine-plan-second-pass](UC-pipeline.plan.refine-plan-second-pass.md) · [Back to README](../README.md) · [UC-pipeline.verification.verify-change-result →](UC-pipeline.verification.verify-change-result.md)
+[← UC-pipeline.plan.refine-plan-second-pass](UC-pipeline.plan.refine-plan-second-pass.md) · [Back to README](README.md) · [UC-pipeline.verification.verify-change-result →](UC-pipeline.verification.verify-change-result.md)
 
 # UC-pipeline.implementation.execute-change-in-isolation: Реализация изменения в изолированном контексте
 

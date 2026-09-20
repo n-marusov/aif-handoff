@@ -1,4 +1,4 @@
-[← UC-accounting.limits.configure-project-limits](UC-accounting.limits.configure-project-limits.md) · [Back to README](../README.md) · [UC-handoff.transfer.ownership-to-executor →](UC-handoff.transfer.ownership-to-executor.md)
+[← UC-accounting.limits.configure-project-limits](UC-accounting.limits.configure-project-limits.md) · [Back to README](README.md) · [UC-handoff.transfer.ownership-to-executor →](UC-handoff.transfer.ownership-to-executor.md)
 
 # UC-accounting.blocking.block-on-limit-exceeded: Блокировка задачи при превышении лимита
 

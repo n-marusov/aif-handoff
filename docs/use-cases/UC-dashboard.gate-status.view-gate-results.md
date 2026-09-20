@@ -1,4 +1,4 @@
-[← UC-dashboard.board.view-kanban-columns](UC-dashboard.board.view-kanban-columns.md) · [Back to README](../README.md) · [UC-dashboard.detail.view-task-details →](UC-dashboard.detail.view-task-details.md)
+[← UC-dashboard.board.view-kanban-columns](UC-dashboard.board.view-kanban-columns.md) · [Back to README](README.md) · [UC-dashboard.detail.view-task-details →](UC-dashboard.detail.view-task-details.md)
 
 # UC-dashboard.gate-status.view-gate-results: Просмотр статуса формальных гейтов
 

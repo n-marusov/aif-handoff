@@ -1,4 +1,4 @@
-[← UC-vcs-auto.mr.publish-atomic-merge-request](UC-vcs-auto.mr.publish-atomic-merge-request.md) · [Back to README](../README.md) · [UC-accounting.tracking.record-runtime-call →](UC-accounting.tracking.record-runtime-call.md)
+[← UC-vcs-auto.mr.publish-atomic-merge-request](UC-vcs-auto.mr.publish-atomic-merge-request.md) · [Back to README](README.md) · [UC-accounting.tracking.record-runtime-call →](UC-accounting.tracking.record-runtime-call.md)
 
 # UC-vcs-auto.plan-review.publish-plan-for-approval: Публикация плана для утверждения (Plan Review Gate)
 

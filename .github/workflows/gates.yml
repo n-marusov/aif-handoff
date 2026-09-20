@@ -1,0 +1,39 @@
+name: Gates
+
+# Deterministic gate suite (G1 spec validators + AG architecture + FG test-quality).
+# Mirrors `make gates`; publishes the `aif-gate-result.json` artifact so the
+# gate verdict is machine-readable (gates.md principle 9).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Deterministic gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run deterministic gates (G1 + AG + FG)
+        run: npm run gates:report
+      - name: Upload gate result
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aif-gate-result
+          path: scripts/gates/results/aif-gate-result.json
+          retention-days: 14

@@ -1,4 +1,4 @@
-[← UC-pipeline.independent-verification.verify-independently](UC-pipeline.independent-verification.verify-independently.md) · [Back to README](../README.md) · [UC-dashboard.board.view-kanban-columns →](UC-dashboard.board.view-kanban-columns.md)
+[← UC-pipeline.independent-verification.verify-independently](UC-pipeline.independent-verification.verify-independently.md) · [Back to README](README.md) · [UC-dashboard.board.view-kanban-columns →](UC-dashboard.board.view-kanban-columns.md)
 
 # UC-pipeline.escalation.escalate-after-exhausted-retries: Эскалация при исчерпании попыток исправления
 

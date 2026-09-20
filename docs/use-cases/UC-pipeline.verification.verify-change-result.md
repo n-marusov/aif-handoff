@@ -1,4 +1,4 @@
-[← UC-pipeline.implementation.execute-change-in-isolation](UC-pipeline.implementation.execute-change-in-isolation.md) · [Back to README](../README.md) · [UC-pipeline.completion.auto-complete-pipeline →](UC-pipeline.completion.auto-complete-pipeline.md)
+[← UC-pipeline.implementation.execute-change-in-isolation](UC-pipeline.implementation.execute-change-in-isolation.md) · [Back to README](README.md) · [UC-pipeline.completion.auto-complete-pipeline →](UC-pipeline.completion.auto-complete-pipeline.md)
 
 # UC-pipeline.verification.verify-change-result: Верификация результата изменения
 

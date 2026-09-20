@@ -1,4 +1,4 @@
-[← UC-pipeline.review-loop.iterate-review-feedback](UC-pipeline.review-loop.iterate-review-feedback.md) · [Back to README](../README.md) · [UC-pipeline.escalation.escalate-after-exhausted-retries →](UC-pipeline.escalation.escalate-after-exhausted-retries.md)
+[← UC-pipeline.review-loop.iterate-review-feedback](UC-pipeline.review-loop.iterate-review-feedback.md) · [Back to README](README.md) · [UC-pipeline.escalation.escalate-after-exhausted-retries →](UC-pipeline.escalation.escalate-after-exhausted-retries.md)
 
 # UC-pipeline.independent-verification.verify-independently: Независимая верификация после гейтов
 

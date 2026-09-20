@@ -1,4 +1,4 @@
-[← UC-runtime.profile.configure-project-runtime](UC-runtime.profile.configure-project-runtime.md) · [Back to README](../README.md) · [UC-runtime.external-adapter.register-external-module →](UC-runtime.external-adapter.register-external-module.md)
+[← UC-runtime.profile.configure-project-runtime](UC-runtime.profile.configure-project-runtime.md) · [Back to README](README.md) · [UC-runtime.external-adapter.register-external-module →](UC-runtime.external-adapter.register-external-module.md)
 
 # UC-runtime.override.override-profile-for-task: Переопределение runtime-профиля для конкретной задачи
 

@@ -1,4 +1,4 @@
-[← UC-dashboard.realtime.receive-live-status-updates](UC-dashboard.realtime.receive-live-status-updates.md) · [Back to README](../README.md) · [UC-runtime.profile.configure-project-runtime →](UC-runtime.profile.configure-project-runtime.md)
+[← UC-dashboard.realtime.receive-live-status-updates](UC-dashboard.realtime.receive-live-status-updates.md) · [Back to README](README.md) · [UC-runtime.profile.configure-project-runtime →](UC-runtime.profile.configure-project-runtime.md)
 
 # UC-dashboard.search.find-task-by-query: Поиск по проектам и изменениям
 

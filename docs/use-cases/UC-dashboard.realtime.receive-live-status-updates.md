@@ -1,4 +1,4 @@
-[← UC-dashboard.detail.view-task-details](UC-dashboard.detail.view-task-details.md) · [Back to README](../README.md) · [UC-dashboard.search.find-task-by-query →](UC-dashboard.search.find-task-by-query.md)
+[← UC-dashboard.detail.view-task-details](UC-dashboard.detail.view-task-details.md) · [Back to README](README.md) · [UC-dashboard.search.find-task-by-query →](UC-dashboard.search.find-task-by-query.md)
 
 # UC-dashboard.realtime.receive-live-status-updates: Обновления статуса в реальном времени
 

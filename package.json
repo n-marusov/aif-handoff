@@ -46,6 +46,11 @@
     "ai:load": "node packages/api/perf/run.mjs",
     "ai:protocol": "npm run codex:app-server:protocol:check --workspace=@aif/runtime",
     "ai:checklist": "node -e \"console.log('[WARNING] check CHECKLIST.md')\"",
+    "gates": "node scripts/gates/run.mjs",
+    "gates:g1": "node scripts/gates/run.mjs --group G1",
+    "gates:ag": "node scripts/gates/run.mjs --group AG",
+    "gates:fg": "node scripts/gates/run.mjs --group FG",
+    "gates:report": "node scripts/gates/run.mjs --out scripts/gates/results/aif-gate-result.json",
     "prepare": "husky"
   },
   "lint-staged": {

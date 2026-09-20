@@ -1,4 +1,4 @@
-[← UC-chat.project-context.consult-ai-assistant](UC-chat.project-context.consult-ai-assistant.md) · [Back to README](../README.md) · [UC-auth.registration.sign-up-participant →](UC-auth.registration.sign-up-participant.md)
+[← UC-chat.project-context.consult-ai-assistant](UC-chat.project-context.consult-ai-assistant.md) · [Back to README](README.md) · [UC-auth.registration.sign-up-participant →](UC-auth.registration.sign-up-participant.md)
 
 # UC-chat.task-context.discuss-task-with-ai: Диалог с AI в контексте конкретного изменения
 

@@ -1,4 +1,4 @@
-[← UC-auth.roles.assign-participant-role](UC-auth.roles.assign-participant-role.md) · [Back to README](../README.md) · [UC-audit.heartbeat.receive-agent-heartbeat →](UC-audit.heartbeat.receive-agent-heartbeat.md)
+[← UC-auth.roles.assign-participant-role](UC-auth.roles.assign-participant-role.md) · [Back to README](README.md) · [UC-audit.heartbeat.receive-agent-heartbeat →](UC-audit.heartbeat.receive-agent-heartbeat.md)
 
 # UC-audit.logging.audit-state-transition: Иммутабельный аудит действий системы
 

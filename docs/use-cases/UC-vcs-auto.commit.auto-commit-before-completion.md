@@ -1,4 +1,4 @@
-[← UC-vcs-auto.isolation.execute-task-in-worktree](UC-vcs-auto.isolation.execute-task-in-worktree.md) · [Back to README](../README.md) · [UC-vcs-auto.mr.publish-atomic-merge-request →](UC-vcs-auto.mr.publish-atomic-merge-request.md)
+[← UC-vcs-auto.isolation.execute-task-in-worktree](UC-vcs-auto.isolation.execute-task-in-worktree.md) · [Back to README](README.md) · [UC-vcs-auto.mr.publish-atomic-merge-request →](UC-vcs-auto.mr.publish-atomic-merge-request.md)
 
 # UC-vcs-auto.commit.auto-commit-before-completion: Автоматический коммит изменений перед завершением
 

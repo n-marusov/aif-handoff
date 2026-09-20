@@ -1,4 +1,4 @@
-[← UC-pipeline.stage.auto-advance-task](UC-pipeline.stage.auto-advance-task.md) · [Back to README](../README.md) · [UC-pipeline.plan.refine-plan-second-pass →](UC-pipeline.plan.refine-plan-second-pass.md)
+[← UC-pipeline.stage.auto-advance-task](UC-pipeline.stage.auto-advance-task.md) · [Back to README](README.md) · [UC-pipeline.plan.refine-plan-second-pass →](UC-pipeline.plan.refine-plan-second-pass.md)
 
 # UC-pipeline.plan.generate-change-plan: Генерация плана изменения AI-планировщиком
 

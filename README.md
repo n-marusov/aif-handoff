@@ -157,15 +157,22 @@ make test-fast         # fail-fast (for agent iterations)
 make lint              # turbo lint (eslint)
 make fmt               # prettier --write .
 make gate-fast         # quick check: build + test
-make gate              # full native gate: lint + build + test + coverage
+make gate              # full native gate: lint-check + build + test + coverage + gates
+make gate-g1           # deterministic G1 spec validators (format, IDs, links, dup, TBD, machine)
+make gate-ag           # architectural AG gates (cycles, layers, boundaries, struct metrics)
+make gate-fg           # FG test-quality gates (test anti-patterns, mutation policy)
+make gates             # all deterministic gates + aif-gate-result.json report
 
 # Docker targets (requires Docker Engine)
 make docker-build      # docker compose build
 make docker-dev        # docker compose up (dev mode)
 make docker-logs       # tail all container logs
 make docker-prod-run   # production compose up
-make ci-gate           # full CI pipeline in Docker Compose
+make ci-gate           # full CI pipeline in Docker Compose (incl. gates)
 ```
+
+Deterministic gate reports are written to `scripts/gates/results/aif-gate-result.json`
+(gitignored) and published in CI as a build artifact. See [doc](docs/qa/gates-run.md) for details.
 
 ### Authentication
 
@@ -410,6 +417,7 @@ AGENT_BYPASS_PERMISSIONS=true
 | [GitHub Demo](docs/github-demo.md)         | GitHub.com + router.ai runbook (Plan Review PR Gate) |
 | [GitLab Demo](docs/gitlab-demo.md)         | End-to-end GitLab.com + router.ai demo runbook       |
 | [Dev GUI Demo](docs/dev-gui-demo.md)       | Local dev + Web UI GitLab/router.ai runbook          |
+| [Gates Run](docs/qa/gates-run.md)          | Deterministic gates: commands, report format, CI     |
 | [Known Issues](docs/known-issues.md)       | Known problems, workarounds, and deferred fixes      |
 
 ![ui-light](https://github.com/lee-to/aif-handoff/blob/main/art/ui-light.png)

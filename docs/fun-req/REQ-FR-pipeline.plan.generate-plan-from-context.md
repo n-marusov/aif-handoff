@@ -33,5 +33,5 @@
 ## See Also
 
 - [REQ-FR-pipeline.plan.refine-plan-second-pass](REQ-FR-pipeline.plan.refine-plan-second-pass.md) — второй проход Improve
-- [REQ-FR-vcs-auto.isolation.create-worktree](../vcs-auto/REQ-FR-vcs-auto.isolation.create-worktree.md) — изоляция worktree
+- [REQ-FR-vcs-auto.isolation.create-worktree](REQ-FR-vcs-auto.isolation.create-worktree.md) — изоляция worktree
 - [REQ-FR-audit.errors.classify-runtime-error](REQ-FR-audit.errors.classify-runtime-error.md) — классификация ошибок

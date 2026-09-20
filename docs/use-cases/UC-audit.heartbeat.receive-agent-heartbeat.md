@@ -1,4 +1,4 @@
-[← UC-audit.logging.audit-state-transition](UC-audit.logging.audit-state-transition.md) · [Back to README](../README.md) · [UC-audit.errors.classify-runtime-error →](UC-audit.errors.classify-runtime-error.md)
+[← UC-audit.logging.audit-state-transition](UC-audit.logging.audit-state-transition.md) · [Back to README](README.md) · [UC-audit.errors.classify-runtime-error →](UC-audit.errors.classify-runtime-error.md)
 
 # UC-audit.heartbeat.receive-agent-heartbeat: Получение хартбитов от выполняющихся агентов
 

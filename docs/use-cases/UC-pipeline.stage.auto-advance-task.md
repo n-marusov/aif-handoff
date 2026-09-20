@@ -1,4 +1,4 @@
-[← Back to USE-CASES-INDEX](USE-CASES-INDEX.md) · [Back to README](../README.md) · [UC-pipeline.plan.generate-change-plan →](UC-pipeline.plan.generate-change-plan.md)
+[← Back to USE-CASES-INDEX](USE-CASES-INDEX.md) · [Back to README](README.md) · [UC-pipeline.plan.generate-change-plan →](UC-pipeline.plan.generate-change-plan.md)
 
 # UC-pipeline.stage.auto-advance-task: Автоматическое прохождение стадий конвейера
 

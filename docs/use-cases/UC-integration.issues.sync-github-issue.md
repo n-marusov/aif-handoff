@@ -1,4 +1,4 @@
-[← UC-audit.errors.classify-runtime-error](UC-audit.errors.classify-runtime-error.md) · [Back to README](../README.md) · [UC-integration.issues.bootstrap-project-sync-and-create-task →](UC-integration.issues.bootstrap-project-sync-and-create-task.md)
+[← UC-audit.errors.classify-runtime-error](UC-audit.errors.classify-runtime-error.md) · [Back to README](README.md) · [UC-integration.issues.bootstrap-project-sync-and-create-task →](UC-integration.issues.bootstrap-project-sync-and-create-task.md)
 
 # UC-integration.issues.sync-github-issue: Синхронизация задач с GitHub Issues
 

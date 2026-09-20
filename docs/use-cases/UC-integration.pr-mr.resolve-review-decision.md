@@ -1,4 +1,4 @@
-[← UC-integration.pr-mr.publish-github-pr](UC-integration.pr-mr.publish-github-pr.md) · [Back to README](../README.md) · [UC-integration.ci-status.check-pipeline-status →](UC-integration.ci-status.check-pipeline-status.md)
+[← UC-integration.pr-mr.publish-github-pr](UC-integration.pr-mr.publish-github-pr.md) · [Back to README](README.md) · [UC-integration.ci-status.check-pipeline-status →](UC-integration.ci-status.check-pipeline-status.md)
 
 # UC-integration.pr-mr.resolve-review-decision: Обработка решения ревью по PR/MR
 

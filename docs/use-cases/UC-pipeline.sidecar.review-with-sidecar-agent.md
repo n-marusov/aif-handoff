@@ -1,4 +1,4 @@
-[← UC-pipeline.gate.enforce-stage-transition-gate](UC-pipeline.gate.enforce-stage-transition-gate.md) · [Back to README](../README.md) · [UC-pipeline.review-loop.iterate-review-feedback →](UC-pipeline.review-loop.iterate-review-feedback.md)
+[← UC-pipeline.gate.enforce-stage-transition-gate](UC-pipeline.gate.enforce-stage-transition-gate.md) · [Back to README](README.md) · [UC-pipeline.review-loop.iterate-review-feedback →](UC-pipeline.review-loop.iterate-review-feedback.md)
 
 # UC-pipeline.sidecar.review-with-sidecar-agent: Sidecar-агенты (read-only) проверки результата
 

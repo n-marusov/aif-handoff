@@ -22,8 +22,14 @@
 #
 # Гейты:
 #   make gate-fast   — быстрый гейт до первого падения: build + test-fast
-#   make gate        — полный нативный гейт: lint-check + build + test + coverage
-#   make ci-gate     — полный CI-эквивалент в Docker Compose
+#   make gate        — полный нативный гейт: lint-check + build + test + coverage + gates
+#   make gate-g1     — детерминированные G1-валидаторы спецификации (форма, ID, ссылки, DUP, TBD, MACHINE)
+#   make gate-ag     — архитектурные AG-гейты (циклы, слои, границы, структурные метрики)
+#   make gate-fg     — FG-гейты качества тестов (FG-TEST-QUALITY, FG-MUTATION политика)
+#   make gates       — все детерминированные гейты (G1 + AG + FG) с отчётом aif-gate-result
+#   make ci-gate     — полный CI-эквивалент build + lint + test + coverage + gates в Docker Compose
+#
+# Отчёты детерминированных гейтов: scripts/gates/results/aif-gate-result.json (gitignored).
 #
 # Указания по настройке окружения:
 #   1. Node.js ^20.19.0 или >=22.12.0
@@ -248,8 +254,13 @@ ci-coverage: ## [CI] Тесты с покрытием в Docker Compose
 	@$(DC_DEV) run --rm api $(NPM_CMD) run coverage
 	@echo ci-coverage: OK
 
+.PHONY: ci-gates
+ci-gates: ## [CI] Детерминированные гейты в Docker Compose (G1 + AG + FG)
+	@$(DC_DEV) run --rm api $(NPM_CMD) run gates:report
+	@echo ci-gates: OK
+
 .PHONY: ci-gate
-ci-gate: ci-build ci-lint ci-test ci-coverage ## Полный CI-эквивалент (build + lint + test + coverage в Docker)
+ci-gate: ci-build ci-lint ci-test ci-coverage ci-gates ## Полный CI-эквивалент (build + lint + test + coverage + гейты в Docker)
 
 .PHONY: ci
 ci: ci-gate ## Псевдоним ci-gate (полный CI-эквивалент)
@@ -257,10 +268,30 @@ ci: ci-gate ## Псевдоним ci-gate (полный CI-эквивалент)
 ##@ Гейты
 
 .PHONY: gate-fast
-gate-fast: build test ## Быстрый fail-fast гейт (для итеративной работы): build + test (FG-BUILD + FG-UNIT)
+gate-fast: build test-fast ## Быстрый fail-fast гейт (для итеративной работы): build + test-fast (FG-BUILD + FG-UNIT)
+
+.PHONY: gate-g1
+gate-g1: ## Детерминированные G1-валидаторы спецификации (форма, ID, ссылки, DUP, TBD, MACHINE)
+	@$(NPM_CMD) run gates:g1
+
+.PHONY: gate-ag
+gate-ag: ## Архитектурные AG-гейты (циклы, слои, границы, структурные метрики)
+	@$(NPM_CMD) run gates:ag
+
+.PHONY: gate-fg
+gate-fg: ## FG-гейты качества тестов (FG-TEST-QUALITY, FG-MUTATION политика)
+	@$(NPM_CMD) run gates:fg
+
+.PHONY: gate-spec
+gate-spec: gate-g1 ## Алиас полного детерминированного скана спецификации (набор G1)
+
+.PHONY: gates
+gates: ## Все детерминированные гейты (G1 + AG + FG) с отчётом aif-gate-result
+	@$(NPM_CMD) run gates:report
+	@echo gates: OK, all deterministic gates passed
 
 .PHONY: gate
-gate: lint-check build test coverage ## Полный нативный гейт: lint-check + build + test + coverage
+gate: lint-check build test coverage gates ## Полный нативный гейт: lint-check + build + test + coverage + детерим. гейты
 
 ##@ Валидация AI Factory
 

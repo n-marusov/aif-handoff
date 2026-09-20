@@ -1,4 +1,4 @@
-[← UC-handoff.escalation.escalate-unresolvable-decision](UC-handoff.escalation.escalate-unresolvable-decision.md) · [Back to README](../README.md) · [UC-handoff.diagnostics.receive-escalation-diagnostics →](UC-handoff.diagnostics.receive-escalation-diagnostics.md)
+[← UC-handoff.escalation.escalate-unresolvable-decision](UC-handoff.escalation.escalate-unresolvable-decision.md) · [Back to README](README.md) · [UC-handoff.diagnostics.receive-escalation-diagnostics →](UC-handoff.diagnostics.receive-escalation-diagnostics.md)
 
 # UC-handoff.history.view-executor-timeline: Просмотр истории исполнителей задачи
 

@@ -1,4 +1,4 @@
-[← UC-audit.heartbeat.receive-agent-heartbeat](UC-audit.heartbeat.receive-agent-heartbeat.md) · [Back to README](../README.md) · [UC-integration.issues.sync-github-issue →](UC-integration.issues.sync-github-issue.md)
+[← UC-audit.heartbeat.receive-agent-heartbeat](UC-audit.heartbeat.receive-agent-heartbeat.md) · [Back to README](README.md) · [UC-integration.issues.sync-github-issue →](UC-integration.issues.sync-github-issue.md)
 
 # UC-audit.errors.classify-runtime-error: Категоризация ошибок выполнения runtime
 

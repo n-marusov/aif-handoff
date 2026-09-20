@@ -449,4 +449,4 @@ curl -f http://localhost:3100/health     # MCP health
 - [C4-модель](../c4/README.md) — топология контейнеров и стенда (`context.md`, `container.md`, `deployment.md`)
 - [Известные проблемы](../known-issues.md) — реестр KI
 - [README.md §10](README.md#10-метрики-качества-и-пороговые-значения) — метрики и пороги
-- [Правила проекта](../.ai-factory/RULES.md) — правила ведения репозитория
+- [Правила проекта](../../.ai-factory/RULES.md) — правила ведения репозитория

@@ -1,4 +1,4 @@
-[← UC-vcs-auto.plan-review.publish-plan-for-approval](UC-vcs-auto.plan-review.publish-plan-for-approval.md) · [Back to README](../README.md) · [UC-accounting.limits.configure-project-limits →](UC-accounting.limits.configure-project-limits.md)
+[← UC-vcs-auto.plan-review.publish-plan-for-approval](UC-vcs-auto.plan-review.publish-plan-for-approval.md) · [Back to README](README.md) · [UC-accounting.limits.configure-project-limits →](UC-accounting.limits.configure-project-limits.md)
 
 # UC-accounting.tracking.record-runtime-call: Учёт каждого вызова runtime
 

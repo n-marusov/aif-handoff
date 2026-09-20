@@ -1,4 +1,4 @@
-[← UC-integration.issues.sync-github-issue](UC-integration.issues.sync-github-issue.md) · [Back to README](../README.md) · [UC-integration.pr-mr.publish-github-pr →](UC-integration.pr-mr.publish-github-pr.md)
+[← UC-integration.issues.sync-github-issue](UC-integration.issues.sync-github-issue.md) · [Back to README](README.md) · [UC-integration.pr-mr.publish-github-pr →](UC-integration.pr-mr.publish-github-pr.md)
 
 # UC-integration.issues.bootstrap-project-sync-and-create-task: Добавление проекта, синхронизация и постановка задачи
 

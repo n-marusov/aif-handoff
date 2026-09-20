@@ -32,5 +32,4 @@
 ## See Also
 
 - [REQ-NFR-security.compliance.session-auth](REQ-NFR-security.compliance.session-auth.md)
-- [REQ-NFR-ui.availability.real-time-updates](REQ-NFR-ui.availability.real-time-updates.md)
 - [REQ-NFR-api.availability.runtime-adapter-timeouts](REQ-NFR-api.availability.runtime-adapter-timeouts.md)

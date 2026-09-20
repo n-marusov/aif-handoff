@@ -1,0 +1,138 @@
+# Machine-readable contract registry.
+#
+# Schema (per docs/contracts/README.md «Реестр INDEX.yaml»):
+#   id, name, type, format, version, from, to, status, spec_path?, source_paths?, traceability?
+#
+# `docs/contracts/README.md` (реестр) is the human-readable source of truth;
+# this file is the machine-readable mirror validated by G1-MACHINE.
+
+- id: contract-aif-runtime
+  name: RuntimeAdapter interface (@aif/runtime)
+  type: typescript
+  format: ts-types
+  version: 1.0.0
+  from: agent
+  to: runtime-adapter
+  status: implemented
+  spec_path: docs/contracts/adapter/runtime-adapter.md
+  source_paths:
+    - packages/runtime/src/types.ts
+  traceability:
+    - HF3
+    - UC-runtime.*
+    - UC-pipeline.*
+
+- id: contract-aif-rest-api
+  name: REST API (Hono)
+  type: rest
+  format: openapi-3.1
+  version: 0.1.0
+  from: web-ui
+  to: api-server
+  status: implemented
+  spec_path: docs/contracts/rest/aif-api.md
+  source_paths:
+    - packages/api/src/routes
+  traceability:
+    - HF2
+    - UC-dashboard.*
+    - UC-auth.*
+    - UC-chat.*
+
+- id: contract-aif-ws
+  name: WebSocket real-time events
+  type: websocket
+  format: custom-yaml
+  version: 1.0.0
+  from: api-server
+  to: web-ui
+  status: implemented
+  spec_path: docs/contracts/websocket/events.md
+  source_paths:
+    - packages/api/src/ws.ts
+  traceability:
+    - HF2.4
+    - UC-dashboard.realtime.*
+
+- id: contract-aif-data
+  name: Data-access layer (@aif/data)
+  type: typescript
+  format: ts-types
+  version: 1.0.0
+  from: api
+  to: data-layer
+  status: implemented
+  spec_path: docs/contracts/data/data-layer.md
+  source_paths:
+    - packages/data/src/index.ts
+  traceability:
+    - ADR-DES.API.data-access-boundary
+
+- id: contract-aif-db-schema
+  name: SQLite schema (Drizzle ORM)
+  type: sql
+  format: drizzle-orm
+  version: 1.0.0
+  from: data-layer
+  to: sqlite
+  status: implemented
+  source_paths:
+    - packages/shared/src/schema.ts
+  traceability:
+    - UC-*.data.*
+
+- id: contract-aif-scheduler
+  name: Coordinator polling protocol
+  type: schedule
+  format: ts-types
+  version: 1.0.0
+  from: coordinator
+  to: database
+  status: implemented
+  source_paths:
+    - packages/agent/src/coordinator.ts
+  traceability:
+    - HF1
+    - UC-pipeline.stage.*
+
+- id: contract-aif-github
+  name: GitHub REST API integration
+  type: rest
+  format: openapi-3.1
+  version: null
+  from: agent
+  to: github
+  status: implemented
+  source_paths:
+    - packages/api/src/services/github.ts
+  traceability:
+    - HF11
+    - UC-integration.issues.*
+
+- id: contract-aif-gitlab
+  name: GitLab REST API integration
+  type: rest
+  format: openapi-3.1
+  version: null
+  from: agent
+  to: gitlab
+  status: implemented
+  source_paths:
+    - packages/api/src/services/gitlab.ts
+  traceability:
+    - HF11
+    - UC-integration.issues.*
+
+- id: contract-aif-worktree
+  name: Git worktree isolation
+  type: git
+  format: custom-yaml
+  version: 1.0.0
+  from: coordinator
+  to: git-worktree
+  status: implemented
+  source_paths:
+    - packages/shared/src/gitIsolation.ts
+  traceability:
+    - HF4.1
+    - BR-constraint.git.worktree-isolation

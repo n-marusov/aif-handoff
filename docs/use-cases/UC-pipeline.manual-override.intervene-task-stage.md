@@ -1,4 +1,4 @@
-[← UC-pipeline.completion.auto-complete-pipeline](UC-pipeline.completion.auto-complete-pipeline.md) · [Back to README](../README.md) · [UC-pipeline.gate.enforce-stage-transition-gate →](UC-pipeline.gate.enforce-stage-transition-gate.md)
+[← UC-pipeline.completion.auto-complete-pipeline](UC-pipeline.completion.auto-complete-pipeline.md) · [Back to README](README.md) · [UC-pipeline.gate.enforce-stage-transition-gate →](UC-pipeline.gate.enforce-stage-transition-gate.md)
 
 # UC-pipeline.manual-override.intervene-task-stage: Ручное управление движением задачи
 

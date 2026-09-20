@@ -1,4 +1,4 @@
-[← UC-dashboard.search.find-task-by-query](UC-dashboard.search.find-task-by-query.md) · [Back to README](../README.md) · [UC-runtime.override.override-profile-for-task →](UC-runtime.override.override-profile-for-task.md)
+[← UC-dashboard.search.find-task-by-query](UC-dashboard.search.find-task-by-query.md) · [Back to README](README.md) · [UC-runtime.override.override-profile-for-task →](UC-runtime.override.override-profile-for-task.md)
 
 # UC-runtime.profile.configure-project-runtime: Настройка runtime-профиля для проекта
 

@@ -1,4 +1,4 @@
-[← UC-accounting.blocking.block-on-limit-exceeded](UC-accounting.blocking.block-on-limit-exceeded.md) · [Back to README](../README.md) · [UC-handoff.escalation.escalate-unresolvable-decision →](UC-handoff.escalation.escalate-unresolvable-decision.md)
+[← UC-accounting.blocking.block-on-limit-exceeded](UC-accounting.blocking.block-on-limit-exceeded.md) · [Back to README](README.md) · [UC-handoff.escalation.escalate-unresolvable-decision →](UC-handoff.escalation.escalate-unresolvable-decision.md)
 
 # UC-handoff.transfer.ownership-to-executor: Передача владения изменением (handoff)
 
