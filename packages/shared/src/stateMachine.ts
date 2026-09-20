@@ -23,7 +23,6 @@ import type {
   TaskStatus,
   UpdateTaskInput,
 } from "./types.js";
-import { logger } from "./logger.js";
 
 // FR: REQ-FR-pipeline.gate.enforce-stage-transition-gate (criteria 2, 8) — гейт отдаёт патч перехода с целевым статусом.
 // Патч перехода - ровно те поля, которые может менять смена статуса. Тип выведен из
@@ -62,8 +61,6 @@ export type TransitionResult =
 // FR: REQ-FR-auth.roles.assign-participant-role (criterion 5) — RBAC проверяется в resolveTaskAction.
 // Контекст актора, от которого зависит решение. Роль и активность передаются
 // отдельно, потому что актор бывает и системным (без участия в проекте).
-const log = logger("state-machine");
-
 export interface TaskActionContext {
   participantsModeEnabled: boolean;
   actor: AuditActor;
@@ -104,40 +101,6 @@ export const CLEAN_STATE_RESET = {
 // Единая точка создания отказа: гарантирует, что код причины всегда заполнен.
 function denied(code: TaskActionDeniedCode, error: string): TransitionResult {
   return { ok: false, code, error };
-}
-
-function logTransitionDecision(
-  task: TaskPolicyView,
-  event: TaskEvent,
-  result: TransitionResult,
-): void {
-  if (result.ok) {
-    log.debug(
-      {
-        taskId: task.id,
-        event,
-        status: task.status,
-        runPostVerify: task.runPostVerify,
-        skipReview: task.skipReview,
-        targetStatus: result.patch.status,
-      },
-      "Resolved task action transition",
-    );
-    return;
-  }
-
-  log.warn(
-    {
-      taskId: task.id,
-      event,
-      status: task.status,
-      runPostVerify: task.runPostVerify,
-      skipReview: task.skipReview,
-      denialCode: result.code,
-      error: result.error,
-    },
-    "Task action denied",
-  );
 }
 
 // Legacy-набор переходов: режим участников выключен. Понятия владельца-человека здесь
@@ -402,7 +365,6 @@ export function resolveTaskAction(
 ): TransitionResult {
   const authorization = resolveParticipantAuthorization(task, context);
   if (authorization) {
-    logTransitionDecision(task, event, authorization);
     return authorization;
   }
 
@@ -411,7 +373,6 @@ export function resolveTaskAction(
       ? resolveLegacyAction(task, event)
       : resolveHumanOwnerAction(task, event);
 
-  logTransitionDecision(task, event, result);
   return result;
 }
 
