@@ -24,3 +24,4 @@
 ## References
 
 - For **Antora documentation structure, `antora.yml` descriptors, page authoring, navigation, playbook keys, CLI, build/publish, and extensions**, see `.ai-factory/references/antora.md`.
+- For **quality-assurance methodology — the Quality Programming Matrix (5×4), measurability criteria, test-design techniques, test levels/pyramid, test doubles, TDD/BDD, coverage/mutation, automation and CI quality gates, API testing, metrics/DoD, and anti-patterns**, see `.ai-factory/references/quality-assurance-methodology.md` (distilled from a curated QA bibliography — see its Bibliography section; base methodology: the `quality-matrix` skill).
