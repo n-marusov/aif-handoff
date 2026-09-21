@@ -326,13 +326,21 @@ export class GitLabClient {
   }
 
   /**
-   * Открытые задачи проекта. `scope=all` обязателен: без него GitLab вернет
-   * только задачи, созданные владельцем токена.
+   * Задачи проекта, включая закрытые. `scope=all` обязателен: без него GitLab
+   * вернет только задачи, созданные владельцем токена.
+   *
+   * state=all (а не state=opened) намерен: слияние MR, чьё описание содержит
+   * "Closes #<iid>", автоматически закрывает связанный issue. Если синхронизация
+   * видит только открытые задачи, закрытый issue выпадает из цикла, его
+   * mrState не обновляется на "merged", и ни роут (`merged → accepted`),
+   * ни done-checker (читает mrState из БД) не завершают задачу. GitHub-клиент
+   * использует state=all по той же причине; issueIsEligible отсекает закрытые
+   * задачи от импорта, а связанные закрытые проходят только MR-reconcile.
    */
   listIssues(namespace: string, name: string): Promise<GitLabIssueResponse[]> {
     const project = projectPath(namespace, name);
     return this.list<GitLabIssueResponse>(
-      `/projects/${project}/issues?scope=all&state=opened&order_by=updated_at`,
+      `/projects/${project}/issues?scope=all&state=all&order_by=updated_at`,
     );
   }
 

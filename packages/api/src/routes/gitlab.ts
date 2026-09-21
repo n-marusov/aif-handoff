@@ -398,6 +398,11 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
               {},
               { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
             );
+            // GitLab автоматически закрывает issue при слиянии MR ("Closes #<iid>"), и
+            // importGitLabIssueTask помечает связанную задачу как paused. Принятая задача
+            // терминальна: снимаем paused, как это делает done-checker через CLEAN_STATE_RESET,
+            // чтобы состояние accepted не осталось с признаком паузы.
+            setTaskFields(task.id, { paused: false });
             // Закрытие жизненного цикла: удалить worktree, сохранить ветку.
             await requestWorktreeCleanupAfterMerge(
               snapshotTaskWorktree(

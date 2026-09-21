@@ -1075,7 +1075,10 @@ describe("GitLab project routes", () => {
     const app = new Hono();
     app.route("/projects", gitlabRouter);
 
-    // Смерженный MR → verified
+    // Смерженный MR → verified. Реальный GitLab после слияния MR с "Closes #154"
+    // автоматически закрывает issue, поэтому мок возвращает state=closed, а не opened:
+    // синхронизация обязана обрабатывать и закрытые связанные issues (MR-reconcile),
+    // иначе merged → accepted никогда не сработает (регрессия e2e L-10).
     vi.stubGlobal(
       "fetch",
       vi
@@ -1087,7 +1090,7 @@ describe("GitLab project routes", () => {
               iid: 154,
               global_id: "gid://gitlab/Issue/154",
               web_url: "https://gitlab.com/namespace/repo/-/issues/154",
-              state: "opened",
+              state: "closed",
               title: "GitLab mode",
               description: "Implement it",
               author: { username: "author" },
