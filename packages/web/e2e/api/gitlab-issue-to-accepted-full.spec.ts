@@ -768,3 +768,158 @@ test("L-10-full: полный AI-конвейер Issue → Accepted (LLM, ав�
     await deleteProject(request, project.id);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L-10j — US-pipeline.stage.done-to-implementing-rework (Sc.1 + Sc.3):
+// решение человека возвращает задачу из Done в Implementing с reworkRequested.
+// Детерминированный уровень (реальный GitLab shortcut-импорт + legacy-событие).
+//
+// Trace:
+//   - UC-pipeline.review-loop.iterate-review-feedback (Agent)
+//   - BR-constraint.task-lifecycle.transitions (done → implementing, request_changes)
+//   - ADR-IMPL.PROCESS.task-state-machine (done --> implementing : request_changes (rework; skill $aif-fix))
+// ─────────────────────────────────────────────────────────────────────────────
+test("L-10j: done → implementing rework (request_changes) с reworkRequested и идемпотентностью", async ({
+  request,
+}) => {
+  await ensureGitLabIssueMrFeature(request);
+
+  const marker = runId();
+  const label = `aif-e2e-rework-${marker}`;
+  const branchName = `e2e-l10j-${marker}`;
+  const project = await createIsolatedProject(request, marker);
+  let linkedTaskId: string | null = null;
+
+  try {
+    // Краткий путь: Issue со связанным открытым MR импортируется сразу в done.
+    await createGitLabBranchWithCommit(request, branchName, `l10j-${marker}`);
+    const issue = await createIssue(request, label, `[L-10j] issue ${marker}`);
+    await gitLabApi<GitLabMrResponse>(
+      request,
+      `/projects/${gitLabProjectPathEncoded()}/merge_requests`,
+      "POST",
+      {
+        source_branch: branchName,
+        target_branch: "main",
+        title: `[L-10j] mr ${marker}`,
+        description: `Closes #${issue.iid}`,
+      },
+    );
+    await connectGitLabViaApi(request, project.id, label);
+    await syncGitLabViaApi(request, project.id);
+    const link = await pollForTaskLink(request, project.id, issue.iid);
+    linkedTaskId = link.taskId;
+    if (!linkedTaskId) throw new Error("task not linked");
+    const doneTask = await pollTaskStatus(request, linkedTaskId, "done", 60_000);
+    expect(doneTask.reworkRequested).toBe(false);
+
+    // Scenario 1: человек явно указывает, что реализация неправильна.
+    await updateTask(request, linkedTaskId, { paused: true });
+    const rework = await fireTaskEvent(request, linkedTaskId, "request_changes");
+    expect(rework.status).toBe("implementing");
+    const reworked = await readTaskById(request, linkedTaskId);
+    expect(reworked.status).toBe("implementing");
+    expect(reworked.reworkRequested).toBe(true);
+
+    // Scenario 3 (идемпотентность): повторный request_changes из implementing отклоняется.
+    const retryResponse = await request.post(`${API_URL}/tasks/${linkedTaskId}/events`, {
+      data: { event: "request_changes" },
+    });
+    expect(retryResponse.status()).toBe(409);
+    const afterRetry = await readTaskById(request, linkedTaskId);
+    expect(afterRetry.status).toBe("implementing");
+  } finally {
+    await deleteTaskIfExists(request, linkedTaskId);
+    await deleteProject(request, project.id);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L-10k — US-integration.pr-mr.rework-plan-on-mr-comment (Sc.1 + Sc.2):
+// доработка плана из Plan Review → Improve по решению ревью.
+// Требует достижимого plan_review, а значит LLM-планировщика (гейт AIF_LLM_INTEGRATION=1).
+//
+// Примечание: фидбек через GitLab MR-note `requested changes` (system:true) в GitLab CE
+// публичным API не создаётся; путь MR-note покрыт route-тестами (gitlab.test.ts).
+// Здесь решение ревью применяется событием request_plan_changes → task переходит в improve,
+// затем improver (реальный LLM) дорабатывает план и возвращает задачу в plan_review.
+// ─────────────────────────────────────────────────────────────────────────────
+test("L-10k: plan_review → improve (доработка плана) → improver → plan_review (LLM)", async ({
+  request,
+}) => {
+  await ensureGitLabIssueMrFeature(request);
+  await ensureLlmRuntime(request);
+  test.setTimeout(30 * 60 * 1000);
+
+  const marker = runId();
+  const label = `aif-e2e-rework-plan-${marker}`;
+  const project = await createIsolatedProject(request, marker);
+  let linkedTaskId: string | null = null;
+
+  try {
+    const issue = await createIssue(request, label, `[L-10k] issue ${marker}`);
+    await connectGitLabViaApi(request, project.id, label);
+    await syncGitLabViaApi(request, project.id);
+    const link = await pollForTaskLink(request, project.id, issue.iid);
+    linkedTaskId = link.taskId;
+    if (!linkedTaskId) throw new Error("task not linked");
+
+    const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
+      data: { enabled: true },
+    });
+    expect(queueMode.ok()).toBe(true);
+
+    // Публикация plan-MR координатором (plan-publisher): задача в plan_review.
+    await expect
+      .poll(
+        async () => {
+          const state = await readGitLabState(request, project.id);
+          const entry = state.issues.find((item) => item.iid === issue.iid);
+          if (entry?.mrIid && entry.mrMode === "plan_review") {
+            const task = await readTaskById(request, linkedTaskId!);
+            return task.status === "plan_review" ? entry.mrIid : null;
+          }
+          return null;
+        },
+        { timeout: 15 * 60 * 1000, intervals: [5_000, 5_000, 10_000] },
+      )
+      .not.toBeNull();
+
+    // Гарантия: план реально создан.
+    const planFile = await request.get(`${API_URL}/tasks/${linkedTaskId}/plan-file-status`);
+    expect(planFile.ok()).toBe(true);
+    const planStatus = (await planFile.json()) as { exists: boolean; path: string };
+    expect(planStatus.exists).toBe(true);
+
+    // Scenario 1: ревью запрашивает изменения плана → plan_review → improve.
+    const changed = await fireTaskEvent(request, linkedTaskId, "request_plan_changes");
+    expect(changed.status).toBe("improve");
+    const inImprove = await readTaskById(request, linkedTaskId);
+    expect(inImprove.status).toBe("improve");
+    expect(inImprove.planReviewState).not.toBe("approved");
+
+    // Scenario 2: improver дорабатывает план и возвращает задачу в plan_review.
+    await expect
+      .poll(async () => (await readTaskById(request, linkedTaskId!)).status, {
+        timeout: 20 * 60 * 1000,
+        intervals: [10_000, 10_000, 15_000],
+      })
+      .toBe("plan_review");
+
+    // Единый MR: доработка не плодит второй MR для плана.
+    const mrLink = (await readGitLabState(request, project.id)).issues.find(
+      (entry) => entry.iid === issue.iid,
+    );
+    expect(mrLink?.mrMode).toBe("plan_review");
+    if (!mrLink?.mrIid) throw new Error("plan MR link not found");
+    const mrDetails = await gitLabApi<GitLabMrResponse>(
+      request,
+      `/projects/${gitLabProjectPathEncoded()}/merge_requests/${mrLink.mrIid}`,
+    );
+    const mrsForBranch = await listMergeRequestsForBranch(request, mrDetails.source_branch);
+    expect(mrsForBranch.length).toBe(1);
+  } finally {
+    await deleteTaskIfExists(request, linkedTaskId);
+    await deleteProject(request, project.id);
+  }
+});
