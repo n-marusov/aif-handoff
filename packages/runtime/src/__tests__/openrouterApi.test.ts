@@ -422,6 +422,23 @@ describe("OpenRouter API transport", () => {
       });
     });
 
+    it("returns null usage when stream ends without usage chunk", async () => {
+      fetchMock.mockResolvedValueOnce(
+        sseResponse([
+          'data: {"id":"gen-no-usage","choices":[{"delta":{"content":"hello"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+
+      const result = await runOpenRouterApiStreaming(
+        createRunInput({ options: { apiKey: "sk-test" } }),
+      );
+
+      expect(result.outputText).toBe("hello");
+      expect(result.sessionId).toBe("gen-no-usage");
+      expect(result.usage).toBeNull();
+    });
+
     it("retries 429 in streaming mode and then succeeds", async () => {
       fetchMock
         .mockResolvedValueOnce(

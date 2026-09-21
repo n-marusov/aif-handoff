@@ -95,6 +95,7 @@ export interface GitLabNoteResponse {
  */
 export interface GitLabMergeRequestResponse {
   iid: number;
+  title?: string;
   web_url: string;
   state: "opened" | "closed" | "merged" | "locked";
   merged_at: string | null;
@@ -167,6 +168,15 @@ function classifyHttpError(status: number): GitLabApiError["adapterCode"] {
  */
 function projectPath(namespace: string, name: string): string {
   return encodeURIComponent(`${namespace}/${name}`);
+}
+
+function normalizeMergeRequestText(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
 }
 
 /**
@@ -418,7 +428,7 @@ export class GitLabClient {
   }
 
   /** Правка заголовка и описания MR - используется при публикации плана. */
-  updateMergeRequest(input: {
+  async updateMergeRequest(input: {
     namespace: string;
     name: string;
     mrIid: number;
@@ -426,10 +436,34 @@ export class GitLabClient {
     description: string;
   }): Promise<GitLabMergeRequestResponse> {
     const project = projectPath(input.namespace, input.name);
-    return this.request(`/projects/${project}/merge_requests/${input.mrIid}`, {
-      method: "PUT",
-      body: JSON.stringify({ title: input.title, description: input.description }),
-    });
+    const putPath = `/projects/${project}/merge_requests/${input.mrIid}`;
+    try {
+      return await this.request(putPath, {
+        method: "PUT",
+        body: JSON.stringify({ title: input.title, description: input.description }),
+      });
+    } catch (error) {
+      if (!(error instanceof GitLabApiError)) throw error;
+      // GitLab CE (e2e стенд) иногда отвечает 500 при update MR с
+      // внутренней валидацией `Merge request has already been taken`.
+      // Это конфликт повторного применения к уже синхронизированному MR,
+      // поэтому делаем GET и считаем операцию успешной, если нужные
+      // поля уже выставлены.
+      if (error.httpStatus !== 500) throw error;
+      const current = await this.getMergeRequest(input.namespace, input.name, input.mrIid);
+      const currentTitle = normalizeMergeRequestText(current.title ?? "");
+      const currentDescription = normalizeMergeRequestText(current.description ?? "");
+      const targetTitle = normalizeMergeRequestText(input.title);
+      const targetDescription = normalizeMergeRequestText(input.description);
+      if (currentTitle === targetTitle && currentDescription === targetDescription) {
+        log.warn(
+          { namespace: input.namespace, name: input.name, mrIid: input.mrIid, httpStatus: 500 },
+          "GitLab returned transient 500 on merge request update; recovered by re-reading unchanged MR",
+        );
+        return current;
+      }
+      throw error;
+    }
   }
 
   /** Аппрувы MR, свернутые в `pending` / `approved` (см. latestReviewState). */

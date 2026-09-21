@@ -2380,6 +2380,40 @@ describe("GitLab project routes", () => {
     expect(await response.json()).toMatchObject({ mrIid: 200, mrState: "open" });
   });
 
+  it("recovers merge request update on transient 500 when MR already matches", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ message: "Internal Server Error" }, { status: 500 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          iid: 200,
+          title: "Task title",
+          web_url: "https://gitlab.com/namespace/repo/-/merge_requests/200",
+          state: "opened",
+          merged_at: null,
+          source_branch: "feature/gitlab-issue-154",
+          sha: "0123456789abcdef",
+          description: "Task description\r\n",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new GitLabClient("secret", "https://gitlab.com/api/v4");
+    const updated = await client.updateMergeRequest({
+      namespace: "namespace",
+      name: "repo",
+      mrIid: 200,
+      title: "Task title",
+      description: "Task description\n",
+    });
+
+    expect(updated.iid).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/merge_requests/200");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "PUT" });
+    expect(fetchMock.mock.calls[1]?.[1]).not.toHaveProperty("method");
+  });
+
   it("creates one merge request and reuses it on repeated publication", async () => {
     upsertGitLabRepository({
       projectId: "project-1",
