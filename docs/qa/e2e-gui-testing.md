@@ -395,22 +395,22 @@ Harness-правило для каждого GUI-пути:
 
 Свод идентификаторов с уровнем `E2E GUI`: сценарии — `test-plan.md` (артефакты `aif-qa`), ID набора `L-*`:
 
-| Область                                                    | Источник (основной trace)                                                                                | Идентификаторы сценариев (примеры) |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| Kanban-доска: просмотр/фильтр                              | `UC-dashboard.board.view-kanban-columns`                                                                 | L-01, L-01b, L-01c                 |
-| Kanban-доска: создание задачи через форму                  | `UC-dashboard.board.view-kanban-columns`, `UC-integration.issues.bootstrap-project-sync-and-create-task` | L-02-form                          |
-| Kanban-доска: реордеринг карточек (кнопка, не drag & drop) | `UC-dashboard.board.view-kanban-columns`                                                                 | L-01e                              |
-| Детали задачи: просмотр                                    | `UC-dashboard.detail.view-task-details`                                                                  | L-02                               |
-| Детали задачи: комментарии                                 | `UC-dashboard.detail.view-task-details`                                                                  | L-02b                              |
-| Детали задачи: переходы, handoff                           | `UC-pipeline.manual-override.intervene-task-stage`, `UC-handoff.transfer.ownership-to-executor`          | L-03, L-04                         |
-| Задачи: task-level runtime override                        | `UC-runtime.override.override-profile-for-task`                                                          | L-05c                              |
-| Чат с AI-ассистентом (проект/задача)                       | `UC-chat.project-context.consult-ai-assistant`, `UC-chat.task-context.discuss-task-with-ai`              | L-08c, L-08d                       |
-| Диалоги: участники, настройки проектов, runtime-профили    | `UC-runtime.profile.configure-project-runtime`, `UC-auth.roles.assign-participant-role`                  | L-05, L-06                         |
-| Real-time: статусы/гейты, реконнект                        | `UC-dashboard.realtime.receive-live-status-updates`                                                      | L-07                               |
-| Аутентификация                                             | `UC-auth.registration.sign-up-participant`, `BR-constraint.auth.sessions`                                | L-08                               |
-| GitLab: Issue → MR review/merge → Accepted                 | `UC-integration.issues.bootstrap-project-sync-and-create-task`, `UC-integration.pr-mr.publish-github-pr` | L-10, L-10b                        |
-| Инфраструктура стенда (health-check)                       | без UC/US — явное исключение §4 (аналог L-08)                                                            | L-01d                              |
-| a11y (план)                                                | WCAG, keyboard-only                                                                                      | L-09 (целевое)                     |
+| Область                                                    | Источник (основной trace)                                                                                | Идентификаторы сценариев (примеры)                                                         |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Kanban-доска: просмотр/фильтр                              | `UC-dashboard.board.view-kanban-columns`                                                                 | L-01, L-01b, L-01c                                                                         |
+| Kanban-доска: создание задачи через форму                  | `UC-dashboard.board.view-kanban-columns`, `UC-integration.issues.bootstrap-project-sync-and-create-task` | L-02-form                                                                                  |
+| Kanban-доска: реордеринг карточек (кнопка, не drag & drop) | `UC-dashboard.board.view-kanban-columns`                                                                 | L-01e                                                                                      |
+| Детали задачи: просмотр                                    | `UC-dashboard.detail.view-task-details`                                                                  | L-02                                                                                       |
+| Детали задачи: комментарии                                 | `UC-dashboard.detail.view-task-details`                                                                  | L-02b                                                                                      |
+| Детали задачи: переходы, handoff                           | `UC-pipeline.manual-override.intervene-task-stage`, `UC-handoff.transfer.ownership-to-executor`          | L-03, L-04                                                                                 |
+| Задачи: task-level runtime override                        | `UC-runtime.override.override-profile-for-task`                                                          | L-05c                                                                                      |
+| Чат с AI-ассистентом (проект/задача)                       | `UC-chat.project-context.consult-ai-assistant`, `UC-chat.task-context.discuss-task-with-ai`              | L-08c, L-08d                                                                               |
+| Диалоги: участники, настройки проектов, runtime-профили    | `UC-runtime.profile.configure-project-runtime`, `UC-auth.roles.assign-participant-role`                  | L-05, L-06                                                                                 |
+| Real-time: статусы/гейты, реконнект                        | `UC-dashboard.realtime.receive-live-status-updates`                                                      | L-07                                                                                       |
+| Аутентификация                                             | `UC-auth.registration.sign-up-participant`, `BR-constraint.auth.sessions`                                | L-08                                                                                       |
+| GitLab: Issue → MR review/merge → Accepted                 | `UC-integration.issues.bootstrap-project-sync-and-create-task`, `UC-integration.pr-mr.publish-github-pr` | L-10, L-10b, L-10c, L-10d, L-10g (детерминированные) + L-10-full (LLM, полный AI-конвейер) |
+| Инфраструктура стенда (health-check)                       | без UC/US — явное исключение §4 (аналог L-08)                                                            | L-01d                                                                                      |
+| a11y (план)                                                | WCAG, keyboard-only                                                                                      | L-09 (целевое)                                                                             |
 
 Правила:
 
@@ -458,6 +458,24 @@ Harness-правило для каждого GUI-пути:
 
 - попытка `Connect` с несуществующим GitLab URL/namespace;
 - ожидаемо: диагностируемая ошибка в UI (toast/error), а `GET /projects/:id/gitlab` не получает новую connection.
+
+### 12.2. Карточки сценариев L-10c…L-10g и L-10-full — полный путь Issue → Accepted
+
+Исполняются как E2E API (`packages/web/e2e/api/gitlab-issue-to-accepted-full.spec.ts`, уровень `E2E`),
+а также покрывают требования `US-integration.pr-mr.gitlab-issue-to-accepted` (столбец «Oracle» и §5.3):
+
+| ID         | Scenario US                  | Trace (основной)                                                                                               | Проверка (oracle)                                                                                                                                                    | Уровень                                |
+| ---------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| L-10c      | 1 (Sync → Backlog)           | `UC-integration.issues.bootstrap-project-sync-and-create-task`                                                 | `GET /tasks/:id=backlog`; ссылка на issue без `mrIid`                                                                                                                | E2E API (детерминированный)            |
+| L-10d      | 3 + 8 (план в MR, единый MR) | `UC-pipeline.plan.generate-change-plan`, `UC-vcs-auto.mr.publish-atomic-merge-request`                         | `plan-file-status.exists=true`; description MR содержит текст плана; повторный `publish-plan` → тот же mrIid, один MR                                                | E2E API (детерминированный)            |
+| L-10g      | 10 + 11 + 8 (краткий путь)   | `UC-integration.issues.bootstrap-project-sync-and-create-task`, `UC-integration.pr-mr.resolve-review-decision` | Issue+MR импортируется сразу в `done`; merge → `accepted`; один MR                                                                                                   | E2E API (детерминированный)            |
+| L-10-full  | 2-9 (полный AI-контур)       | `UC-pipeline.*`, `UC-integration.pr-mr.resolve-review-decision`                                                | План опубликован в MR; approve → implementing; `implementationLog` содержит `[files] Files changed`; reviewer pass → `done` автономно; merge → `accepted`; единый MR | E2E API (LLM, `AIF_LLM_INTEGRATION=1`) |
+| Negative-A | A8, A9                       | `UC-integration.pr-mr.resolve-review-decision`                                                                 | `request_changes` done→implementing; close MR без merge → `paused`, НЕ `accepted`                                                                                    | E2E API (детерминированный)            |
+
+Обозначенные в US §5.3 трассы `L-10e/L-10f/L-10i` (approve → implementing, implementer → verify →
+review → done, повторный MR) покрываются внутри `L-10-full` — переходы планирования и реализации
+требуют реального AI-контура и не воспроизводятся детерминированно на стенде без LLM
+(PARTICIPANTS_MODE_ENABLED=false, legacy-набор событий).
 
 ## 13. Тестовые данные
 

@@ -78,6 +78,10 @@ services:
       # GitLab Issue→MR режим для e2e (в базовом compose по умолчанию off).
       GIT_PROVIDER: gitlab
       AIF_GITLAB_ISSUE_MR_ENABLED: "true"
+      # Plan Review Gate: импортированная задача должна остановиться в plan_review
+      # после публикации MR плана и ждать approve в GitLab (US-интеграционный путь
+      # Issue → MR → Accepted; e2e/gui/gitlab-issue-to-accepted.spec.ts L-10-full).
+      AIF_PLAN_REVIEW_PR_ENABLED: "true"
       AIF_GITLAB_BASE_URL: "http://gitlab:8929/api/v4"
       # Имя переменной, которое хранит подключение проекта; значение резолвится
       # из окружения контейнера в рантайме (prepareRepository/tokenFor).
@@ -87,6 +91,7 @@ services:
     environment:
       GIT_PROVIDER: gitlab
       AIF_GITLAB_ISSUE_MR_ENABLED: "true"
+      AIF_PLAN_REVIEW_PR_ENABLED: "true"
       AIF_GITLAB_BASE_URL: "http://gitlab:8929/api/v4"
       GITLAB_TOKEN: "${GITLAB_TOKEN:-}"
 

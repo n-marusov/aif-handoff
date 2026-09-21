@@ -9,6 +9,16 @@ import {
   type CreateTaskOptions,
   type CreatedTask,
 } from "../gui/common.js";
+export {
+  createGitLabBranchWithCommit,
+  GITLAB_REPOSITORY_PATH,
+  GITLAB_TOKEN,
+  GITLAB_WEB_URL,
+  GitLabApiError,
+  gitLabApi,
+  gitLabProjectPathEncoded,
+  isRetryableMergeReadinessDelay,
+} from "../shared/gitlab.js";
 
 export {
   API_URL,

@@ -65,6 +65,12 @@ compose stack ports (`localhost:5180` / `localhost:3009`).
 
 - `kanban-horizontal-scroll.spec.ts` — verifies horizontal wheel gestures over
   a vertically scrollable card list still scroll the Kanban board.
+- `api/gitlab-issue-to-accepted-full.spec.ts` — GitLab Issue → MR → Accepted
+  (`US-integration.pr-mr.gitlab-issue-to-accepted`): deterministic L-10c/L-10d/L-10g
+  (import без MR → backlog; план опубликован в едином MR; краткий путь MR → accepted)
+  и gated `AIF_LLM_INTEGRATION=1` полный AI-контур L-10-full (planning → plan_review
+  → approve → implementer → verify → auto-review → done → merge → accepted
+  с проверкой отчёта о работе в MR).
 - `perf/dashboard-load.spec.ts` — cold kanban render. Asserts DOM-ready and
   LCP budgets after the first column paints.
 - `perf/runtime-profiles-endpoint.spec.ts` — cold + warm `/runtime-profiles`

@@ -1,4 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  createGitLabBranchWithCommit,
+  GITLAB_REPOSITORY_PATH,
+  GITLAB_WEB_URL,
+  gitLabApi,
+  gitLabProjectPathEncoded,
+  GITLAB_TOKEN,
+} from "../shared/gitlab.js";
 import { API_URL, runId } from "./common";
 
 interface ApiSettings {
@@ -38,46 +46,6 @@ interface GitLabIssueResponse {
 
 interface GitLabMrResponse {
   iid: number;
-}
-
-const GITLAB_WEB_URL = process.env.GITLAB_WEB_URL;
-const GITLAB_TOKEN = process.env.GITLAB_TOKEN;
-const GITLAB_REPOSITORY_PATH = "root/e2e-target";
-
-function gitLabApiBaseUrl(): string {
-  if (!GITLAB_WEB_URL) {
-    throw new Error("GITLAB_WEB_URL is required");
-  }
-  return `${GITLAB_WEB_URL.replace(/\/$/, "")}/api/v4`;
-}
-
-function gitLabProjectPathEncoded(): string {
-  return encodeURIComponent(GITLAB_REPOSITORY_PATH);
-}
-
-async function gitLabApi<T>(
-  request: APIRequestContext,
-  path: string,
-  method: "GET" | "POST" | "PUT" | "DELETE",
-  data?: unknown,
-): Promise<T> {
-  if (!GITLAB_TOKEN) {
-    throw new Error("GITLAB_TOKEN is required");
-  }
-  const response = await request.fetch(`${gitLabApiBaseUrl()}${path}`, {
-    method,
-    headers: {
-      "PRIVATE-TOKEN": GITLAB_TOKEN,
-      "Content-Type": "application/json",
-    },
-    data,
-  });
-  if (!response.ok()) {
-    throw new Error(
-      `GitLab API ${method} ${path} failed: ${response.status()} ${await response.text()}`,
-    );
-  }
-  return (await response.json()) as T;
 }
 
 async function ensureGitLabIssueMrFeature(request: APIRequestContext): Promise<void> {
@@ -164,28 +132,6 @@ async function readTaskById(request: APIRequestContext, taskId: string): Promise
   const response = await request.get(`${API_URL}/tasks/${taskId}`);
   expect(response.ok()).toBe(true);
   return (await response.json()) as TaskDetails;
-}
-
-async function createGitLabBranchWithCommit(
-  request: APIRequestContext,
-  branchName: string,
-  marker: string,
-): Promise<void> {
-  await gitLabApi(request, `/projects/${gitLabProjectPathEncoded()}/repository/branches`, "POST", {
-    branch: branchName,
-    ref: "main",
-  });
-
-  await gitLabApi(
-    request,
-    `/projects/${gitLabProjectPathEncoded()}/repository/files/${encodeURIComponent(`e2e/${marker}.md`)}`,
-    "POST",
-    {
-      branch: branchName,
-      content: `# ${marker}\n`,
-      commit_message: `test(e2e): add ${marker}`,
-    },
-  );
 }
 
 async function deleteTaskIfExists(
