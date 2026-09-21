@@ -20,6 +20,15 @@
 #                      показывает все падения
 #   make coverage    — полный прогон со статистикой покрытия (@vitest/coverage-v8)
 #
+# E2E-тесты:
+#   make e2e         — GUI + API спектры Playwright против стека docker-compose
+#                      (api+web+agent+mcp+тестовый GitLab; стек поднимается
+#                      автоматически, см. scripts/e2e-docker.mjs и .env.e2e)
+#   make e2e-gui     — только GUI-спектры
+#   make e2e-api     — только API-спектры (REST+WS напрямую в сервис api)
+#   make e2e-docker  — только поднять/подготовить стек без прогона
+#   make docker-e2e-down — остановить E2E-стек и удалить тома
+#
 # Гейты:
 #   make gate-fast   — быстрый гейт до первого падения: build + test-fast
 #   make gate        — полный нативный гейт: lint-check + build + test + coverage + gates
@@ -124,17 +133,22 @@ coverage: ## Полный прогон тестов с покрытием (FG-CO
 	@echo coverage: OK, coverage report generated
 
 .PHONY: e2e
-e2e: e2e-gui e2e-api ## E2E-тесты Playwright: GUI + API против локального dev-стека
+e2e: e2e-gui e2e-api ## E2E-тесты Playwright: GUI + API против стека docker-compose (api+web+agent+mcp+gitlab; стек поднимается автоматически)
 	@echo e2e: OK, all e2e tests passed
 
+.PHONY: e2e-docker
+e2e-docker: ## Поднять E2E-стек docker-compose (включая тестовый GitLab) и подготовить его без прогона спектров
+	@$(NPM_CMD) run e2e:docker -- --prepare
+	@echo e2e-docker: OK, docker-compose stack prepared for e2e
+
 .PHONY: e2e-gui
-e2e-gui: ## E2E GUI-спектры в браузере (npm run e2e:gui --workspace=@aif/web)
-	@$(NPM_CMD) run e2e:gui --workspace=@aif/web
+e2e-gui: ## E2E GUI-спектры против стека docker-compose (npm run e2e:gui --workspace=@aif/web)
+	@$(NPM_CMD) run e2e:docker -- --gui
 	@echo e2e-gui: OK, all GUI e2e tests passed
 
 .PHONY: e2e-api
-e2e-api: ## E2E API-спектры: REST+WS напрямую в сервис api (npm run e2e:api --workspace=@aif/web)
-	@$(NPM_CMD) run e2e:api --workspace=@aif/web
+e2e-api: ## E2E API-спектры: REST+WS напрямую в сервис api против стека docker-compose (npm run e2e:api --workspace=@aif/web)
+	@$(NPM_CMD) run e2e:docker -- --api
 	@echo e2e-api: OK, all API e2e tests passed
 
 .PHONY: e2e-full
@@ -213,6 +227,11 @@ docker-dev-stop: ## Остановить dev-окружение (docker compose 
 docker-dev-down: ## Остановить dev-окружение и удалить тома (docker compose down)
 	@$(DC_DEV) down --volumes --remove-orphans
 	@echo docker-dev-down: OK, stopped and cleaned
+
+.PHONY: docker-e2e-down
+docker-e2e-down: ## Остановить E2E-стек (включая тестовый GitLab) и удалить тома
+	@$(NPM_CMD) run e2e:docker -- --down
+	@echo docker-e2e-down: OK, e2e stack stopped and cleaned
 
 .PHONY: docker-logs
 docker-logs: ## Хвост логов всех сервисов (docker compose logs -f)

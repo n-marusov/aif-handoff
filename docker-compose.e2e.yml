@@ -1,0 +1,96 @@
+# ============================================================================
+# docker-compose.e2e.yml — E2E-стенд: расширяет docker-compose.yml, добавляет
+# тестовый GitLab-сервер и переопределяет окружение api/agent на GitLab-режим.
+#
+# Запуск (через scripts/e2e-docker.mjs):
+#   docker compose --env-file .env.e2e \
+#     -f docker-compose.yml -f docker-compose.e2e.yml up -d
+#
+# Изоляция портов от dev-окружения (правило RULES.md):
+#   * api    — host ${PORT}     (default в .env.e2e: 3210)  → container 3009
+#   * web    — host ${WEB_PORT} (default в .env.e2e: 5280)  → container 80
+#   * mcp    — host ${MCP_PORT} (default в .env.e2e: 3211)  → container 3100
+#   * gitlab — host ${GITLAB_WEB_PORT} (default 8929) → container 8929
+#              host ${GITLAB_SSH_PORT} (default 2289) → container 22
+#   Ни один из этих host-портов не пересекается с dev (3009/5180/3100/3010).
+#
+# GitLab настроен как тестовый стенд с полным доступом для e2e:
+#   * root-пароль фиксирован (GITLAB_ROOT_PASSWORD) — первый вход детерминирован.
+#     Значение обязано проходить проверку сложности GitLab (без словарных слов
+#     и без username "root"), иначе первичный сиид 003_admin.rb падает и
+#     root-пользователь не создаётся (см. scripts/e2e-docker.mjs);
+#   * GITLAB_TOKEN — фиксированный PAT (создаётся проактивно скриптом
+#     scripts/e2e-docker.mjs через gitlab-rails runner и инжектится в api/agent);
+#   * тестовый репозиторий root/e2e-target (Issue → MR → Approve
+#     → comment → merge) создаётся скриптом при старте, если отсутствует.
+# external_url смотрит на internal hostname (http://gitlab:8929): API-клиент
+# приложения (AIF_GITLAB_BASE_URL) и клоны агента (connection.webUrl) живут
+# внутри compose-сети. Host-тесты ходят на API через http://localhost:8929.
+# ============================================================================
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:${GITLAB_VERSION:-17.0.2-ce.0}
+    container_name: aif-e2e-gitlab
+    restart: unless-stopped
+    hostname: gitlab
+    environment:
+      # Официальный хук перед reconfigure: дописывает настройки в gitlab.rb.
+      # Основной путь bak-конфига здесь — файл, а не GITLAB_OMNIBUS_CONFIG:
+      # эта версия image не потребляет переменную при генерации gitlab.rb.
+      # Гвардия по маркеру делает скрипт идемпотентным на перезапусках.
+      GITLAB_PRE_RECONFIGURE_SCRIPT: |
+        if ! grep -q '# aif-e2e custom config' /etc/gitlab/gitlab.rb; then
+          cat >> /etc/gitlab/gitlab.rb <<'EOC'
+        # aif-e2e custom config
+        external_url 'http://gitlab:8929'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2289
+        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD:-Xq7Zt2Lm9Vb4Kp}'
+        gitlab_rails['signup_enabled'] = false
+        # Local (socket) peers доверенные: тестовый стенд, Docker Desktop / WSL
+        # не всегда даёт peer-usermap (Docker for Windows не поддерживается
+        # официально доками GitLab). trust только для local-сокетов стенда.
+        postgresql['custom_pg_hba_entries'] = {
+          'local_trust' => [
+            { 'type' => 'local', 'database' => 'all', 'user' => 'all', 'method' => 'trust' }
+          ]
+        }
+        EOC
+        fi
+    ports:
+      - "${GITLAB_WEB_PORT:-8929}:8929"
+      - "${GITLAB_SSH_PORT:-2289}:22"
+    volumes:
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+    shm_size: "256m"
+    healthcheck:
+      # GitLab отвечает 200 на /-/health только после полного reconfigure.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8929/-/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+
+  api:
+    environment:
+      # GitLab Issue→MR режим для e2e (в базовом compose по умолчанию off).
+      GIT_PROVIDER: gitlab
+      AIF_GITLAB_ISSUE_MR_ENABLED: "true"
+      AIF_GITLAB_BASE_URL: "http://gitlab:8929/api/v4"
+      # Имя переменной, которое хранит подключение проекта; значение резолвится
+      # из окружения контейнера в рантайме (prepareRepository/tokenFor).
+      GITLAB_TOKEN: "${GITLAB_TOKEN:-}"
+
+  agent:
+    environment:
+      GIT_PROVIDER: gitlab
+      AIF_GITLAB_ISSUE_MR_ENABLED: "true"
+      AIF_GITLAB_BASE_URL: "http://gitlab:8929/api/v4"
+      GITLAB_TOKEN: "${GITLAB_TOKEN:-}"
+
+volumes:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:

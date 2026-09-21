@@ -20,6 +20,16 @@ test("L-07: внешнее изменение статуса отображае�
     await openProjectBoard(page);
     await expect(page.getByText(title, { exact: true })).toBeVisible();
 
+    // Дождёмся готовности приложенческого WebSocket: внешний переход ниже
+    // шлёт task:moved только живым сокетам. Если событие уйдёт до открытия
+    // сокета, доска не узнает о переходе (WS без replay) и тест упадёт —
+    // см. anti-flake §15.2 в docs/qa/e2e-api-testing.md.
+    await page.waitForFunction(
+      () => typeof (window as unknown as Record<string, unknown>).__aifWsClientId === "string",
+      undefined,
+      { timeout: 10_000 },
+    );
+
     // Фиксируем тип навигации: тест не должен перезагружать страницу.
     const navigationType = await page.evaluate(
       () => performance.getEntriesByType("navigation")[0]?.toJSON().type ?? "unknown",

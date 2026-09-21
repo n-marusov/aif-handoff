@@ -38,7 +38,8 @@ test("L-02: открывает детали задачи и видит секц�
     expect(oracle.ok()).toBe(true);
     const row = (await oracle.json()) as { status: string; executionOwner: string };
     // Слайд-овер показывает бейдж владельца AI owner (legacy-контекст: canHandoff=true).
-    await expect(page.getByText("AI owner", { exact: true })).toBeVisible();
+    // Бейдж есть и на карточке доски, поэтому берём последний элемент (портал слайд-овера).
+    await expect(page.getByText("AI owner", { exact: true }).last()).toBeVisible();
     expect(row.status).toBe("backlog");
     expect(row.executionOwner).toBe("ai");
   } finally {

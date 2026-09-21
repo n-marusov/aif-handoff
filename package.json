@@ -40,6 +40,7 @@
     "participants:bootstrap": "npm run participants:bootstrap --workspace=@aif/api --",
     "e2e:gui": "npm run e2e:gui --workspace=@aif/web",
     "e2e:api": "npm run e2e:api --workspace=@aif/web",
+    "e2e:docker": "node scripts/e2e-docker.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "ai:log-markers": "node scripts/check-log-markers.mjs",

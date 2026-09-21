@@ -221,6 +221,14 @@ export function useWebSocket(enabled = true) {
       ) {
         currentClientId = (raw.payload as Record<string, unknown>).clientId as string;
         console.debug("[ws] Assigned clientId:", currentClientId);
+        // Тестовая/внешняя наблюдаемость: код ниже ждёт готовности WS до
+        // внешних мутаций (L-07 realtime), иначе событие может уйти до
+        // открытия сокета и доска останется на старом статусе.
+        try {
+          (window as unknown as Record<string, unknown>).__aifWsClientId = currentClientId;
+        } catch {
+          // Не уронить обработчик, если запись в window запрещена (sandbox).
+        }
         return;
       }
 
@@ -307,6 +315,24 @@ export function useWebSocket(enabled = true) {
         const cachedStatus = statusCacheRef.current.get(movedTask.id);
         const previousStatus = cachedStatus ?? findTaskInCache(movedTask.id)?.status ?? null;
         statusCacheRef.current.set(movedTask.id, movedTask.status);
+
+        // Оптимистичная запись в кеш: без неё доска может остаться на старом
+        // статусе навсегда, если инвалидация (ниже) прилетит в момент, когда
+        // board-запрос уже в полёте — реакт-квери поглотит инвалидацию, а
+        // прилетевший старый ответ станет "свежим". Обновляем списки задач
+        // и детальку сразу из payload, а инвалидация ниже добьёт остальное.
+        for (const [queryKey, list] of queryClient.getQueriesData<TaskListItem[]>({
+          queryKey: ["tasks"],
+        })) {
+          if (!list) continue;
+          queryClient.setQueryData(
+            queryKey,
+            list.map((item) => (item.id === movedTask.id ? { ...item, ...movedTask } : item)),
+          );
+        }
+        queryClient.setQueryData<Task>(["task", movedTask.id], (current) =>
+          current ? { ...current, ...movedTask } : current,
+        );
 
         if (previousStatus && previousStatus !== movedTask.status) {
           if (settingsRef.current.desktop) {

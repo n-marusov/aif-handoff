@@ -38,8 +38,8 @@ test("E2E-API-002: создание и обновление задачи сог�
     expect(row.priority).toBe(1);
     expect(row.paused).toBe(true);
 
-    // PATCH /tasks/:id — меняем title и priority.
-    const patch = await request.patch(`${API_URL}/tasks/${task.id}`, {
+    // PATCH-маршрута для задачи нет: обновление идёт через PUT /tasks/:id.
+    const patch = await request.put(`${API_URL}/tasks/${task.id}`, {
       data: { title: `e2e-api-lifecycle-renamed-${suffix}`, priority: 3 },
     });
     expect(patch.ok()).toBe(true);
@@ -113,11 +113,12 @@ test("E2E-API-004: start_ai из planning отклоняется (negative)", as
     const moved = (await first.json()) as { status: string };
     expect(moved.status).toBe("planning");
 
-    // Повторный start_ai из planning — недопустимый переход.
+    // Повторный start_ai из planning — недопустимый переход. Адаптер переводит
+    // все отказы автомата в 409 (см. services/taskEvents.ts statusForCode).
     const second = await request.post(`${API_URL}/tasks/${task.id}/events`, {
       data: { event: "start_ai" },
     });
-    expect(second.status).toBe(400);
+    expect(second.status()).toBe(409);
 
     // Oracle: статус остался planning (негативный сценарий не изменил состояние).
     const detail = await request.get(`${API_URL}/tasks/${task.id}`);
@@ -136,5 +137,5 @@ test("E2E-API-004b: событие для несуществующей зада�
       data: { event: "start_ai" },
     },
   );
-  expect(response.status).toBe(404);
+  expect(response.status()).toBe(404);
 });

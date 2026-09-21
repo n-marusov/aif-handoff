@@ -38,5 +38,5 @@ test("E2E-API-006b: comment для несуществующей задачи →
     `${API_URL}/tasks/00000000-0000-0000-0000-000000000000/comments`,
     { data: { message: "orphan" } },
   );
-  expect(response.status).toBe(404);
+  expect(response.status()).toBe(404);
 });

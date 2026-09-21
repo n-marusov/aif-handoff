@@ -763,11 +763,26 @@ npm run ai:protocol                      # protocol-проверка codex-ко�
 Настоящий E2E API-уровень — Playwright-спектры `packages/web/e2e/api/*.spec.ts`, которые ходят в сервис `api` напрямую (REST + WS через внешний клиент, без браузера UI):
 
 ```sh
+make e2e                              # поднимает docker-compose (включая тестовый GitLab) и гоняет API + GUI E2E
+make e2e-api                          # API-спектры против docker-compose (стек поднимается автоматически)
 npm run e2e:api --workspace=@aif/web   # E2E API-спектры (health, task lifecycle, handoff, comments, WS, projects, runtime)
 npm run e2e:gui --workspace=@aif/web   # GUI-спектры (браузер)
 npm run test --workspace=@aif/api      # unit + in-process интеграционные (.integration.test.ts / .e2e.test.ts)
-docker compose up -d                    # полный контур (целевое для E2E API)
+docker compose --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d  # полный контур (Включая GitLab)
 ```
+
+E2E-стек разворачивается через `docker-compose.e2e.yml` (расширение базового compose)
+с собственным окружением `.env.e2e` (шаблон `.env.e2e.example`), в котором host-порты
+изолированы от dev: API `3210`, web `5280`, mcp `3211`, GitLab `8929`/`2289`. В стек
+добавлен тестовый GitLab CE с полным доступом для сценариев Issue → MR → Approve →
+comment → merge: root-пароль и PAT фиксированы (`GITLAB_ROOT_PASSWORD`/`GITLAB_TOKEN`
+в `.env.e2e`), тестовый репозиторий `root/e2e-target` провижинится скриптом при
+старте. `GITLAB_ROOT_PASSWORD` обязан проходить проверку сложности GitLab (без
+словарных слов и без username `root`): иначе первичный сиид `003_admin.rb` падает и
+root-пользователь не создаётся. Готовность GitLab проверяется по `GET /users/sign_in`
+(`/-/health` доступен только с loopback и из host отдаёт `404`). Спектры получают
+`GITLAB_TOKEN`/`GITLAB_WEB_URL` от `scripts/e2e-docker.mjs`.
+Правило изоляции портов — в `.ai-factory/RULES.md`.
 
 Правила:
 

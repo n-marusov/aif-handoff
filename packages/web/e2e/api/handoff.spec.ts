@@ -85,7 +85,7 @@ test("E2E-API-005b: handoff с устаревшей ревизией откло�
         assigneeIds: [],
       },
     });
-    expect(stale.status).toBe(409);
+    expect(stale.status()).toBe(409);
 
     // Oracle: владелец остался human.
     const detail = await request.get(`${API_URL}/tasks/${task.id}`);

@@ -30,8 +30,14 @@ test("L-05: создание project runtime-профиля через ProjectRu
   await page.getByPlaceholder("ANTHROPIC_API_KEY").fill(apiKeyEnvVar);
   await page.getByRole("button", { name: "Create Profile", exact: true }).click();
 
-  // Профиль появился в списке Project Profiles.
-  await expect(page.getByText(profileName, { exact: true })).toBeVisible();
+  // Профиль появился в списке Project Profiles. Список рендерит полную метку
+  // `name (runtime/provider)`, поэтому точное совпадение по одному имени не
+  // сработает — берём подстроку.
+  await expect(
+    page.getByText(new RegExp(profileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), {
+      exact: false,
+    }),
+  ).toBeVisible();
   await expect(
     page.getByText(new RegExp(`model=${model.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), {
       exact: false,
@@ -62,7 +68,11 @@ test("L-05: создание project runtime-профиля через ProjectRu
     // Профиль переиспользуем: профиль остаётся видимым после перезагрузки страницы.
     await page.reload();
     await page.getByRole("button", { name: "Runtime profiles" }).click();
-    await expect(page.getByText(profileName, { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(new RegExp(profileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), {
+        exact: false,
+      }),
+    ).toBeVisible();
   } finally {
     if (created) {
       const deleted = await request.delete(`${API_URL}/runtime-profiles/${created.id}`);

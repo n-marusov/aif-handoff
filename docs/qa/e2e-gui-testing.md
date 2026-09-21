@@ -169,7 +169,7 @@ it("отображает колонки Kanban и карточки задач", 
 | -------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------ |
 | Kanban-доска   | `Board`, `Column`, `TaskCard`, `AddTaskForm`                                                                          | колонки по стадиям, карточки (приоритет/владелец/гейты), создание задачи, реордеринг | L-01, L-01b, L-01c, L-01e, L-02-form |
 | Детали задачи  | `TaskDetail`, ownership/handoff, `ExecutorTimeline`, план, комментарии, логи, `TaskSettings`                          | поля, переходы стадий, handoff, комментарии, история, task-level runtime override    | L-02, L-02b, L-03, L-04, L-05c       |
-| Диалоги        | `ParticipantManagementDialog`, `ProjectRuntimeSettings`, `RuntimeProfileForm`, `GlobalSettingsDialog`, `WarmupDialog` | валидация, сохранение, ошибки                                                        | L-05, L-06                           |
+| Диалоги        | `ParticipantManagementDialog`, `ProjectRuntimeSettings`, `RuntimeProfileForm`, `GlobalSettingsDialog`, `WarmupDialog` | валидация, сохранение, ошибки                                                        | L-05, L-06, L-10                     |
 | Real-time      | `useWebSocket`, notifications                                                                                         | обновление статусов без перезагрузки, реконнект                                      | L-07                                 |
 | Аутентификация | `LoginPage`, session/CSRF                                                                                             | вход/выход, ошибки, редиректы                                                        | L-08                                 |
 | Чат            | `ChatBubble`, `ChatPanel`, sessions/messages                                                                          | открытие, отправка вопроса, ответ ассистента, история сессии                         | L-08c, L-08d                         |
@@ -214,7 +214,7 @@ it("отображает колонки Kanban и карточки задач", 
 | a11y-стенд (план)         | Стенд E2E GUI + axe/Screen Reader                                                                 | сценарии доступности (WCAG)                         |
 | Compose-стенд             | docker compose dev/prod: api/web/agent/mcp                                                        | деплой-проверки, полный контур                      |
 
-> Статус (2026-09-20): стенд E2E GUI реализован — Playwright Set (`packages/web/e2e/*.spec.ts`), `webServer` поднимает dev-стек (`npm run dev`), `AIF_WEB_URL`/`AIF_SKIP_DEV_SERVER` для внешних окружений. Текущий набор: scroll-регрессии Kanban, `participants-mode.spec.ts`, perf-бюджеты (`e2e/perf/*`). a11y-автоматизация — целевое состояние.
+> Статус (2026-09-21): стенд E2E GUI реализован — Playwright Set (`packages/web/e2e/*.spec.ts`). Основной путь запуска — `make e2e`/`make e2e-gui`: поднимается docker-compose стек (`scripts/e2e-docker.mjs`: `.env` + `PROJECTS_DIR` + `docker compose up -d` + readiness + посев эталонного проекта), спектры идут против compose-портов с `AIF_SKIP_DEV_SERVER=1`. Для локальной итерации `npm run e2e:gui --workspace=@aif/web` по-прежнему авто-стартует dev-стек (`webServer`); `AIF_WEB_URL`/`AIF_SKIP_DEV_SERVER` — для внешних окружений. Текущий набор: scroll-регрессии Kanban, `participants-mode.spec.ts`, perf-бюджеты (`e2e/perf/*`). a11y-автоматизация — целевое состояние.
 
 ### 7.2. Обязательные свойства стенда E2E GUI
 
@@ -301,6 +301,7 @@ Playwright — это **способ читать и управлять реал
 | Диалоги/настройки (L-05, L-06)             | web 5180 + API 3009 + БД                             |
 | Real-time (L-07)                           | web 5180 + API 3009 + WS + второй клиент/координатор |
 | Аутентификация (L-08)                      | web 5180 + API 3009 (session/CSRF)                   |
+| GitLab Issue→MR→Accepted (L-10)            | web 5180 + API 3009 + БД + GitLab + `GITLAB_TOKEN`   |
 | Деградация (без адаптера)                  | web 5180 + API 3009 без заглушки адаптера            |
 
 ## 10. Процедура E2E GUI-тестирования
@@ -407,6 +408,7 @@ Harness-правило для каждого GUI-пути:
 | Диалоги: участники, настройки проектов, runtime-профили    | `UC-runtime.profile.configure-project-runtime`, `UC-auth.roles.assign-participant-role`                  | L-05, L-06                         |
 | Real-time: статусы/гейты, реконнект                        | `UC-dashboard.realtime.receive-live-status-updates`                                                      | L-07                               |
 | Аутентификация                                             | `UC-auth.registration.sign-up-participant`, `BR-constraint.auth.sessions`                                | L-08                               |
+| GitLab: Issue → MR review/merge → Accepted                 | `UC-integration.issues.bootstrap-project-sync-and-create-task`, `UC-integration.pr-mr.publish-github-pr` | L-10, L-10b                        |
 | Инфраструктура стенда (health-check)                       | без UC/US — явное исключение §4 (аналог L-08)                                                            | L-01d                              |
 | a11y (план)                                                | WCAG, keyboard-only                                                                                      | L-09 (целевое)                     |
 
@@ -414,6 +416,48 @@ Harness-правило для каждого GUI-пути:
 
 - пользовательские E2E GUI-сценарии выводятся из UC (канал `GUI`) и US/функций `vision.md` §2.2; исключение без UC (BR/KI) оформляется явно; детализация кейса — шаги, данные, oracle, негативы — в `test-cases.md` (`.ai-factory/qa/<branch-slug>/`);
 - сценарий с уровнем только `integration` не входит в E2E GUI-набор.
+
+### 12.1. Карточка сценария L-10 — GitLab Issue → MR → Accepted
+
+- **ID:** `L-10`
+- **Тип:** E2E GUI, P0
+- **Основной trace:** `UC-integration.issues.bootstrap-project-sync-and-create-task`
+- **Контекст trace:** `UC-integration.pr-mr.publish-github-pr` (GitLab-variant), `HF11.1`, `HF11.2`, `HF1.6`, `US-integration.pr-mr.gitlab-issue-to-accepted`
+- **Цель:** подтвердить, что через UI проекта (`ProjectSelector`) система подключает GitLab-репозиторий, синхронизирует Issue/MR и доводит linked Task до `accepted` после merge MR.
+
+**Предусловия:**
+
+- поднят e2e-стек (`web` + `api` + `db` + GitLab);
+- `GIT_PROVIDER=gitlab`, `AIF_GITLAB_ISSUE_MR_ENABLED=true`;
+- в окружении Playwright доступны `GITLAB_WEB_URL` и `GITLAB_TOKEN`;
+- тестовый репозиторий `root/e2e-target` доступен токену.
+
+**Шаги (happy path):**
+
+1. Через GitLab API подготовить данные: создать Issue и открытый MR с `Closes #<iid>`.
+2. В GUI открыть проект, перейти в Edit Project, в блоке **GitLab Issue-to-MR** указать URL репозитория и eligibility label, нажать `Connect`.
+3. Нажать `Sync now` и дождаться сообщения `GitLab sync complete`.
+4. Проверить oracle: `GET /projects/:id/gitlab` содержит связанный issue (`iid`) и `taskId`.
+5. Выполнить merge MR через GitLab API.
+6. Повторно нажать `Sync now`.
+7. Проверить oracle: `GET /tasks/:id` возвращает `status=accepted`.
+
+**Ожидаемый результат:**
+
+- связь Project ↔ GitLab сохранена;
+- issue импортирован в задачу;
+- после merge и повторного sync задача переведена в `accepted`.
+
+**Внешние oracle:**
+
+- `GET /settings` (фича-флаги);
+- `GET /projects/:id/gitlab` (connection + links + MR state);
+- `GET /tasks?projectId=...` и `GET /tasks/:id` (статус задачи).
+
+**Negative (L-10b):**
+
+- попытка `Connect` с несуществующим GitLab URL/namespace;
+- ожидаемо: диагностируемая ошибка в UI (toast/error), а `GET /projects/:id/gitlab` не получает новую connection.
 
 ## 13. Тестовые данные
 
@@ -528,10 +572,24 @@ Fresh-context reviewer проверяет: требование/контракт
 
 ```sh
 npm run perf:install --workspace=@aif/web    # установка chromium (один раз)
-npm run e2e:gui --workspace=@aif/web         # GUI-спектры (webServer авто-старт dev-стека)
+make e2e                                     # основной путь: поднимает docker-compose и гоняет GUI + API
+make e2e-gui                                 # GUI-спектры против docker-compose (стек поднимается автоматически)
+make e2e-docker                              # только поднять/подготовить стек
+npm run e2e:gui --workspace=@aif/web         # GUI-спектры (webServer авто-старт dev-стека, локально)
 npm run perf --workspace=@aif/web            # полный E2E-набор (GUI + perf-бюджеты + scroll/participants)
 npm run perf:report --workspace=@aif/web     # HTML-отчёт
 ```
+
+Исполнение через Makefile (`make e2e*`) использует `scripts/e2e-docker.mjs`:
+`docker compose --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d`
+→ readiness-check API/web/**GitLab CE** (`GET /users/sign_in`) → идемпотентный посев эталонного
+проекта `c1de80b3-...` в БД контейнера api → провижининг GitLab (root-пользователь,
+root PAT `aif-e2e`, тестовый репозиторий `root/e2e-target`) → Playwright с `AIF_SKIP_DEV_SERVER=1`
+против e2e-портов (см. `.env.e2e.example`; по умолчанию API `localhost:3210`, web
+`localhost:5280`, GitLab `localhost:8929`). Стек после прогона остаётся поднятым;
+остановка — `make docker-e2e-down`. Host-порты E2E изолированы от dev (правило
+в `.ai-factory/RULES.md`). E2E-спектры получают `GITLAB_TOKEN`/`GITLAB_WEB_URL`
+для работы с тестовым GitLab (Issue → MR → Approve → comment → merge).
 
 - переменные окружения: `AIF_SKIP_DEV_SERVER=1` (не поднимать dev-сервер), `AIF_WEB_URL` (внешний URL web), `AIF_E2E_ISOLATED_UI=true` (изолированный web dev);
 - наблюдение — через DOM/a11y-дерево Playwright и внешние состояния (API/WS/БД), а не через внутренние структуры приложения.

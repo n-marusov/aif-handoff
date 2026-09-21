@@ -189,7 +189,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const isEditDialogOpen = dialogOpen && dialogMode === "edit" && !!editingId;
   const { data: githubData, isLoading: isGitHubLoading } = useProjectGitHub(
     editingId,
-    isEditDialogOpen && githubIssuePrEnabled,
+    isEditDialogOpen && gitProvider === "github" && githubIssuePrEnabled,
   );
   const { data: gitlabData, isLoading: isGitLabLoading } = useProjectGitLab(
     editingId,

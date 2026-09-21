@@ -17,6 +17,7 @@ dist/
 
 # Environment
 .env
+.env.e2e
 .env.local
 .env.*.local
 
