@@ -29,6 +29,13 @@
 #   make e2e-docker  — только поднять/подготовить стек без прогона
 #   make docker-e2e-down — остановить E2E-стек и удалить тома
 #
+# Интеграционные тесты (реальные внешние сервисы, настройки из .env.integration):
+#   make integration-llm    — LLM-интеграция (@aif/runtime; открытый счёт на
+#                             OpenAI-совместимый шлюз)
+#   make integration-gitlab — GitLab-интеграция (@aif/api; требует стенд,
+#                             который поднимает e2e-docker + docker-compose.e2e.yml)
+#   make integration        — оба набора (LLM + GitLab)
+#
 # Гейты:
 #   make gate-fast   — быстрый гейт до первого падения: build + test-fast
 #   make gate        — полный нативный гейт: lint-check + build + test + coverage + gates
@@ -175,6 +182,22 @@ mutation: ## Stryker mutation testing (полный прогон)
 mutation-dry-run: ## Stryker mutation testing (dry-run, без мутаций)
 	@$(NPM_CMD) run mutation:dry-run
 	@echo mutation-dry-run: OK
+
+##@ Интеграционное тестирование (реальные внешние сервисы)
+
+.PHONY: integration
+integration: integration-llm integration-gitlab ## Прогон интеграционных тестов: LLM (@aif/runtime) + GitLab (@aif/api); настройки из .env.integration
+	@echo integration: OK, all integration tests passed
+
+.PHONY: integration-llm
+integration-llm: ## Интеграционный тест LLM (@aif/runtime; Codex API к OpenAI-совместимому шлюзу; настройки OPENAI_* из .env.integration; гейт AIF_LLM_INTEGRATION=1)
+	@$(NPM_CMD) run integration:llm
+	@echo integration-llm: OK, LLM integration tests passed
+
+.PHONY: integration-gitlab
+integration-gitlab: e2e-docker ## Интеграционный тест GitLab (@aif/api; GitLabClient против стенда из docker-compose.e2e.yml; настройки GITLAB_* из .env.integration; гейт AIF_GITLAB_INTEGRATION=1)
+	@$(NPM_CMD) run integration:gitlab
+	@echo integration-gitlab: OK, GitLab integration tests passed
 
 ##@ Качество кода (нативно, без Docker)
 

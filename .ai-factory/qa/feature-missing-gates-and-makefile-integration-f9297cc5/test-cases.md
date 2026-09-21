@@ -115,6 +115,50 @@ Preconditions: disposable task; board open.
 
 ---
 
+## TC-L-09 LLM integration smoke (Codex API transport)
+
+Trace: `UC-runtime.profile.configure-project-runtime`; `HF3.1`, `contract-runtime-adapter`.
+
+Preconditions:
+- integration env file exists: `.env.integration` (copied from `.env.e2e`), with `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`;
+- run flag enabled: `AIF_LLM_INTEGRATION=1`;
+- runtime package dependencies installed.
+
+| Step | Action | Expected |
+| ---- | ------ | -------- |
+| 1 | Load env from `.env.integration` for test process | process has non-empty `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL` |
+| 2 | Call `validateCodexAgentApiConnection` with `baseUrl`+`apiKey` from env | result `ok:true` (provider `/models` reachable and key accepted) |
+| 3 | Run `runCodexAgentApi` with model from env and prompt `Reply with exactly: OK` | run completes without exception; `outputText` is non-empty |
+| 4 | Verify envelope fields | `sessionId` is `string \| null`; `usage` is `RuntimeUsage \| null` |
+| 5 | Negative guard | when `AIF_LLM_INTEGRATION!=1`, test is skipped (does not hit external LLM) |
+
+---
+
+## TC-L-10 GitLab integration (Issue → MR → review → merge)
+
+Trace: `UC-integration.issues.bootstrap-project-sync-and-create-task`; `UC-integration.pr-mr.publish-github-pr` (GitLab-вариант); `HF11.1/HF11.2/HF1.6`, `contract-aif-gitlab`.
+
+Preconditions:
+- integration env file `.env.integration` carries GitLab settings from `docker-compose.e2e.yml`: `GIT_PROVIDER=gitlab`, `AIF_GITLAB_ISSUE_MR_ENABLED=true`, `AIF_GITLAB_BASE_URL=http://localhost:8929/api/v4`, `GITLAB_TOKEN=<PAT>`, `GITLAB_TEST_NAMESPACE=root`, `GITLAB_TEST_PROJECT=e2e-target`;
+- test GitLab stand is up (e.g. `node scripts/e2e-docker.mjs --prepare` brings up `gitlab-ce` + provisions root PAT `aif-e2e` and repository `root/e2e-target`);
+- run flag enabled: `AIF_GITLAB_INTEGRATION=1`.
+
+| Step | Action | Expected |
+| ---- | ------ | -------- |
+| 1 | Load env from `.env.integration` | process has non-empty `AIF_GITLAB_BASE_URL`, `GITLAB_TOKEN`, test project path |
+| 2 | `GitLabClient.getRepository(namespace/name)` for `root/e2e-target` | remote project returned; `default_branch` non-empty; `web_url` contains repo path |
+| 3 | Create branch + commit file in test repo via GitLab REST API | branch exists; commit created on the branch |
+| 4 | Create issue via REST API | issue `iid` returned, state `opened` |
+| 5 | `GitLabClient.createMergeRequest` (source branch, target main, description `Closes #<iid>`) | MR created; `findMergeRequest` finds it |
+| 6 | `getMergeRequestApprovals` | `reviewState: "pending"` before any approve |
+| 7 | `upsertMarkerNote` twice with same marker | only one note with the marker exists (idsempotent update) |
+| 8 | `getCommitChecks(sha)` | result is `null \| "pending" \| "success" \| "failure"` (no exception) |
+| 9 | Approve MR via REST API (`POST /merge_requests/:iid/approve`) | `getMergeRequestApprovals` → `reviewState: "approved"`; system note `approved this merge request` appears |
+| 10 | Merge MR via REST API (`PUT /merge_requests/:iid/merge`) | `getMergeRequest` → `state: "merged"`; issue auto-closed (`Closes #<iid>`) → `listIssues` shows `state: "closed"` |
+| 11 | Negative guard | when `AIF_GITLAB_INTEGRATION!=1` or settings missing, test is skipped (no GitLab traffic) |
+
+---
+
 ## TC-L-08 Registration/login — BLOCKED on stand
 
 Trace: `UC-auth.registration.sign-up-participant`; `HF9.1`, `BR-constraint.auth.sessions`.
