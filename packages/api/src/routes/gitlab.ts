@@ -499,7 +499,7 @@ gitlabRouter.post("/:id/gitlab/sync", jsonValidator(gitlabSyncSchema), async (c)
                 noteId: pendingRequestChangesNote.id,
                 feedbackLength: feedback?.length ?? 0,
               },
-              "GitLab plan review requested changes; task returned to planning",
+              "GitLab plan review requested changes; task returned to improve",
             );
           } else {
             log.error(

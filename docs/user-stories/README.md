@@ -85,12 +85,13 @@ Feature: US-<domain>.<subdomain>.<action> <краткое название>
 
 ## Текущее состояние
 
-На дату актуализации (2026-09-21) каталог содержит **21 пользовательскую историю** — E2E-релевантный срез для подтверждения бизнес-пользы в сквозных GUI/API/Agent-путях.
+На дату актуализации (2026-09-21) каталог содержит **23 пользовательские истории** — E2E-релевантный срез для подтверждения бизнес-пользы в сквозных GUI/API/Agent-путях.
 
 Оставленные US:
 
 - `US-pipeline.stage.auto-advance-task`
 - `US-pipeline.manual-override.intervene-task-stage`
+- `US-pipeline.stage.done-to-implementing-rework`
 - `US-dashboard.board.view-kanban-columns`
 - `US-dashboard.detail.view-task-details`
 - `US-dashboard.realtime.receive-live-status-updates`
@@ -107,6 +108,7 @@ Feature: US-<domain>.<subdomain>.<action> <краткое название>
 - `US-integration.issues.bootstrap-project-sync-and-create-task`
 - `US-integration.pr-mr.resolve-review-decision`
 - `US-integration.pr-mr.gitlab-issue-to-accepted`
+- `US-integration.pr-mr.rework-plan-on-mr-comment`
 - `US-vcs-auto.mr.publish-atomic-merge-request`
 - `US-chat.project-context.consult-ai-assistant`
 - `US-chat.task-context.discuss-task-with-ai`

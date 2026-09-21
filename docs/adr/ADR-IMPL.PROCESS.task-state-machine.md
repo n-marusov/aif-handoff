@@ -34,7 +34,7 @@ stateDiagram-v2
     review --> implementing : request_changes / request_review_changes (rework)
 
     done --> accepted : approve_done
-    done --> implementing : request_changes (rework)
+    done --> implementing : request_changes (rework; skill $aif-fix)
 
     blocked_external --> planning : retry_from_blocked
     blocked_external --> improve : retry_from_blocked
@@ -46,18 +46,18 @@ stateDiagram-v2
 
 ### Описание состояний
 
-| Статус             | Роль                                         | Вход                                         | Выход                                                                                                                                                        |
-| ------------------ | -------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `backlog`          | Задача создана, ожидает запуска              | Создание, импорт                             | `start_ai` / `scheduledAt` / `start_human_work` → `planning`                                                                                                 |
-| `planning`         | AI планирует или человек описывает план      | `backlog`                                    | План готов → `plan_review`; флаг `runPlanImprove` → `improve`                                                                                                |
-| `improve`          | `/aif-improve` уточняет план                 | `planning` (флаг) или `plan_review` (replan) | `improve` completed → `plan_review`                                                                                                                          |
-| `plan_review`      | План готов, ожидает разрешения на реализацию | `planning` / `improve`                       | `start_implementation` / `approve_plan` / `autoMode` → `implementing`; `request_replanning` / `request_plan_changes` → `improve`; `fast_fix` → self-loop     |
-| `implementing`     | AI реализует план                            | `plan_review`                                | Реализация завершена → `verify`; флаг `skipReview` → `done`; **fast gate (самовозврат)** → `implementing` — агент повторяет реализацию без перехода в Verify |
-| `verify`           | Проверка реализации на соответствие плану    | `implementing`                               | Проверка пройдена → `review`; не пройдена → `implementing`                                                                                                   |
-| `review`           | Ревью кода (auto или human)                  | `verify`                                     | Ревью пройдено → `done`; изменения запрошены → `implementing`                                                                                                |
-| `done`             | Реализация завершена, ожидает подтверждения  | `review` / `implementing` (skipReview)       | `approve_done` → `accepted`; `request_changes` → `implementing`; **auto-approve (PR/MR merged, review approved, `/approve` comment)** → `accepted`           |
-| `accepted`         | Задача принята (терминальное состояние)      | `done`                                       | —                                                                                                                                                            |
-| `blocked_external` | Задача заблокирована внешней причиной        | Любой статус (через error recovery)          | `retry_from_blocked` → исходный статус (`planning` / `improve` / `plan_review` / `implementing`)                                                             |
+| Статус             | Роль                                         | Вход                                         | Выход                                                                                                                                                                                 |
+| ------------------ | -------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backlog`          | Задача создана, ожидает запуска              | Создание, импорт                             | `start_ai` / `scheduledAt` / `start_human_work` → `planning`                                                                                                                          |
+| `planning`         | AI планирует или человек описывает план      | `backlog`                                    | План готов → `plan_review`; флаг `runPlanImprove` → `improve`                                                                                                                         |
+| `improve`          | `/aif-improve` уточняет план                 | `planning` (флаг) или `plan_review` (replan) | `improve` completed → `plan_review`                                                                                                                                                   |
+| `plan_review`      | План готов, ожидает разрешения на реализацию | `planning` / `improve`                       | `start_implementation` / `approve_plan` / `autoMode` → `implementing`; `request_replanning` / `request_plan_changes` → `improve`; `fast_fix` → self-loop                              |
+| `implementing`     | AI реализует план                            | `plan_review`                                | Реализация завершена → `verify`; флаг `skipReview` → `done`; **fast gate (самовозврат)** → `implementing` — агент повторяет реализацию без перехода в Verify                          |
+| `verify`           | Проверка реализации на соответствие плану    | `implementing`                               | Проверка пройдена → `review`; не пройдена → `implementing`                                                                                                                            |
+| `review`           | Ревью кода (auto или human)                  | `verify`                                     | Ревью пройдено → `done`; изменения запрошены → `implementing`                                                                                                                         |
+| `done`             | Реализация завершена, ожидает подтверждения  | `review` / `implementing` (skipReview)       | `approve_done` → `accepted`; `request_changes` → `implementing` (доработка через скилл `$aif-fix`); **auto-approve (PR/MR merged, review approved, `/approve` comment)** → `accepted` |
+| `accepted`         | Задача принята (терминальное состояние)      | `done`                                       | —                                                                                                                                                                                     |
+| `blocked_external` | Задача заблокирована внешней причиной        | Любой статус (через error recovery)          | `retry_from_blocked` → исходный статус (`planning` / `improve` / `plan_review` / `implementing`)                                                                                      |
 
 Ключевые принципы:
 
@@ -68,6 +68,7 @@ stateDiagram-v2
 - **Plan validation gate:** задача НЕ переводится из `planning` или `improve` в `plan_review`, если файл плана отсутствует или пуст. При пустом плане после `planning` задача остаётся в `planning` для повторной генерации; после `improve` — возвращается в `planning`.
 - **Done auto-approval:** задача в `done` с VCS-linked PR/MR автоматически переходит в `accepted` при слиянии PR/MR (`prState=merged`), одобрении ревью (`reviewState=approved`) или команде `/approve` в комментариях. Стадия `done-checker` проверяет это на каждом poll-цикле.
 - **Blocked external:** при недоступности рантайма задача переходит в `blocked_external` с `retryAfter` и автоматическим возвратом.
+- **Done rework через `$aif-fix`:** при `request_changes` из `done` (`done → implementing`) доработку выполняет скилл `$aif-fix`, а не общий реализационный прогон. Основание: агент полагает задачу выполненной корректно и все формальные гейты пройдены, однако человек явно указывает, что реализация неправильна; скилл ориентирует исправление ровно на замечания человека.
 - **Action codes:** каждое возвращаемое действие имеет код (`action_not_allowed`, `actor_not_authorized` и т.д.) для однозначной обработки в API и UI.
 
 **Рассмотренные альтернативы:**

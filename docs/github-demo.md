@@ -202,7 +202,7 @@ Merge the PR on GitHub.com. The next sync advances the task to `verified`.
 - Plan publication: logger `plan-review:publisher` (INFO on push + PR publication,
   WARN on deferred publish when the branch/plan is missing).
 - Approval / replanning transitions: API GitHub sync route logs INFO on `plan_review →
-implementing` / `plan_review → planning`, DEBUG for deduped review ids.
+improving` / `plan_review → improve`, DEBUG for deduped review ids.
 - Blocked implementation: coordinator/implementer WARN with `taskId`, `status`, and
   `planReviewState` — no stack trace for the expected waiting state.
 

@@ -244,9 +244,9 @@ The task leaves `plan_review` only through VCS sync:
   `plan_review → implementing` with
   `planReviewState=approved`; the coordinator then starts implementation.
 - **Changes requested / comments** — a `changes_requested` GitHub review or a GitLab
-  request-changes note transitions the task back to `planning` with
+  request-changes note transitions the task back to `improve` with
   `planReviewState=changes_requested`; the review/comment text is persisted as
-  `planReviewFeedback` and fed to the planner. Replanning reuses the same branch/worktree
+  `planReviewFeedback` and fed to the improver. Rework reuses the same branch/worktree
   and plan path, and the next publish updates the **same** PR/MR body.
 
 After implementation and review, the final publish converts that same PR/MR to

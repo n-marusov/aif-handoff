@@ -290,7 +290,7 @@ describe("plan review gate transitions", () => {
     });
   });
 
-  it("routes changes requested back to planning and persists feedback", () => {
+  it("routes changes requested back to improve and persists feedback", () => {
     const taskId = createReadyAiTask("Request plan changes");
     markTaskPlanPublished({ taskId, commitSha: "abc123", actor: agentActor });
 
@@ -299,9 +299,9 @@ describe("plan review gate transitions", () => {
       feedback: "Please split the migration into two steps",
       actor: agentActor,
     });
-    expect(result).toMatchObject({ ok: true, fromStatus: "plan_review", toStatus: "planning" });
+    expect(result).toMatchObject({ ok: true, fromStatus: "plan_review", toStatus: "improve" });
     expect(findTaskById(taskId)).toMatchObject({
-      status: "planning",
+      status: "improve",
       planReviewState: "changes_requested",
       planReviewFeedback: "Please split the migration into two steps",
       planReviewApprovedAt: null,

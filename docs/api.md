@@ -738,7 +738,7 @@ When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the
 is in `plan_review` mode (`prMode === "plan_review"`), sync also drives the gate: an
 `approved` review transitions the task `plan_review → implementing` with
 `planReviewState=approved`; a `changes_requested` review (or new review/comment feedback)
-transitions it back to `planning` with `planReviewState=changes_requested` and the review
+transitions it back to `improve` with `planReviewState=changes_requested` and the review
 text persisted as `planReviewFeedback`. Review ids are deduped so repeated syncs do not
 bounce the task.
 
@@ -843,7 +843,7 @@ When the plan-review gate is enabled (`AIF_PLAN_REVIEW_PR_ENABLED=true`) and the
 is in `plan_review` mode (`mrMode === "plan_review"`), sync drives the gate from MR **system
 notes**, not the approvals boolean: an unprocessed "approved this merge request" note
 transitions the task `plan_review → implementing` with `planReviewState=approved`; a
-"requested changes" note transitions it back to `planning` with
+"requested changes" note transitions it back to `improve` with
 `planReviewState=changes_requested` and `planReviewFeedback` populated. When both review
 actions are still unprocessed, the newer note id wins. An approval only counts while no
 newer revocation note exists: the explicit "unapproved this merge request" action and the

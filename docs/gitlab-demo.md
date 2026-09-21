@@ -610,9 +610,9 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
 3. **Approve на gitlab.com** → следующая синхронизация (≤ 60 с) переводит задачу
    `plan_review → implementing` (`planReviewState=approved`), и агент начинает
    реализацию.
-4. **Request changes на MR** → синк возвращает задачу в `planning`
+4. **Request changes на MR** → синк возвращает задачу в `improve`
    (`planReviewState=changes_requested`), текст замечаний сохраняется как
-   `planReviewFeedback` и передаётся планировщику. Агент перепланирует на **той же**
+   `planReviewFeedback` и передаётся улучшителю (improver). Агент дорабатывает план на **той же**
    ветке, коммитит новую версию плана и обновляет **тот же** MR.
 5. **Финальная публикация** после реализации/ревью конвертирует тот же MR: маркер
    `implementation`, тело с логом реализации и evidence тестов, и только теперь

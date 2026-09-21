@@ -40,7 +40,7 @@ sequenceDiagram
     Sync->>DB: task → implementing (planReviewState=approved)
     Sync->>DB: пометить обработанное решение (после успеха)
   else plan_review + запрос изменений
-    Sync->>DB: task → planning (planReviewState=changes_requested)
+    Sync->>DB: task → improve (planReviewState=changes_requested)
     Sync->>DB: пометить обработанное решение (после успеха)
   end
   Sync-->>Coord: sync complete

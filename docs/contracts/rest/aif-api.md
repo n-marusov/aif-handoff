@@ -214,7 +214,7 @@ Middleware-цепочка:
 Для задачи, связанной с MR (`mrMode === "plan_review"`), sync читает системные заметки ревью (MR notes API) и применяет решение по фронту события:
 
 - **Approval** — при обнаружении новой заметки `«approved this merge request»` и отсутствии более новой заметки отзыва (`«unapproved this merge request»` / `«reset approvals …»`) задача переводится `plan_review → implementing` с `planReviewState=approved`.
-- **Changes requested** — при заметке `«requested changes»` задача возвращается в `planning` с `planReviewState=changes_requested` и сохранённой обратной связью.
+- **Changes requested** — при заметке `«requested changes»` задача возвращается в `improve` с `planReviewState=changes_requested` и сохранённой обратной связью.
 - **Competing notes** — если необработаны несколько решений, применяется последнее по времени (более новый id).
 - **Marker after success** — отметка `lastReviewNoteId` записывается только после успешного перехода; при конфликте решение повторяется на следующем sync.
 

@@ -11,7 +11,7 @@
 - **Импорт Issue:** API периодически сканирует Issues проекта (GithubRepository/GitlabRepository), идемпотентно маппит `(projectId, issue_number/iid)` → задача. Тайтл, тело, лейблы, assignees, milestone — refreshable snapshot.
 - **Ветка и PR/MR:** каждая задача создаёт ветку `feature/github-issue-<N>` или `feature/gitlab-issue-<N>` (из RULES-конвенции). После реализации — коммит + пуш. PR/MR создаётся/обновляется через API: тело включает маркер `<!-- aif:pr-mode=plan_review -->` / `<!-- aif:mr-mode=plan_review -->` для plan-review, и `<!-- aif:pr-mode=implementation -->` после реализации.
 - **Plan Review Gate (optional):** `AIF_PLAN_REVIEW_PR_ENABLED=true` — после планирования публикуется plan-only PR/MR; implementation начинается только после approval в VCS.
-- **Асинхронная синхронизация состояния:** API читает состояние PR/MR (approvals, review comments, merge status) при каждом синхро-цикле. Approved → `implementing`, changes requested → `planning` (plan_review) или `implementing` (реализация), merged → `verified`, closed unmerged → pause.
+- **Асинхронная синхронизация состояния:** API читает состояние PR/MR (approvals, review comments, merge status) при каждом синхро-цикле. Approved → `implementing`, changes requested → `improve` (plan_review) или `implementing` (реализация), merged → `verified`, closed unmerged → pause.
 - **Pull vs Push:** PR/MR создаётся и обновляется по REST; git push — через Git credentials (не токен). API key для GitHub/GitLab API — отдельно, в проектных настройках.
 
 **Рассмотренные альтернативы:**

@@ -411,7 +411,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
         ) {
           // Plan-review gate: одобренный PR/MR плана — единственное событие,
           // которое переводит задачу в implementing; ревью с changes-requested
-          // возвращает её в planning для перепланирования на той же ветке/PR.
+          // возвращает её в improve для доработки плана на той же ветке/PR.
           // Ревью COMMENTED с "/approve" трактуется как одобрение.
           if (effectiveReviewState === "approved") {
             const approved = markTaskPlanApproved({
@@ -479,7 +479,7 @@ githubRouter.post("/:id/github/sync", jsonValidator(githubSyncSchema), async (c)
                   reviewId: effectiveReviewId,
                   feedbackLength: feedback?.length ?? 0,
                 },
-                "GitHub plan review requested changes; task returned to planning",
+                "GitHub plan review requested changes; task returned to improve",
               );
             } else {
               log.error(

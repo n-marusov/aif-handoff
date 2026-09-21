@@ -568,10 +568,10 @@ export function markTaskPlanApproved(input: {
 }
 
 /**
- * Обработка запроса изменений от VCS: задача возвращается в `planning` на перепланирование
- * с сохранением связи с веткой и PR.
+ * Обработка запроса изменений от VCS: задача возвращается в `improve` на доработку плана
+ * с сохранением связи с веткой и MR/PR.
  *
- * Отзыв ревьюера сохраняется для следующего запуска планировщика; в лог попадает только
+ * Отзыв ревьюера сохраняется для следующего запуска improver; в лог попадает только
  * длина отзыва, но не его текст.
  */
 export function markTaskPlanChangesRequested(input: {
@@ -588,12 +588,12 @@ export function markTaskPlanChangesRequested(input: {
       feedbackLength: input.feedback?.length ?? 0,
       action: "task.plan_review.changes_requested",
     },
-    "Plan changes requested; returning task to planning",
+    "Plan changes requested; returning task to improve",
   );
-  // Changes requested возвращает задачу в planning для полного перепланирования.
+  // Changes requested возвращает задачу в improve для доработки плана по отзыву.
   return transitionTaskStatus({
     taskId: input.taskId,
-    status: "planning",
+    status: "improve",
     expectedStatus: "plan_review",
     actor: resolvePlanReviewActor(input.actor),
     action: "task.plan_review.changes_requested",

@@ -904,7 +904,7 @@ describe("GitHub project routes", () => {
     });
   });
 
-  it("returns a plan_review task to planning on GitHub changes-requested with feedback", async () => {
+  it("returns a plan_review task to improve on GitHub changes-requested with feedback", async () => {
     upsertGitHubRepository({
       projectId: "project-1",
       owner: "owner",
@@ -998,7 +998,7 @@ describe("GitHub project routes", () => {
 
     expect(response.status).toBe(200);
     expect(findTaskById(imported.taskId)).toMatchObject({
-      status: "planning",
+      status: "improve",
       planReviewState: "changes_requested",
       planReviewFeedback: "Split the migration into two steps",
     });

@@ -1920,7 +1920,7 @@ describe("GitLab project routes", () => {
     expect(findGitLabIssue("project-1", 154)?.lastReviewNoteId).toBe(800);
   });
 
-  it("returns a plan_review task to planning on a GitLab requested-changes note with feedback", async () => {
+  it("returns a plan_review task to improve on a GitLab requested-changes note with feedback", async () => {
     upsertGitLabRepository({
       projectId: "project-1",
       namespace: "namespace",
@@ -2033,7 +2033,7 @@ describe("GitLab project routes", () => {
 
     expect(response.status).toBe(200);
     expect(findTaskById(imported.taskId)).toMatchObject({
-      status: "planning",
+      status: "improve",
       planReviewState: "changes_requested",
       planReviewFeedback: "[nikomaru] Split the migration into two steps",
     });
@@ -2293,7 +2293,7 @@ describe("GitLab project routes", () => {
 
     expect(response.status).toBe(200);
     expect(findTaskById(imported.taskId)).toMatchObject({
-      status: "planning",
+      status: "improve",
       planReviewState: "changes_requested",
     });
     expect(findGitLabIssue("project-1", 154)).toMatchObject({

@@ -25,7 +25,7 @@
 5. Сохраняется `planReviewPublishedAt`, `planReviewCommitSha`.
 6. Coordinator ожидает: Plan Review Gate проверяет `planReviewState` на каждом poll-цикле.
 7. При `planReviewState=approved` (через `markTaskPlanApproved` или UI/VCS-webhook) задача переходит в `implementing`.
-8. При `planReviewState=changes_requested` задача возвращается в `planning`/`improve`.
+8. При `planReviewState=changes_requested` задача возвращается в `improve`.
 9. Если `planReviewState=null` — задача переходит в `implementing` без gate.
 10. Reviewer может оставлять комментарии в PR/MR; `planReviewFeedback` сохраняется.
 
