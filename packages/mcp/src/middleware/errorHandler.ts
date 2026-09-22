@@ -4,7 +4,12 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 const log = logger("mcp:error");
 
 /**
- * Соотносит распространённые типы ошибок с кодами ошибок MCP.
+ * Соотносит ошибки с кодами MCP без парсинга текста сообщения.
+ *
+ * - McpError пропускается как есть.
+ * - Любая иная Error-ошибка считается внутренней.
+ * - Невалидные входные параметры должны выбрасываться через `validationError`,
+ *   чтобы код InvalidParams был выставлен структурно на месте возникновения.
  */
 export function toMcpError(error: unknown): McpError {
   if (error instanceof McpError) {
@@ -12,19 +17,6 @@ export function toMcpError(error: unknown): McpError {
   }
 
   if (error instanceof Error) {
-    // Ошибки валидации
-    if (error.message.includes("validation") || error.message.includes("invalid")) {
-      log.error({ error: error.message }, "Validation error");
-      return new McpError(ErrorCode.InvalidParams, error.message);
-    }
-
-    // Ошибки «не найдено»
-    if (error.message.includes("not found")) {
-      log.error({ error: error.message }, "Resource not found");
-      return new McpError(ErrorCode.InvalidParams, error.message);
-    }
-
-    // Прочие ошибки
     log.error({ error: error.message, stack: error.stack }, "Unhandled tool exception");
     return new McpError(ErrorCode.InternalError, error.message);
   }

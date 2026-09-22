@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const loggerInfoMock = vi.fn();
+const loggerWarnMock = vi.fn();
+
 const { findProjectByTaskIdMock } = vi.hoisted(() => ({
   findProjectByTaskIdMock: vi.fn(),
 }));
@@ -14,6 +17,12 @@ vi.mock("@aif/shared", async (importOriginal) => {
     ...actual,
     // Перечитываем env на каждый вызов, чтобы переопределения vi.stubEnv из теста были видны.
     getEnv: () => actual.validateEnv(process.env),
+    logger: () => ({
+      info: (...args: unknown[]) => loggerInfoMock(...args),
+      warn: (...args: unknown[]) => loggerWarnMock(...args),
+      error: () => undefined,
+      debug: () => undefined,
+    }),
   };
 });
 
@@ -27,6 +36,8 @@ describe("notifyTaskBroadcast", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     findProjectByTaskIdMock.mockReset();
+    loggerInfoMock.mockReset();
+    loggerWarnMock.mockReset();
     resetEnvCache();
     vi.stubEnv("PORT", "3999");
     vi.stubEnv("API_BASE_URL", "http://localhost:3999");
@@ -146,6 +157,26 @@ describe("notifyTaskBroadcast", () => {
     global.fetch = fetchMock as any;
 
     await expect(notifyTaskBroadcast("task-3", "task:updated")).resolves.toBeUndefined();
+  });
+
+  it("treats task broadcast 404 as idempotent already_deleted race", async () => {
+    // BR: BR-trigger.automation.failure-recovery
+    // FR: REQ-FR-dashboard.realtime.broadcast-live-updates,REQ-FR-audit.logging.record-state-transition
+    // NFR: REQ-NFR-integration.compliance.review-event-idempotency
+    // KI: KI-15E
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    global.fetch = fetchMock as any;
+
+    await expect(notifyTaskBroadcast("task-404", "task:updated")).resolves.toBeUndefined();
+
+    expect(loggerWarnMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-404", status: 404 }),
+      "Task broadcast request returned non-OK status",
+    );
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-404", status: 404, reason: "already_deleted" }),
+      "Task broadcast skipped for already deleted task",
+    );
   });
 
   describe("telegram notifications", () => {

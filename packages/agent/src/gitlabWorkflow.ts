@@ -37,6 +37,27 @@ const SYNC_INTERVAL_MS = 60_000;
 // свежий, но попытка уже провалилась: повторять ее на каждом тике не нужно.
 const lastSyncAttempts = new Map<string, number>();
 
+interface GitLabSyncCorrelation {
+  traceId: string | null;
+  testId: string | null;
+  projectScope: string[];
+}
+
+function parseScopedProjectIds(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function readGitLabSyncCorrelation(): GitLabSyncCorrelation {
+  const traceId = process.env.AIF_GITLAB_SYNC_TRACE_ID?.trim() || null;
+  const testId = process.env.AIF_GITLAB_SYNC_TEST_ID?.trim() || null;
+  const projectScope = parseScopedProjectIds(process.env.AIF_GITLAB_SYNC_PROJECT_SCOPE);
+  return { traceId, testId, projectScope };
+}
+
 interface GitLabApiFailure {
   error?: string;
   code?: string;
@@ -71,7 +92,22 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
     return;
   }
   const baseUrl = getEnv().API_BASE_URL;
+  const correlation = readGitLabSyncCorrelation();
+  const scopeSet = correlation.projectScope.length > 0 ? new Set(correlation.projectScope) : null;
+
   for (const connection of listEnabledGitLabRepositories()) {
+    if (scopeSet && !scopeSet.has(connection.projectId)) {
+      log.debug(
+        {
+          projectId: connection.projectId,
+          traceId: correlation.traceId,
+          testId: correlation.testId,
+          projectScope: correlation.projectScope,
+        },
+        "Skipping GitLab repository sync outside scoped project set",
+      );
+      continue;
+    }
     // Сравниваются два независимых времени: успешная синхронизация по данным БД и
     // последняя попытка в этом процессе. Второе не дает ретраить упавший проект на
     // каждом тике.
@@ -92,10 +128,17 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
     const url = `${baseUrl}/projects/${connection.projectId}/gitlab/sync`;
     try {
       // Жесткий таймаут: фоновый тик не должен зависать из-за недоступного API.
+      const syncPayload: Record<string, unknown> = {};
+      if (correlation.traceId) syncPayload.traceId = correlation.traceId;
+      if (correlation.testId) syncPayload.testId = correlation.testId;
+      if (correlation.projectScope.length > 0) {
+        syncPayload.projectScope = correlation.projectScope;
+      }
+
       const response = await fetch(url, {
         method: "POST",
         headers: internalApiHeaders(),
-        body: "{}",
+        body: Object.keys(syncPayload).length > 0 ? JSON.stringify(syncPayload) : "{}",
         signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) {
@@ -106,6 +149,9 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
             status: response.status,
             code: failure.code ?? "gitlab_sync_failed",
             retryAt: failure.retryAt ?? null,
+            traceId: correlation.traceId,
+            testId: correlation.testId,
+            projectScope: correlation.projectScope,
           },
           "GitLab repository sync deferred",
         );
@@ -114,7 +160,13 @@ export async function synchronizeGitLabProjects(now = Date.now()): Promise<void>
       // Синхронизация best-effort: сбой логируется и не прерывает обход остальных
       // репозиториев и работу координатора.
       log.warn(
-        { projectId: connection.projectId, err: error },
+        {
+          projectId: connection.projectId,
+          err: error,
+          traceId: correlation.traceId,
+          testId: correlation.testId,
+          projectScope: correlation.projectScope,
+        },
         "GitLab repository sync unavailable",
       );
     }

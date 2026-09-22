@@ -67,6 +67,7 @@ import {
   isOutsideDeclaredScope,
 } from "../planLayers.js";
 import { assertCurrentBranch, restorePersistedBranch } from "../gitBranch.js";
+import { maybeBuildEvolveRecommendation } from "../evolveTrigger.js";
 
 // Имя агента держится на уровне модуля: оно используется и как agentName для subagentQuery, и
 // как agentDefinitionName в нативном режиме, поэтому единый источник исключает расхождение
@@ -505,7 +506,12 @@ Parallel worker contract (mandatory for layers marked "parallel"):
 All files must be created and modified inside this directory. Do NOT create files outside of it.`;
   // Одна и та же строка служит и первым сообщением промпта, и fallback-командой для рантайма,
   // поэтому она собирается заранее, а не по месту каждого использования.
-  const implementSlashCommand = `/aif-implement ${planSection}`;
+  // Для rework в skill-режиме направляем исполнение в fix-навык: это удерживает
+  // фокус на адресном исправлении замечаний вместо общего re-implement прогона.
+  const implementSlashCommand =
+    !useSubagents && task.reworkRequested
+      ? `/aif-fix ${planSection}`
+      : `/aif-implement ${planSection}`;
   // Контекст handoff передается отдельным блоком и только в режиме субагентов: слэш-команда
   // несет те же данные через собственный механизм подстановки.
   const handoffContext = `HANDOFF_MODE: 1
@@ -887,6 +893,11 @@ Rules for this retry:
     finalResultNotes.push(
       `[warning] Files changed outside the declared layer scope: ${shown}${suffix}. The layer was scheduled for parallel fan-out — review before merging.`,
     );
+  }
+
+  const evolveRecommendation = maybeBuildEvolveRecommendation(projectRoot);
+  if (evolveRecommendation) {
+    finalResultNotes.push(evolveRecommendation);
   }
 
   // Конкретная сводка изменений — показываем точно, какие файлы затронул этот

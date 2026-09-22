@@ -143,6 +143,13 @@ async function postTaskBroadcast(
     // в UI, когда клиент жалуется на «застрявшую» карточку.
     if (res.ok) {
       log.info({ taskId, type: body.type, ...context }, "Task broadcast sent");
+    } else if (res.status === 404) {
+      // Задачу могли удалить между сменой статуса и best-effort broadcast.
+      // Для гонки удаления это ожидаемый идемпотентный исход, а не ошибка.
+      log.info(
+        { taskId, type: body.type, status: res.status, reason: "already_deleted", url },
+        "Task broadcast skipped for already deleted task",
+      );
     } else {
       log.warn(
         { taskId, type: body.type, status: res.status, url },

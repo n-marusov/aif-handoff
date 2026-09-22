@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logger, parsePlanAnnotations, toTaskResponse } from "@aif/shared";
-import { findTaskById, setTaskPlanContentManaged } from "@aif/data";
+import { findTaskById, persistTaskPlanForTask, setTaskPlanContentManaged } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
 import { compactTaskResponse } from "../utils/compactResponse.js";
@@ -11,10 +11,15 @@ const log = logger("mcp:tool:push-plan");
 const pushPlanInputSchema: Record<string, z.ZodTypeAny> = {
   taskId: z.string().uuid().describe("Task ID to push plan to"),
   planContent: z.string().max(100_000).describe("Plan content in markdown (max 100KB)"),
+  persistTarget: z
+    .enum(["field", "canonical_file"])
+    .optional()
+    .describe("Persistence target: task field only (default) or canonical plan file + field"),
 };
 
 type PushPlanArgs = {
   planContent: string;
+  persistTarget?: "field" | "canonical_file";
   taskId: string;
 };
 
@@ -66,21 +71,29 @@ export function register(server: McpServer, context: ToolContext): void {
           };
         });
 
-        // Обновляет поле плана задачи через общий контракт
-        const planResult = setTaskPlanContentManaged(args.taskId, args.planContent);
-        if (!planResult.ok) {
-          throw validationError(`Task not found: ${args.taskId}`, {
-            taskId: ["Task does not exist"],
-          });
+        const persistTarget = args.persistTarget ?? "field";
+
+        let task = toTaskResponse(row);
+        if (persistTarget === "canonical_file") {
+          persistTaskPlanForTask({ taskId: args.taskId, planText: args.planContent });
+          const updatedRow = findTaskById(args.taskId);
+          task = updatedRow ? toTaskResponse(updatedRow) : task;
+        } else {
+          const planResult = setTaskPlanContentManaged(args.taskId, args.planContent);
+          if (!planResult.ok) {
+            throw validationError(`Task not found: ${args.taskId}`, {
+              taskId: ["Task does not exist"],
+            });
+          }
+          task = planResult.task ? toTaskResponse(planResult.task) : task;
         }
-        const updatedRow = planResult.task;
-        const task = updatedRow ? toTaskResponse(updatedRow) : toTaskResponse(row);
 
         log.info(
           {
             taskId: args.taskId,
             planSize: args.planContent.length,
             annotationCount: annotations.length,
+            persistTarget,
           },
           "handoff_push_plan completed",
         );

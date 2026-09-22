@@ -2,9 +2,11 @@ import { expect, test } from "@playwright/test";
 import {
   PERF_BUDGETS,
   PERF_API_ORIGIN,
+  evaluateBudgetSamples,
   readNavigationTiming,
   readWebVitals,
   recordNetwork,
+  resolvePerfBudgetPolicy,
 } from "./utils";
 
 // Явное исключение §4 (docs/qa/e2e-gui-testing.md): perf-бюджет холодной
@@ -16,41 +18,53 @@ import {
 // остаётся активным, поэтому первые прогоны после старта dev дают худшие задержки.
 test.describe("dashboard cold load", () => {
   test("renders kanban shell within LCP/DOM-ready budgets", async ({ page, context }) => {
-    await context.clearCookies();
-    const network = recordNetwork(page, (url) => url.startsWith(PERF_API_ORIGIN));
+    const policy = resolvePerfBudgetPolicy();
+    const domSamples: number[] = [];
+    const lcpSamples: number[] = [];
 
-    const nav = page.goto("/", { waitUntil: "domcontentloaded" });
-    const response = await nav;
-    expect(response?.status() ?? 500).toBeLessThan(400);
+    for (let attempt = 0; attempt < policy.attempts; attempt += 1) {
+      await context.clearCookies();
+      const network = recordNetwork(page, (url) => url.startsWith(PERF_API_ORIGIN));
 
-    // Ждём, пока приложение завершит первый запрос проектов и отрисует
-    // стабильное состояние дашборда. База perf-окружения может быть пустой —
-    // тогда показывается состояние без проектов вместо колонок канбана.
-    await page.waitForSelector(
-      "text=/Backlog|Planning|Implementing|Projects overview|No projects yet/i",
-      {
-        timeout: 30_000,
-      },
-    );
+      const nav = page.goto("/", { waitUntil: "domcontentloaded" });
+      const response = await nav;
+      expect(response?.status() ?? 500).toBeLessThan(400);
 
-    const timing = await readNavigationTiming(page);
-    const vitals = await readWebVitals(page);
-    const apiCalls = network.stop();
+      await page.waitForSelector(
+        "text=/Backlog|Planning|Implementing|Projects overview|No projects yet/i",
+        {
+          timeout: 30_000,
+        },
+      );
 
-    // eslint-disable-next-line no-console
-    console.log("[perf] dashboard timing:", {
-      nav: timing,
-      vitals,
-      apiCalls: apiCalls.map(({ url, durationMs, status }) => ({
-        url: url.replace(PERF_API_ORIGIN, ""),
-        durationMs,
-        status,
-      })),
-    });
+      const timing = await readNavigationTiming(page);
+      const vitals = await readWebVitals(page);
+      const apiCalls = network.stop();
 
-    expect(timing.domContentLoadedMs).toBeLessThan(PERF_BUDGETS.dashboardDomReadyMs);
-    if (vitals.lcpMs != null) {
-      expect(vitals.lcpMs).toBeLessThan(PERF_BUDGETS.dashboardLcpMs);
+      domSamples.push(timing.domContentLoadedMs);
+      if (vitals.lcpMs != null) {
+        lcpSamples.push(vitals.lcpMs);
+      }
+
+      // eslint-disable-next-line no-console
+      console.log("[perf] dashboard timing:", {
+        attempt: attempt + 1,
+        nav: timing,
+        vitals,
+        apiCalls: apiCalls.map(({ url, durationMs, status }) => ({
+          url: url.replace(PERF_API_ORIGIN, ""),
+          durationMs,
+          status,
+        })),
+      });
+    }
+
+    const domEval = evaluateBudgetSamples(domSamples, PERF_BUDGETS.dashboardDomReadyMs, policy);
+    expect(domEval.pass).toBe(true);
+
+    if (lcpSamples.length > 0) {
+      const lcpEval = evaluateBudgetSamples(lcpSamples, PERF_BUDGETS.dashboardLcpMs, policy);
+      expect(lcpEval.pass).toBe(true);
     }
   });
 });

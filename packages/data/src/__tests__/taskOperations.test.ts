@@ -264,6 +264,10 @@ describe("taskOperations", () => {
     });
   });
 
+  // BR: BR-trigger.automation.pipeline
+  // FR: REQ-FR-pipeline.stage.auto-advance-after-gate
+  // NFR: REQ-NFR-data.compliance.task-transactional-consistency
+  // KI: KI-09
   describe("setTaskPlanContentManaged", () => {
     it("sets the plan field and returns the updated row", () => {
       const created = createTaskManaged({

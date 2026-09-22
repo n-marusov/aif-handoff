@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { ORDERED_STATUSES, STATUS_CONFIG } from "@aif/shared/browser";
 import {
   API_URL,
   PROJECT_ID,
@@ -9,9 +10,10 @@ import {
   runId,
 } from "./common";
 
-// UC-dashboard.board.view-kanban-columns: пользователь видит колонки Kanban (основной источник).
-// HF2.1: просмотр изменений по стадиям (контекст).
-// BR-fact.audit.observability: статусы согласованы с аудитом (контекст).
+// BR: BR-fact.task-lifecycle.stages
+// FR: REQ-FR-dashboard.board.render-kanban-columns
+// NFR: REQ-NFR-data.compliance.task-state-persistence
+// KI: KI-02
 // contract-aif-rest-api: GET /tasks?projectId=X — внешний oracle (контекст).
 test("L-01: отображает колонки Kanban и карточку задачи из API", async ({ page, request }) => {
   const suffix = runId();
@@ -26,10 +28,13 @@ test("L-01: отображает колонки Kanban и карточку за�
   try {
     await openProjectBoard(page);
 
-    // Все 11 колонок стадий присутствуют с подписями из STATUS_CONFIG.
-    for (const label of STATUS_COLUMN_LABELS) {
+    // Колонки рендерятся из канонического STATUS_CONFIG/ORDERED_STATUSES.
+    const expectedLabels = ORDERED_STATUSES.map((status) => STATUS_CONFIG[status].label);
+    expect(STATUS_COLUMN_LABELS).toEqual(expectedLabels);
+    for (const label of expectedLabels) {
       await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
     }
+    await expect(page.getByRole("heading", { name: "Plan Ready", exact: true })).toHaveCount(0);
 
     // Фикстура создана через реальный API (oracle) со статусом backlog.
     expect(task.status).toBe("backlog");
@@ -113,6 +118,7 @@ test("L-01c: несуществующая задача не отображает
 });
 
 // Прямой доступ к API стенда: health-check перед прогоном (диагностика окружения).
+// KI classification: KI-05 infra-smoke (non-US scenario by design).
 test("L-01d: API стенда отвечает на health-check", async ({ request }) => {
   const response = await request.get(`${API_URL}/health`);
   expect(response.ok()).toBe(true);
@@ -120,11 +126,13 @@ test("L-01d: API стенда отвечает на health-check", async ({ requ
   expect(body.status).toBe("ok");
 });
 
-// US-dashboard.board.view-kanban-columns: пользователь меняет порядок задач в колонке (основной источник).
-// HF2.1: просмотр изменений по стадиям (контекст).
+// BR: BR-fact.task-lifecycle.stages
+// FR: REQ-FR-dashboard.board.render-kanban-columns
+// NFR: REQ-NFR-data.compliance.task-transactional-consistency
+// KI: KI-04
 // contract-aif-rest-api: PATCH /tasks/:id/position, GET /tasks?projectId=X — внешний oracle (контекст).
 // Примечание: реордеринг реализован кнопками «Move task up/down» (useReorderTask),
-// а не drag&-drop; различие зафиксировано в docs/known-issues.md (Task 8).
+// а не drag&-drop; различие зафиксировано в docs/known-issues.md.
 test("L-01e: реордеринг карточки в Backlog меняет position и сохраняется после reload", async ({
   page,
   request,
@@ -224,5 +232,38 @@ test("L-01e: реордеринг карточки в Backlog меняет posit
   } finally {
     await deleteTaskViaApi(request, first.id);
     await deleteTaskViaApi(request, second.id);
+  }
+});
+
+// BR: BR-fact.task-lifecycle.stages
+// FR: REQ-FR-dashboard.board.render-kanban-columns
+// NFR: REQ-NFR-data.compliance.task-transactional-consistency
+// KI: KI-04
+// Negative regression: drag-and-drop reorder is not available yet; backlog uses explicit up/down buttons.
+test("L-01f: drag-and-drop реордер не доступен, используются кнопки Move task up/down", async ({
+  page,
+  request,
+}) => {
+  const suffix = runId();
+  const task = await createTaskViaApi(request, {
+    title: `e2e-reorder-controls-${suffix}`,
+    autoMode: false,
+    paused: true,
+  });
+
+  try {
+    await openProjectBoard(page);
+
+    const card = page
+      .getByText(task.title, { exact: true })
+      .locator("xpath=ancestor::div[contains(@class,'cursor-pointer')][1]");
+    await expect(card).toBeVisible();
+
+    await expect(card.getByRole("button", { name: "Move task up" })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Move task down" })).toBeVisible();
+
+    await expect(card).not.toHaveAttribute("draggable", "true");
+  } finally {
+    await deleteTaskViaApi(request, task.id);
   }
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { TaskListItem } from "@aif/shared/browser";
+import { ORDERED_STATUSES, STATUS_CONFIG, type TaskListItem } from "@aif/shared/browser";
 
 function makeTask(overrides: Partial<TaskListItem> = {}): TaskListItem {
   return {
@@ -105,21 +105,21 @@ function expectTaskBefore(column: HTMLElement, firstTitle: string, secondTitle: 
 }
 
 describe("Board", () => {
-  it("should render status columns", () => {
+  // BR: BR-fact.task-lifecycle.stages
+  // FR: REQ-FR-dashboard.board.render-kanban-columns
+  // NFR: REQ-NFR-data.compliance.task-state-persistence
+  // KI: KI-02
+  it("should render status columns from STATUS_CONFIG in ORDERED_STATUSES order", () => {
     render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
       wrapper: Wrapper,
     });
 
-    expect(screen.getByText("Backlog")).toBeDefined();
-    expect(screen.getByText("Planning")).toBeDefined();
-    expect(screen.getByText("Improve")).toBeDefined();
-    expect(screen.getByText("Plan Review")).toBeDefined();
-    expect(screen.getByText("Implementing")).toBeDefined();
-    expect(screen.getByText("Verify")).toBeDefined();
-    expect(screen.getByText("Review")).toBeDefined();
-    expect(screen.getByText("Blocked")).toBeDefined();
-    expect(screen.getByText("Done")).toBeDefined();
-    expect(screen.getByText("Accepted")).toBeDefined();
+    const expectedLabels = ORDERED_STATUSES.map((status) => STATUS_CONFIG[status].label);
+    for (const label of expectedLabels) {
+      expect(screen.getByRole("heading", { name: label, level: 3 })).toBeDefined();
+    }
+
+    expect(screen.queryByRole("heading", { name: "Plan Ready", level: 3 })).toBeNull();
   });
 
   it("should render task cards in correct columns", () => {
@@ -337,6 +337,29 @@ describe("Board", () => {
     expect(screen.queryByText("Alice Human Task")).toBeNull();
     expect(screen.getByText("Bob Human Task")).toBeDefined();
     mockTasks.splice(originalLength);
+  });
+
+  // BR: BR-fact.task-lifecycle.stages
+  // FR: REQ-FR-dashboard.board.render-kanban-columns
+  // NFR: REQ-NFR-data.compliance.task-transactional-consistency
+  // KI: KI-04
+  it("should expose backlog reorder controls and keep drag-and-drop disabled", () => {
+    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
+      wrapper: Wrapper,
+    });
+
+    const backlogCard = screen
+      .getByText("Test Task 1")
+      .closest("div.cursor-pointer") as HTMLElement | null;
+    expect(backlogCard).not.toBeNull();
+
+    expect(
+      within(backlogCard as HTMLElement).getByRole("button", { name: "Move task up" }),
+    ).toBeDefined();
+    expect(
+      within(backlogCard as HTMLElement).getByRole("button", { name: "Move task down" }),
+    ).toBeDefined();
+    expect((backlogCard as HTMLElement).getAttribute("draggable")).not.toBe("true");
   });
 
   it("should show task descriptions", () => {

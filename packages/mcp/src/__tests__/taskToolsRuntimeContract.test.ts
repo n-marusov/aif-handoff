@@ -84,6 +84,10 @@ describe("MCP task tools runtime contract", () => {
     broadcastTaskChangeMock.mockClear();
   });
 
+  // BR: BR-fact.project.runtime-profiles
+  // FR: REQ-FR-runtime.profile.configure-project-runtime
+  // NFR: REQ-NFR-ops.observability.tool-error-readability
+  // KI: KI-11
   it("rejects cross-project runtime profile on create", async () => {
     const foreignProfile = createRuntimeProfile({
       projectId: "proj-2",
@@ -104,7 +108,7 @@ describe("MCP task tools runtime contract", () => {
         runtimeProfileId: foreignProfile!.id,
       }),
     ).rejects.toMatchObject({
-      // Контракт: невалидный выбор профиля → валидационная ошибка MCP.
+      // Контракт: невалидный выбор профиля → валидационная ошибка MCP (структурный код обязателен).
       code: -32602,
       message: expect.stringContaining("Invalid runtime profile selection"),
     });
@@ -172,6 +176,10 @@ describe("MCP task tools runtime contract", () => {
     });
   });
 
+  // BR: BR-fact.project.runtime-profiles
+  // FR: REQ-FR-runtime.profile.configure-project-runtime
+  // NFR: REQ-NFR-ops.observability.tool-error-readability
+  // KI: KI-11
   it("rejects disabled runtime profile on update", async () => {
     const disabledProfile = createRuntimeProfile({
       projectId: "proj-1",

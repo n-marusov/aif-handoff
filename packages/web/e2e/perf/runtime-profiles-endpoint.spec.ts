@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { PERF_API_URL, PERF_BUDGETS, recordNetwork } from "./utils";
+import {
+  PERF_API_URL,
+  PERF_BUDGETS,
+  evaluateBudgetSamples,
+  recordNetwork,
+  resolvePerfBudgetPolicy,
+} from "./utils";
 
 // Явное исключение §4 (docs/qa/e2e-gui-testing.md): perf-бюджет эндпоинта
 // runtime-профилей — техническое поведение без UC/US, инфраструктурная
@@ -10,50 +16,54 @@ import { PERF_API_URL, PERF_BUDGETS, recordNetwork } from "./utils";
 // (включая серверный обход ~/.codex/sessions), второй — кеш в памяти эндпоинта.
 test.describe("runtime-profiles endpoint timing", () => {
   test("cold and warm reads stay under their budgets", async ({ page, request }) => {
+    const policy = resolvePerfBudgetPolicy();
+    const coldSamples: number[] = [];
+    const warmSamples: number[] = [];
+
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    const network = recordNetwork(page, (url) => url.includes("/runtime-profiles"));
+    for (let attempt = 0; attempt < policy.attempts; attempt += 1) {
+      const network = recordNetwork(page, (url) => url.includes("/runtime-profiles"));
 
-    // Холодный вызов выполняется из страницы, чтобы cookies/origin совпадали
-    // с контекстом приложения. Вызов прямой, не через UI-триггер, чтобы
-    // отделить стоимость эндпоинта от рендера React.
-    // Идём через прокси Vite (same origin), чтобы исключить CORS и рассинхрон
-    // cookies — это повторяет реальный dev-сценарий общения с API.
-    const coldStart = Date.now();
-    const coldResponse = await page.evaluate(async () => {
-      const started = performance.now();
-      const res = await fetch("/runtime-profiles?includeGlobal=true", {
-        credentials: "include",
+      const coldStart = Date.now();
+      const coldResponse = await page.evaluate(async () => {
+        const started = performance.now();
+        const res = await fetch("/runtime-profiles?includeGlobal=true", {
+          credentials: "include",
+        });
+        return { status: res.status, ms: performance.now() - started };
       });
-      return { status: res.status, ms: performance.now() - started };
-    });
-    const coldTotalMs = Date.now() - coldStart;
+      const coldTotalMs = Date.now() - coldStart;
 
-    const warmResponse = await page.evaluate(async () => {
-      const started = performance.now();
-      const res = await fetch("/runtime-profiles?includeGlobal=true", {
-        credentials: "include",
+      const warmResponse = await page.evaluate(async () => {
+        const started = performance.now();
+        const res = await fetch("/runtime-profiles?includeGlobal=true", {
+          credentials: "include",
+        });
+        return { status: res.status, ms: performance.now() - started };
       });
-      return { status: res.status, ms: performance.now() - started };
-    });
 
-    const samples = network.stop();
+      const samples = network.stop();
+      expect(coldResponse.status).toBe(200);
+      expect(warmResponse.status).toBe(200);
+      coldSamples.push(coldResponse.ms);
+      warmSamples.push(warmResponse.ms);
 
-    // eslint-disable-next-line no-console
-    console.log("[perf] runtime-profiles:", {
-      coldMs: coldResponse.ms,
-      warmMs: warmResponse.ms,
-      coldTotalMs,
-      samples: samples.map((s) => ({ durationMs: s.durationMs, status: s.status })),
-    });
+      // eslint-disable-next-line no-console
+      console.log("[perf] runtime-profiles:", {
+        attempt: attempt + 1,
+        coldMs: coldResponse.ms,
+        warmMs: warmResponse.ms,
+        coldTotalMs,
+        samples: samples.map((s) => ({ durationMs: s.durationMs, status: s.status })),
+      });
+    }
 
-    expect(coldResponse.status).toBe(200);
-    expect(warmResponse.status).toBe(200);
-    expect(coldResponse.ms).toBeLessThan(PERF_BUDGETS.runtimeProfilesColdMs);
-    expect(warmResponse.ms).toBeLessThan(PERF_BUDGETS.runtimeProfilesWarmMs);
+    const coldEval = evaluateBudgetSamples(coldSamples, PERF_BUDGETS.runtimeProfilesColdMs, policy);
+    const warmEval = evaluateBudgetSamples(warmSamples, PERF_BUDGETS.runtimeProfilesWarmMs, policy);
+    expect(coldEval.pass).toBe(true);
+    expect(warmEval.pass).toBe(true);
 
-    // Базовая проверка через request API Node ходит напрямую в API (без прокси),
-    // чтобы поломка dev-прокси Vite проявлялась как разница между измерениями.
     const baseline = await request.get(`${PERF_API_URL}/runtime-profiles?includeGlobal=true`);
     expect(baseline.ok()).toBeTruthy();
   });

@@ -494,9 +494,13 @@ describe("runImplementer rework behavior", () => {
       options: { resume?: string };
     };
 
-    // Слэш-команда остаётся на первой строке, чтобы Claude Code мог её развернуть
+    // BR: BR-trigger.task-lifecycle.done-to-accepted
+    // FR: REQ-FR-pipeline.review-loop.iterate-review-feedback,REQ-FR-pipeline.implementation.execute-change-in-isolation
+    // NFR: REQ-NFR-api.availability.coordinator-resilience
+    // KI: KI-13
+    // Для rework в skill-режиме стартуем через fix-команду
     const firstLine = call.prompt.split("\n")[0] ?? "";
-    expect(firstLine).toBe("/aif-implement @.ai-factory/PLAN.md");
+    expect(firstLine).toBe("/aif-fix @.ai-factory/PLAN.md");
 
     // Шапка доработки + комментарий + протокол по-прежнему внедряются в тело
     expect(call.prompt).toContain("REWORK REQUEST — THIS IS THE PRIMARY TASK");

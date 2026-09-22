@@ -239,6 +239,23 @@ describe("MCP tools contract", () => {
     expect(findTaskById(task!.id)?.plan).toContain("Step one");
   });
 
+  // BR: BR-trigger.automation.plan-review-gate
+  // FR: REQ-FR-vcs-auto.plan-review.publish-plan-for-approval
+  // NFR: REQ-NFR-data.compliance.task-state-persistence
+  // KI: KI-10
+  it("handoff_push_plan persists to canonical file path when persistTarget=canonical_file", async () => {
+    const task = createTask({ projectId: "proj-1", title: "Plan file", description: "D" });
+    const push = server.tools.get("handoff_push_plan")!;
+    const result = await push.callback({
+      taskId: task!.id,
+      planContent: "## Plan\n- [ ] Canonical",
+      persistTarget: "canonical_file",
+    });
+    const body = await parseToolText(result);
+    expect((body.task as { hasPlan: boolean }).hasPlan).toBe(true);
+    expect(findTaskById(task!.id)?.plan).toContain("Canonical");
+  });
+
   it("handoff_annotate_plan inserts a task annotation into markdown", async () => {
     const task = createTask({ projectId: "proj-1", title: "Annotate", description: "D" });
     const annotate = server.tools.get("handoff_annotate_plan")!;

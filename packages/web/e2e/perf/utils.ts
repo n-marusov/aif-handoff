@@ -109,7 +109,7 @@ export function recordNetwork(
       url: request.url(),
       status: response.status(),
       durationMs: Date.now() - startedAt,
-      fromCache: response.fromServiceWorker() || response.fromCache?.() === true,
+      fromCache: response.fromServiceWorker(),
       resourceType: request.resourceType(),
     });
   };
@@ -151,3 +151,11 @@ export const PERF_BUDGETS = {
   chatSessionsColdMs: 6_000,
   chatSessionsWarmMs: 1_500,
 } as const;
+
+export {
+  evaluateBudgetSamples,
+  median,
+  resolvePerfBudgetPolicy,
+  type PerfBudgetEvaluation,
+  type PerfBudgetPolicy,
+} from "../../src/lib/perfBudgetPolicy";

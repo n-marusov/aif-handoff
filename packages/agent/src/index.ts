@@ -23,7 +23,7 @@ import { applyGitIdentity, getEnv, logger } from "@aif/shared";
 import { bootstrapRuntimeRegistry } from "@aif/runtime";
 import { pollAndProcess, setRuntimeRegistry } from "./coordinator.js";
 import { flushAllActivityQueues } from "./hooks.js";
-import { notifyProjectRuntimeLimitBroadcast, notifyTaskUsageBroadcast } from "./notifier.js";
+import { handleUsageSinkRecorded } from "./usageSinkCallbacks.js";
 import { connectWakeChannel, closeWakeChannel, waitForApiReady } from "./wakeChannel.js";
 import { abortAllActiveStages } from "./stageAbort.js";
 import { startPollScheduler } from "./pollScheduler.js";
@@ -101,17 +101,7 @@ bootstrapRuntimeRegistry({
   runtimeModules: env.AIF_RUNTIME_MODULES,
   modelEffortDiscoveryEnabled: env.AIF_RUNTIME_MODEL_EFFORT_DISCOVERY_ENABLED,
   usageSink: createDbUsageSink({
-    onRecorded: (event) => {
-      if (event.context.taskId && event.context.projectId && event.usage) {
-        void notifyTaskUsageBroadcast(event.context.taskId, event.context.projectId, event.usage);
-      }
-      if (!event.context.projectId || !event.profileId) return;
-      // Уведомление об исчерпании лимита шлём без привязки к задаче: лимит
-      // относится к профилю проекта, и задачи может уже не быть.
-      void notifyProjectRuntimeLimitBroadcast(event.context.projectId, event.profileId, {
-        taskId: event.context.taskId ?? null,
-      });
-    },
+    onRecorded: handleUsageSinkRecorded,
   }),
 })
   .then((registry) => {

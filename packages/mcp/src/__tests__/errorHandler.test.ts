@@ -9,20 +9,6 @@ describe("errorHandler", () => {
       expect(toMcpError(err)).toBe(err);
     });
 
-    it("converts validation errors", () => {
-      const err = new Error("validation failed");
-      const result = toMcpError(err);
-      expect(result).toBeInstanceOf(McpError);
-      expect(result.code).toBe(ErrorCode.InvalidParams);
-    });
-
-    it("converts not found errors", () => {
-      const err = new Error("Task not found");
-      const result = toMcpError(err);
-      expect(result).toBeInstanceOf(McpError);
-      expect(result.code).toBe(ErrorCode.InvalidParams);
-    });
-
     it("converts generic errors to internal error", () => {
       const err = new Error("something broke");
       const result = toMcpError(err);

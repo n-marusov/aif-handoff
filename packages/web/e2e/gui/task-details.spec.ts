@@ -4,7 +4,10 @@ import { API_URL, createTaskViaApi, deleteTaskViaApi, openProjectBoard, runId } 
 // UC-dashboard.detail.view-task-details: пользователь открывает детальный просмотр задачи (основной источник).
 // HF2.3: детали изменения (контекст).
 // contract-aif-rest-api: GET /tasks/:id, POST /tasks/:id/comments — внешний oracle (контекст).
-// KI: «E2E GUI: в UI нет композера комментариев» — лента проверяется через API-созданный комментарий (контекст).
+// BR: BR-fact.audit.observability
+// FR: REQ-FR-dashboard.detail.display-task-details
+// NFR: REQ-NFR-api.compliance.request-validation
+// KI: KI-01
 test("L-02: открывает детали задачи и видит секции", async ({ page, request }) => {
   const suffix = runId();
   const title = `e2e-detail-${suffix}`;
@@ -50,7 +53,11 @@ test("L-02: открывает детали задачи и видит секц�
 // UC-dashboard.detail.view-task-details: комментарий сохраняется и отображается в ленте (основной источник).
 // HF2.3: детали изменения (контекст).
 // contract-aif-rest-api: POST /tasks/:id/comments, GET /tasks/:id/comments (контекст).
-// KI: композер комментариев отсутствует — комментарий создаётся через реальный API (контекст).
+// BR: BR-fact.audit.observability
+// FR: REQ-FR-dashboard.detail.display-task-details
+// NFR: REQ-NFR-api.compliance.request-validation
+// KI: KI-01
+// Дополнительный API-oracle для ленты комментариев.
 test("L-02b: лента комментариев отображает комментарий из API (oracle)", async ({
   page,
   request,
@@ -86,6 +93,52 @@ test("L-02b: лента комментариев отображает комме
     expect(comments.ok()).toBe(true);
     const list = (await comments.json()) as Array<{ message: string }>;
     expect(list.some((comment) => comment.message === message)).toBe(true);
+  } finally {
+    await deleteTaskViaApi(request, task.id);
+  }
+});
+
+// BR: BR-fact.audit.observability
+// FR: REQ-FR-dashboard.detail.display-task-details
+// NFR: REQ-NFR-api.compliance.request-validation
+// KI: KI-01
+// UI-регрессия: пользователь создаёт комментарий прямо из панели деталей.
+test("L-02c: пользователь отправляет комментарий через UI и видит его после reload", async ({
+  page,
+  request,
+}) => {
+  const suffix = runId();
+  const title = `e2e-detail-ui-comment-${suffix}`;
+  const message = `e2e-ui-comment-${suffix}`;
+  const task = await createTaskViaApi(request, {
+    title,
+    autoMode: false,
+    paused: true,
+  });
+
+  try {
+    await openProjectBoard(page);
+    await page.getByText(title, { exact: true }).click();
+    await page.getByRole("tab", { name: "Comments" }).click();
+
+    await page.getByLabel("Comment message").fill(message);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+
+    await expect(page.getByText(message, { exact: true })).toBeVisible();
+
+    const oracle = await request.get(`${API_URL}/tasks/${task.id}/comments`);
+    expect(oracle.ok()).toBe(true);
+    const comments = (await oracle.json()) as Array<{ message: string }>;
+    expect(comments.some((comment) => comment.message === message)).toBe(true);
+
+    await page.reload();
+    const detailHeading = page.getByRole("heading", { name: title, exact: true });
+    if (!(await detailHeading.isVisible())) {
+      await page.getByText(title, { exact: true }).first().click();
+      await expect(detailHeading).toBeVisible();
+    }
+    await page.getByRole("tab", { name: "Comments" }).click();
+    await expect(page.getByText(message, { exact: true })).toBeVisible();
   } finally {
     await deleteTaskViaApi(request, task.id);
   }

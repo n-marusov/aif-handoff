@@ -73,6 +73,47 @@ describe("GitLab workflow synchronization", () => {
     );
   });
 
+  it("scopes sync to e2e project ids and forwards trace correlation payload", async () => {
+    // BR: BR-constraint.automation.concurrency
+    // FR: REQ-FR-pipeline.implementation.execute-change-in-isolation
+    // NFR: REQ-NFR-ops.observability.error-categorization
+    // KI: KI-15D
+    vi.stubEnv("AIF_GITLAB_SYNC_PROJECT_SCOPE", "project-2");
+    vi.stubEnv("AIF_GITLAB_SYNC_TRACE_ID", "trace-e2e-15d");
+    vi.stubEnv("AIF_GITLAB_SYNC_TEST_ID", "L-15D");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as typeof fetch;
+
+    await synchronizeGitLabProjects(Date.parse("2026-08-13T10:05:00.000Z"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3999/projects/project-2/gitlab/sync",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          traceId: "trace-e2e-15d",
+          testId: "L-15D",
+          projectScope: ["project-2"],
+        }),
+      }),
+    );
+  });
+
+  it("skips all GitLab sync requests when scoped projects exclude enabled repositories", async () => {
+    // BR: BR-constraint.automation.concurrency
+    // FR: REQ-FR-pipeline.implementation.execute-change-in-isolation
+    // NFR: REQ-NFR-ops.observability.error-categorization
+    // KI: KI-15D
+    vi.stubEnv("AIF_GITLAB_SYNC_PROJECT_SCOPE", "project-e2e-only");
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as typeof fetch;
+
+    await synchronizeGitLabProjects(Date.parse("2026-08-13T10:06:00.000Z"));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not inspect repositories or call GitLab paths when GIT_PROVIDER is github", async () => {
     vi.stubEnv("GIT_PROVIDER", "github");
     const fetchMock = vi.fn();
