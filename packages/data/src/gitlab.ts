@@ -470,24 +470,92 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
     if (linked.taskId) {
       taskId = linked.taskId;
       const existing = tx.select().from(tasks).where(eq(tasks.id, taskId)).get();
+      if (!existing) {
+        throw new Error(`Task ${taskId} linked from GitLab issue ${input.iid} was not found`);
+      }
+      const project = tx.select().from(projects).where(eq(projects.id, input.projectId)).get();
+      if (!project) throw new Error(`Project ${input.projectId} not found`);
+
+      // Контракт импорта применяется и при ре-импорте существующей задачи:
+      // изменение autoQueueMode проекта должно синхронизировать owner/autoMode
+      // у связанной задачи, иначе задача может застрять в неверной модели исполнения.
+      const importedOwner: "ai" | "human" = project.autoQueueMode ? "ai" : "human";
+      const importedAutoMode = project.autoQueueMode;
+
       const nextTags = JSON.stringify(tags);
       const nextPaused = input.state === "closed";
+      const ownerChanged =
+        existing.executionOwner !== importedOwner || existing.autoMode !== importedAutoMode;
+      const nextOwnershipRevision = ownerChanged
+        ? Number(existing.ownershipRevision ?? 0) + 1
+        : existing.ownershipRevision;
+
       // Строка задачи обновляется только при реальном изменении синхронизированного
-      // содержимого. Обновление updatedAt на каждой синхронизации ломает
-      // releaseStaleTaskClaims: сборщик мёртвых процессов считает свежий updatedAt
-      // признаком активности, и захват упавшего координатора висел бы до истечения TTL
-      // вместо восстановления по пульсу.
+      // содержимого или контрактного владения. Обновление updatedAt на каждой
+      // синхронизации ломает releaseStaleTaskClaims: сборщик мёртвых процессов
+      // считает свежий updatedAt признаком активности, и захват упавшего
+      // координатора висел бы до истечения TTL вместо восстановления по пульсу.
       const changed =
-        !existing ||
         existing.title !== title ||
         existing.description !== description ||
         existing.tags !== nextTags ||
-        existing.paused !== nextPaused;
+        existing.paused !== nextPaused ||
+        ownerChanged;
       if (changed) {
         tx.update(tasks)
-          .set({ title, description, tags: nextTags, paused: nextPaused, updatedAt: now })
+          .set({
+            title,
+            description,
+            tags: nextTags,
+            paused: nextPaused,
+            autoMode: importedAutoMode,
+            executionOwner: importedOwner,
+            ownershipRevision: nextOwnershipRevision,
+            updatedAt: now,
+          })
           .where(eq(tasks.id, taskId))
           .run();
+
+        if (ownerChanged) {
+          tx.insert(taskExecutorHistory)
+            .values({
+              id: crypto.randomUUID(),
+              taskId,
+              taskTitleSnapshot: title,
+              ownershipRevision: Number(nextOwnershipRevision ?? 0),
+              executionOwner: importedOwner,
+              assigneesSnapshotJson: "[]",
+              statusSnapshot: existing.status,
+              actorKind: "system",
+              actorId: "gitlab-sync",
+              actorDisplayNameSnapshot: "GitLab Sync",
+              reason: "gitlab_issue_reimported_owner_sync",
+              createdAt: now,
+            })
+            .run();
+
+          tx.insert(auditEvents)
+            .values(
+              createAuditEventValues({
+                action: "gitlab.issue_reimported_owner_synced",
+                entityType: "task",
+                entityId: taskId,
+                taskId,
+                taskTitleSnapshot: title,
+                executionOwnerSnapshot: importedOwner,
+                assigneesSnapshot: [],
+                statusSnapshot: existing.status,
+                actor: { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },
+                metadata: {
+                  repository: `${input.namespace}/${input.repository}`,
+                  iid: input.iid,
+                  autoQueueMode: project.autoQueueMode,
+                },
+                createdAt: now,
+              }),
+            )
+            .run();
+        }
       } else {
         log.debug(
           { projectId: input.projectId, iid: input.iid, taskId },
@@ -503,6 +571,15 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
     // ошибкой данных, а не штатной ситуацией.
     const project = tx.select().from(projects).where(eq(projects.id, input.projectId)).get();
     if (!project) throw new Error(`Project ${input.projectId} not found`);
+    // Контракт владения при импорте (US-integration.pr-mr.gitlab-issue-shortcut-accept):
+    // владелец и autoMode импортированной задачи определяются проектом на момент импорта.
+    //   autoQueueMode=true  -> executionOwner="ai",    autoMode=true
+    //   autoQueueMode=false -> executionOwner="human", autoMode=false
+    // При включении auto-queue ПОСЛЕ импорта задача уже создана human-владельцем и не
+    // подхватывается автоматической очередью (human-owned исключены из auto-queue);
+    // для автономного контура автоочередь должна быть включена ДО первого sync.
+    const importedOwner: "ai" | "human" = project.autoQueueMode ? "ai" : "human";
+    const importedAutoMode = project.autoQueueMode;
     taskId = crypto.randomUUID();
     // Новая задача ставится в конец доски: позиция берется как максимум по
     // проекту плюс шаг. maxPosition может быть null (пустая доска), поэтому есть
@@ -519,18 +596,19 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
       plansDir: config.paths.plans,
       defaultPlanPath: config.paths.plan,
     });
-    // Импортированная из трекера задача сразу готова к автономному прогону:
-    // autoMode и владелец ai означают, что координатор подхватит ее без ручного
-    // вмешательства, а paused выставляется по состоянию issue, чтобы закрытая в
-    // GitLab задача не исполнялась.
+    // Импортированная из трекера задача наследует режим автоочереди проекта:
+    // при autoQueueMode владелец ai + autoMode означают готовность к автономному
+    // прогону координатором; в ручном режиме задача остаётся human-владельцем и
+    // требует явного старта. paused выставляется по состоянию issue, чтобы закрытая
+    // в GitLab задача не исполнялась.
     tx.insert(tasks)
       .values({
         id: taskId,
         projectId: input.projectId,
         title,
         description,
-        autoMode: true,
-        executionOwner: "ai",
+        autoMode: importedAutoMode,
+        executionOwner: importedOwner,
         plannerMode: "full",
         planPath,
         planDocs: true,
@@ -546,15 +624,16 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
         updatedAt: now,
       })
       .run();
-    // Событие истории фиксирует, что владельцем задачи стала система, а не
-    // человек; revision 0 - стартовое значение до первой смены владельца.
+    // Событие истории фиксирует владельца, назначенного контрактом импорта
+    // (система при autoQueueMode, иначе человек); revision 0 - стартовое значение
+    // до первой смены владельца.
     tx.insert(taskExecutorHistory)
       .values({
         id: crypto.randomUUID(),
         taskId,
         taskTitleSnapshot: title,
         ownershipRevision: 0,
-        executionOwner: "ai",
+        executionOwner: importedOwner,
         assigneesSnapshotJson: "[]",
         statusSnapshot: initialStatus,
         actorKind: "system",
@@ -575,7 +654,7 @@ export function importGitLabIssueTask(input: ImportGitLabIssueInput): {
           entityId: taskId,
           taskId,
           taskTitleSnapshot: title,
-          executionOwnerSnapshot: "ai",
+          executionOwnerSnapshot: importedOwner,
           assigneesSnapshot: [],
           statusSnapshot: initialStatus,
           actor: { kind: "system", id: "gitlab-sync", displayNameSnapshot: "GitLab Sync" },

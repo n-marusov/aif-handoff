@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { projects, tasks } from "@aif/shared";
+import { auditEvents, projects, taskExecutorHistory, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/data/db";
 
 const testDb = { current: createTestDb() };
@@ -94,6 +94,60 @@ describe("GitLab issue import", () => {
     },
   };
 
+  it("creates an AI-owned autoMode task when the project has autoQueueMode enabled", () => {
+    testDb.current
+      .update(projects)
+      .set({ autoQueueMode: true })
+      .where(eq(projects.id, "project-1"))
+      .run();
+
+    const imported = importGitLabIssueTask(input);
+    const taskRow = testDb.current
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, imported.taskId))
+      .get();
+
+    expect(taskRow?.executionOwner).toBe("ai");
+    expect(taskRow?.autoMode).toBe(true);
+  });
+
+  it("creates a human-owned non-autoMode task when the project has autoQueueMode disabled", () => {
+    // project-1 создаётся в beforeEach без auto_queue_mode (default 0).
+    const imported = importGitLabIssueTask(input);
+    const taskRow = testDb.current
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, imported.taskId))
+      .get();
+
+    expect(taskRow?.executionOwner).toBe("human");
+    expect(taskRow?.autoMode).toBe(false);
+  });
+
+  it("records the imported owner in executor history and audit snapshot", () => {
+    testDb.current
+      .update(projects)
+      .set({ autoQueueMode: true })
+      .where(eq(projects.id, "project-1"))
+      .run();
+
+    const imported = importGitLabIssueTask(input);
+    const history = testDb.current
+      .select()
+      .from(taskExecutorHistory)
+      .where(eq(taskExecutorHistory.taskId, imported.taskId))
+      .get();
+    expect(history?.executionOwner).toBe("ai");
+
+    const audit = testDb.current
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, imported.taskId))
+      .get();
+    expect(audit?.executionOwnerSnapshot).toBe("ai");
+  });
+
   it("is idempotent and refreshes the same task", () => {
     const first = importGitLabIssueTask(input);
     const second = importGitLabIssueTask({
@@ -108,6 +162,56 @@ describe("GitLab issue import", () => {
     expect(listGitLabIssues("project-1")).toHaveLength(1);
     expect(testDb.current.select().from(tasks).all()).toHaveLength(1);
     expect(findGitLabIssueByTaskId(first.taskId)?.metadata.title).toBe("Updated title");
+  });
+
+  it("re-syncs execution owner and autoMode on re-import after autoQueueMode toggle", () => {
+    testDb.current
+      .update(projects)
+      .set({ autoQueueMode: false })
+      .where(eq(projects.id, "project-1"))
+      .run();
+
+    const first = importGitLabIssueTask(input);
+    const firstTask = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
+    expect(firstTask?.executionOwner).toBe("human");
+    expect(firstTask?.autoMode).toBe(false);
+
+    testDb.current
+      .update(projects)
+      .set({ autoQueueMode: true })
+      .where(eq(projects.id, "project-1"))
+      .run();
+
+    const second = importGitLabIssueTask({
+      ...input,
+      sourceUpdatedAt: "2026-08-13T11:00:00Z",
+      snapshot: { ...input.snapshot, title: "Owner toggle sync" },
+    });
+
+    expect(second.taskId).toBe(first.taskId);
+    expect(second.created).toBe(false);
+
+    const syncedTask = testDb.current.select().from(tasks).where(eq(tasks.id, first.taskId)).get();
+    expect(syncedTask?.executionOwner).toBe("ai");
+    expect(syncedTask?.autoMode).toBe(true);
+    expect(syncedTask?.ownershipRevision).toBe(1);
+
+    const historyRows = testDb.current
+      .select()
+      .from(taskExecutorHistory)
+      .where(eq(taskExecutorHistory.taskId, first.taskId))
+      .all();
+    const historyReasons = historyRows.map((row) => row.reason);
+    expect(historyRows).toHaveLength(2);
+    expect(historyReasons).toContain("gitlab_issue_imported");
+    expect(historyReasons).toContain("gitlab_issue_reimported_owner_sync");
+
+    const auditRows = testDb.current
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, first.taskId))
+      .all();
+    expect(auditRows.map((row) => row.action)).toContain("gitlab.issue_reimported_owner_synced");
   });
 
   it("does NOT bump task updatedAt when the synced snapshot is unchanged", () => {
