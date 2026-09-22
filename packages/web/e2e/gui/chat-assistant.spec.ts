@@ -24,6 +24,8 @@ interface EffectiveChatRuntime {
   profile?: { name: string } | null;
 }
 
+const LLM_INTEGRATION_ENABLED = process.env.AIF_LLM_INTEGRATION === "1";
+
 /** Возвращает эффективный chat-рантайм стенда или null, если endpoint недоступен. */
 async function readEffectiveChatRuntime(request: import("@playwright/test").APIRequestContext) {
   const response = await request.get(`${API_URL}/runtime-profiles/effective/chat/${PROJECT_ID}`);
@@ -49,8 +51,13 @@ async function readSessionMessages(
 }
 
 // Пропуск всего набора, если на стенде нет ключа для chat-рантайма.
-test.describe("L-08c/L-08d: чат с AI-ассистентом (реальный LLM)", () => {
+test.describe("L-08c/L-08d @requires-llm: чат с AI-ассистентом (реальный LLM)", () => {
   test.beforeAll(async ({ request }) => {
+    test.skip(
+      !LLM_INTEGRATION_ENABLED,
+      "L-08c/L-08d require AIF_LLM_INTEGRATION=1 — run the llm lane (e2e:llm)",
+    );
+
     const effective = await readEffectiveChatRuntime(request);
     test.skip(
       !effective?.resolved?.hasApiKey,

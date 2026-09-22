@@ -2,7 +2,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 
-const READY_URL = process.env.AIF_WEB_URL ?? "http://localhost:5180";
+const PERF_API_PORT = Number(process.env.AIF_PERF_API_PORT ?? 39009);
+const PERF_WEB_PORT = Number(process.env.AIF_PERF_WEB_PORT ?? 35180);
+const READY_URL = process.env.AIF_WEB_URL ?? `http://localhost:${PERF_WEB_PORT}`;
+const PERF_API_URL = process.env.AIF_PERF_API_URL ?? `http://localhost:${PERF_API_PORT}`;
+const PERF_WS_URL = process.env.AIF_PERF_WS_URL ?? `ws://localhost:${PERF_API_PORT}/ws`;
 const READY_TIMEOUT_MS = 120_000;
 const READY_POLL_MS = 500;
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -96,7 +100,14 @@ async function run() {
   const dev = spawnInherited("npm", ["run", "dev:perf"], {
     cwd: REPO_ROOT,
     detached: process.platform !== "win32",
-    env: { AIF_ENABLE_CODEX_LOGIN_PROXY: "false", PARTICIPANTS_MODE_ENABLED: "false" },
+    env: {
+      AIF_ENABLE_CODEX_LOGIN_PROXY: "false",
+      PARTICIPANTS_MODE_ENABLED: "false",
+      PORT: String(PERF_API_PORT),
+      AIF_API_PORT: String(PERF_API_PORT),
+      API_BASE_URL: PERF_API_URL,
+      WEB_PORT: String(PERF_WEB_PORT),
+    },
   });
 
   const devExit = once(dev, "exit").then(([code, signal]) => ({ code, signal }));
@@ -104,10 +115,20 @@ async function run() {
   try {
     await waitForReady(dev);
 
-    const perf = spawnInherited("playwright", ["test", "--config=playwright.config.ts"], {
-      cwd: WEB_ROOT,
-      env: { AIF_SKIP_DEV_SERVER: "1" },
-    });
+    const perf = spawnInherited(
+      "playwright",
+      ["test", "--config=playwright.config.ts", "e2e/perf"],
+      {
+        cwd: WEB_ROOT,
+        env: {
+          AIF_SKIP_DEV_SERVER: "1",
+          AIF_WEB_URL: READY_URL,
+          AIF_PERF_API_URL: PERF_API_URL,
+          AIF_E2E_API_URL: PERF_API_URL,
+          AIF_E2E_WS_URL: PERF_WS_URL,
+        },
+      },
+    );
     const [code, signal] = await once(perf, "exit");
     if (code !== 0) {
       throw new Error(`playwright exited with ${code ?? signal}`);

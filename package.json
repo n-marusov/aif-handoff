@@ -40,6 +40,8 @@
     "participants:bootstrap": "npm run participants:bootstrap --workspace=@aif/api --",
     "e2e:gui": "npm run e2e:gui --workspace=@aif/web",
     "e2e:api": "npm run e2e:api --workspace=@aif/web",
+    "e2e:core": "npm run e2e:core --workspace=@aif/web",
+    "e2e:llm": "npm run e2e:llm --workspace=@aif/web",
     "e2e:docker": "node scripts/e2e-docker.mjs",
     "integration": "node scripts/integration.mjs",
     "integration:llm": "node scripts/integration.mjs --llm",

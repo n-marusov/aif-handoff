@@ -304,6 +304,7 @@ async function prepareStack() {
   await ensureGitLabRootUser(urls);
   await ensureGitLabToken(urls);
   await ensureGitLabTestProject(urls);
+  await cleanE2eTestRoots();
   log("stack is ready");
   return urls;
 }
@@ -357,6 +358,67 @@ async function seedReferenceProject() {
     // Сея-шаг не должен ронять API-спектры: проект нужен только GUI (рендер
     // доски). Ошибка exec почти всегда означает проблемы с контейнером.
     log(`WARNING: could not seed reference project: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Worktree-гигиена E2E-корней (P1.2)
+// ---------------------------------------------------------------------------
+
+// Очищает служебные артефакты E2E-проектов, из-за которых planner уходил бы в
+// blocked_external с dirty_worktree (Дефект C: `?? .ai-factory/plans/`).
+//
+// Что делает:
+//   1. удаляет `.ai-factory/plans/` (и остальной `.ai-factory/`) в эталонном
+//      проекте (/home/www/vnc) и в изолированных E2E-корнях (/home/www/e2e-*);
+//   2. удаляет untracked служебные артефакты в тех же корнях (`git clean -fd`
+//      с allowlist: только каталог `.ai-factory/`, никакой другой untracked
+//      контент не трогается);
+//   3. явная проверка чистоты: если остаётся грязный tracked-статус — логируется
+//      предупреждение с конкретным корнем для triage.
+//
+// Выполняется в контейнере api (у него смонтирован PROJECTS_DIR в /home/www,
+// есть git и node). Best-effort: ошибка cleanup не роняет прогон, но логируется.
+async function cleanE2eTestRoots() {
+  const shell = [
+    "set -e",
+    "for root in $(find /home/www -maxdepth 1 -type d \( -name 'vnc' -o -name 'e2e-*' \) 2>/dev/null); do",
+    '  if [ -d "$root/.git" ] || [ -f "$root/.git" ]; then',
+    '    rm -rf "$root/.ai-factory"',
+    '    git -C "$root" clean -fd -- .ai-factory >/dev/null 2>&1 || true',
+    '    dirty=$(git -C "$root" status --porcelain --untracked-files=no)',
+    '    if [ -n "$dirty" ]; then',
+    '      echo "AIF_E2E_DIRTY_ROOT: $root: $dirty"',
+    "    fi",
+    "  fi",
+    "done",
+    "echo AIF_E2E_CLEANUP_DONE",
+  ].join("\n");
+
+  try {
+    const stdout = await runCommandCapture(
+      "docker",
+      ["compose", ...composeArgs(["exec", "-T", "api", "sh", "-c", shell])],
+      { cwd: REPO_ROOT },
+    );
+    const dirtyRoots = stdout
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("AIF_E2E_DIRTY_ROOT:"))
+      .map((line) => line.slice("AIF_E2E_DIRTY_ROOT: ".length));
+    if (dirtyRoots.length > 0) {
+      log(
+        `WARNING: dirty tracked state in e2e test roots (best-effort cleanup, run may be flaky): ${dirtyRoots.join("; ")}`,
+      );
+    } else {
+      log("e2e test roots cleaned (no dirty tracked state)");
+    }
+    if (!stdout.includes("AIF_E2E_CLEANUP_DONE")) {
+      throw new Error(`unexpected cleanup output: ${stdout.slice(0, 200)}`);
+    }
+  } catch (error) {
+    // Не роняем весь прогон: сервисы уже подняты; проблему чисточи логируем,
+    // чтобы triage знал, где копать при последующем blocked_external.
+    log(`WARNING: e2e test-root cleanup failed: ${error instanceof Error ? error.message : error}`);
   }
 }
 
@@ -517,19 +579,28 @@ function runPlaywrightEnv(extraEnv = {}) {
   return env;
 }
 
-async function runGui() {
-  const env = runPlaywrightEnv();
-  log("running GUI e2e specs (npm run e2e:gui --workspace=@aif/web)");
-  await runCommand("npm", ["run", "e2e:gui", "--workspace=@aif/web"], {
+function runPlaywrightEnvForLane(lane) {
+  // Контуры (P0.1): core — детерминированная регрессия без LLM;
+  // llm — интеграционный контур с AIF_LLM_INTEGRATION=1 и runtime-профилем.
+  const extraEnv = lane === "llm" ? { AIF_LLM_INTEGRATION: "1" } : {};
+  return runPlaywrightEnv(extraEnv);
+}
+
+async function runGui(lane = "core") {
+  const env = runPlaywrightEnvForLane(lane);
+  const target = lane === "llm" ? "e2e:gui:llm" : "e2e:gui";
+  log(`running GUI e2e specs (${target})`);
+  await runCommand("npm", ["run", target, "--workspace=@aif/web"], {
     cwd: REPO_ROOT,
     env,
   });
 }
 
-async function runApi() {
-  const env = runPlaywrightEnv();
-  log("running API e2e specs (npm run e2e:api --workspace=@aif/web)");
-  await runCommand("npm", ["run", "e2e:api", "--workspace=@aif/web"], {
+async function runApi(lane = "core") {
+  const env = runPlaywrightEnvForLane(lane);
+  const target = lane === "llm" ? "e2e:api:llm" : "e2e:api";
+  log(`running API e2e specs (${target})`);
+  await runCommand("npm", ["run", target, "--workspace=@aif/web"], {
     cwd: REPO_ROOT,
     env,
   });
@@ -538,7 +609,9 @@ async function runApi() {
 async function main() {
   const args = process.argv.slice(1);
   const requested = args.find((arg) =>
-    ["--prepare", "--gui", "--api", "--all", "--down"].includes(arg),
+    ["--prepare", "--gui", "--api", "--all", "--llm", "--llm-gui", "--llm-api", "--down"].includes(
+      arg,
+    ),
   );
   // Без явного режима запускаем полный прогон (--all): иначе сообщение
   // «e2e: OK, all e2e tests passed» после одного prepare было бы вводящим
@@ -570,10 +643,33 @@ async function main() {
       return;
     }
     if (mode === "--gui" || mode === "--all") {
-      await runGui();
+      await runGui("core");
     }
     if (mode === "--api" || mode === "--all") {
-      await runApi();
+      await runApi("core");
+    }
+    if (mode === "--llm" || mode === "--llm-gui" || mode === "--llm-api") {
+      log(
+        "LLM lane: requires AIF_LLM_INTEGRATION=1 and an enabled runtime profile (fail-fast preflight)",
+      );
+      const preflightEnv = runPlaywrightEnvForLane("llm");
+      try {
+        await runCommand("node", ["packages/web/scripts/e2e-llm-preflight.mjs"], {
+          cwd: REPO_ROOT,
+          env: preflightEnv,
+        });
+      } catch (error) {
+        fail(
+          `LLM-lane preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+      if (mode === "--llm" || mode === "--llm-gui") {
+        await runGui("llm");
+      }
+      if (mode === "--llm" || mode === "--llm-api") {
+        await runApi("llm");
+      }
     }
     log(`e2e: OK, all e2e tests passed (mode=${mode})`);
   } catch (error) {

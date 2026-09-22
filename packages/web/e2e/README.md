@@ -4,21 +4,26 @@ Playwright-driven browser tests. The suite exercises the real web stack
 (API + web bundle) against a running dev server, covers browser-only interaction
 regressions, and enforces latency budgets.
 
-## Run
+## Run lanes (core vs llm)
 
-The primary path is the monorepo Makefile, which **brings up the docker-compose stack**
-(api / web / agent / mcp **+ a test GitLab CE instance**), waits for readiness, seeds the
-reference E2E project, provisions GitLab (root PAT + test repository `root/e2e-target`),
-and runs the Playwright suite against it:
+The suite is split into two lanes so capability-dependent scenarios do not pollute
+the deterministic regression signal (see `docs/qa/us-e2e-refactor-plan.md`):
+
+- **Core lane (`e2e:core`)** — deterministic, LLM-agnostic regression. LLM-dependent
+  scenarios (tagged `@requires-llm`) are **skipped with an explicit reason** when
+  `AIF_LLM_INTEGRATION != 1`.
+- **LLM lane (`e2e:llm`)** — capability/integration lane for scenarios that need a
+  real runtime. A fail-fast preflight (`packages/web/scripts/e2e-llm-preflight.mjs`)
+  validates `AIF_LLM_INTEGRATION=1` and an enabled runtime profile **before** the specs
+  run; a misconfigured stack fails fast with actionable diagnostics instead of a
+  cascade of suite timeouts.
 
 ```bash
-# one-time: install browsers
-npm run perf:install --workspace=@aif/web
-
 # from the repo root — prepares + starts the docker-compose stack (+ GitLab)
-make e2e          # GUI + API спектры против docker-compose
-make e2e-gui      # только GUI-спектры (e2e/gui)
-make e2e-api      # только API-спектры (e2e/api, REST+WS напрямую в сервис api)
+make e2e          # core-контур: GUI + API спектры против docker-compose
+make e2e-gui      # core-контур: только GUI-спектры (e2e/gui)
+make e2e-api      # core-контур: только API-спектры (e2e/api, REST+WS напрямую в сервис api)
+make e2e-llm      # llm-контур: AIF_LLM_INTEGRATION=1 + runtime-профиль (GUI+API)
 make e2e-docker   # только поднять/подготовить стек, без прогона
 
 # остановка стека, когда он больше не нужен
@@ -50,8 +55,10 @@ aborts and no root user is created (see `scripts/e2e-docker.mjs`).
 Direct npm invocations are still available for local-dev iteration:
 
 ```bash
-npm run e2e:gui --workspace=@aif/web    # GUI-спектры (e2e/gui)
-npm run e2e:api --workspace=@aif/web    # API-спектры (e2e/api)
+npm run e2e:core --workspace=@aif/web   # core-контур (GUI + API; LLM-сценарии skip)
+npm run e2e:gui --workspace=@aif/web    # core-контур: GUI-спектры (e2e/gui)
+npm run e2e:api --workspace=@aif/web    # core-контур: API-спектры (e2e/api)
+npm run e2e:llm --workspace=@aif/web    # llm-контур (preflight + GUI/API LLM-сценарии)
 npm run perf --workspace=@aif/web      # полный набор (GUI + perf-бюджеты + scroll/participants)
 ```
 

@@ -10,6 +10,7 @@ import {
   isRetryableMergeReadinessDelay,
 } from "../shared/gitlab.js";
 import { API_URL, runId } from "../gui/common.js";
+import { logTraceStep, testIdFor } from "../shared/trace.js";
 
 /**
  * E2E API: полный путь GitLab Issue → MR → Accepted (US-integration.pr-mr.gitlab-issue-to-accepted).
@@ -119,17 +120,19 @@ async function ensureGitLabIssueMrFeature(request: APIRequestContext): Promise<v
 
 /**
  * Гейт LLM-контура: real-runtime обязателен.
- * В этом сценарии недопустим skip — отсутствие флага/профиля считается ошибкой стенда.
+ * Capability-условие оформлено как условная применимость: в core-контуре
+ * (e2e:core) LLM-сценарии пропускаются с явной причиной, а не падают;
+ * в llm-контуре (e2e:llm) fail-fast preflight уже проверил флаг и профиль.
  */
 async function ensureLlmRuntime(request: APIRequestContext): Promise<void> {
   const response = await request.get(`${API_URL}/settings`);
   expect(response.ok()).toBe(true);
   const settings = (await response.json()) as ApiSettings;
 
-  expect(
-    LLM_INTEGRATION_ENABLED,
-    "full-LLM pipeline requires AIF_LLM_INTEGRATION=1 (real runtime profile + coordinator)",
-  ).toBe(true);
+  test.skip(
+    !LLM_INTEGRATION_ENABLED,
+    "full-LLM pipeline requires AIF_LLM_INTEGRATION=1 (real runtime profile + coordinator) — run the llm lane (e2e:llm)",
+  );
   expect(
     settings.runtimeReadiness?.enabledRuntimeProfileCount ?? 0,
     "no enabled runtime profile configured in the stack",
@@ -364,6 +367,8 @@ async function createIssue(
 // ─────────────────────────────────────────────────────────────────────────────
 // L-10c — Scenario 1: Sync импортирует GitLab Issue БЕЗ MR в Backlog.
 // Детерминированный уровень (LLM не нужен).
+// Primary e2e layer: API (import/ownership contract + state machine).
+// GUI smoke: L-10-full (llm lane) starts from the same import.
 // ─────────────────────────────────────────────────────────────────────────────
 test("L-10c: Issue без MR импортируется в backlog с внешней ссылкой", async ({ request }) => {
   await ensureGitLabIssueMrFeature(request);
@@ -385,8 +390,12 @@ test("L-10c: Issue без MR импортируется в backlog с внешн
 
     const task = await readTaskById(request, link.taskId!);
     expect(task.status).toBe("backlog");
-    expect(task.executionOwner).toBe("ai");
-    // Импортированная задача управляется координатором (autoMode), пауза не ставится.
+    // Контракт владения (P0.2): проект создан без autoQueueMode (default false),
+    // поэтому импорт создаёт human-владельца с autoMode=false. Задача остаётся в
+    // backlog до явного старта или включения автоочереди.
+    expect(task.executionOwner).toBe("human");
+    expect(task.autoMode).toBe(false);
+    // Импортированная задача не паузируется для открытого issue.
     expect(task.paused).toBe(false);
 
     // Oracle: статус согласован и в списке задач проекта.
@@ -405,6 +414,8 @@ test("L-10c: Issue без MR импортируется в backlog с внешн
 // L-10d — Scenario 3 (гарантия «план реально создан и опубликован в MR») +
 // Scenario 8 (единый MR). Маршрут publish-plan (реальный, без LLM).
 // Детерминированный уровень.
+// Primary e2e layer: API (plan-file + MR publication state).
+// GUI smoke: plan_review rendering is covered by L-10-full (llm lane).
 // ─────────────────────────────────────────────────────────────────────────────
 test("L-10d: план создан (файл) и опубликован в едином MR с текстом плана", async ({ request }) => {
   await ensureGitLabIssueMrFeature(request);
@@ -442,8 +453,8 @@ test("L-10d: план создан (файл) и опубликован в ед�
     expect(planStatus.exists).toBe(true);
 
     // Публикация MR плана (реальный маршрут publish-plan).
-    await createGitLabBranchWithCommit(request, branchName, `l10d-${marker}`);
-    const published = await publishPlanMr(request, project.id, linkedTaskId, branchName);
+    const createdBranch = await createGitLabBranchWithCommit(request, branchName, `l10d-${marker}`);
+    const published = await publishPlanMr(request, project.id, linkedTaskId, createdBranch);
     expect(published.mrIid).toBeTruthy();
     expect(published.mrMode).toBe("plan_review");
 
@@ -457,10 +468,14 @@ test("L-10d: план создан (файл) и опубликован в ед�
     expect(mr.description).toContain("e2e fixture");
 
     // Scenario 8 (единый MR): повторная публикация переиспользует ТОТ ЖЕ MR.
-    await createGitLabBranchWithCommit(request, branchName, `l10d-${marker}-v2`);
-    const republished = await publishPlanMr(request, project.id, linkedTaskId, branchName);
+    const createdBranch2 = await createGitLabBranchWithCommit(
+      request,
+      branchName,
+      `l10d-${marker}-v2`,
+    );
+    const republished = await publishPlanMr(request, project.id, linkedTaskId, createdBranch2);
     expect(republished.mrIid).toBe(published.mrIid);
-    const mrsForBranch = await listMergeRequestsForBranch(request, branchName);
+    const mrsForBranch = await listMergeRequestsForBranch(request, createdBranch);
     expect(mrsForBranch.length).toBe(1);
 
     // Задача остаётся plan_review-ожидающей (статус не двинулся сам).
@@ -477,6 +492,7 @@ test("L-10d: план создан (файл) и опубликован в ед�
 // L-10g — Scenarios 10+11 (краткий путь) + Scenario 8 (единый MR): Issue со
 // связанным открытым MR импортируется сразу в Done, Merge MR → sync → Accepted.
 // Детерминированный уровень (LLM не нужен).
+// Primary e2e layer: API (state semantics). GUI L-10 exercises the same path via UI.
 // ─────────────────────────────────────────────────────────────────────────────
 test("L-10g: краткий путь Issue+MR → Done, Merge → Accepted (единый MR)", async ({ request }) => {
   await ensureGitLabIssueMrFeature(request);
@@ -489,14 +505,14 @@ test("L-10g: краткий путь Issue+MR → Done, Merge → Accepted (ед
 
   try {
     // Scenario 10: Issue со связанным открытым MR → импорт сразу в Done.
-    await createGitLabBranchWithCommit(request, branchName, `l10g-${marker}`);
+    const createdBranch = await createGitLabBranchWithCommit(request, branchName, `l10g-${marker}`);
     const issue = await createIssue(request, label, `[L-10g] issue ${marker}`);
     const mr = await gitLabApi<GitLabMrResponse>(
       request,
       `/projects/${gitLabProjectPathEncoded()}/merge_requests`,
       "POST",
       {
-        source_branch: branchName,
+        source_branch: createdBranch,
         target_branch: "main",
         title: `[L-10g] mr ${marker}`,
         description: `Closes #${issue.iid}`,
@@ -519,7 +535,7 @@ test("L-10g: краткий путь Issue+MR → Done, Merge → Accepted (ед
     await pollTaskStatus(request, link.taskId!, "accepted", 60_000);
 
     // Единый MR: всё ещё один MR для ветки, состояние merged.
-    const mrsForBranch = await listMergeRequestsForBranch(request, branchName);
+    const mrsForBranch = await listMergeRequestsForBranch(request, createdBranch);
     expect(mrsForBranch.length).toBe(1);
     const finalLink = (await readGitLabState(request, project.id)).issues.find(
       (entry) => entry.iid === issue.iid,
@@ -614,10 +630,12 @@ test("Negative A: done→implementing, close-MR→paused (не accepted)", async
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// L-10-full — Scenarios 2-9 с РЕАЛЬНЫМ LLM в автоматическом режиме.
+// L-10-full @requires-llm — Scenarios 2-9 с РЕАЛЬНЫМ LLM в автоматическом режиме.
 //
+// Primary e2e layer: API (state machine + MR lifecycle). GUI L-10-full keeps the
+// UI connect/sync smoke and runs in the same llm lane.
 // Гейт: AIF_LLM_INTEGRATION=1 + GitLab-режим + настроенный runtime-профиль
-// (ensureLlmRuntime). Координатор автоматически проходит:
+// (ensureLlmRuntime + e2e-llm-preflight). Координатор автоматически проходит:
 //   backlog → planning → plan_review (planner + plan-publisher публикуют MR плана)
 //   → approve в GitLab (человек) → implementing → implementer → verify → reviewer
 //   (auto-review gate: pass → done; rework/manual — закрытые ветки не проверяем) → done
@@ -637,7 +655,9 @@ test("Negative A: done→implementing, close-MR→paused (не accepted)", async
 //     он вернул бы задачу в implementing (reviewIterationCount), тест проверяет
 //     детерминированно завершение через done — фактическое закрытие loop.
 // ─────────────────────────────────────────────────────────────────────────────
-test("L-10-full: полный AI-конвейер Issue → Accepted (LLM, автономно)", async ({ request }) => {
+test("L-10-full @requires-llm: полный AI-конвейер Issue → Accepted (LLM, автономно)", async ({
+  request,
+}) => {
   await ensureGitLabIssueMrFeature(request);
   await ensureLlmRuntime(request);
 
@@ -649,8 +669,18 @@ test("L-10-full: полный AI-конвейер Issue → Accepted (LLM, ав�
   const project = await createIsolatedProject(request, marker);
   let linkedTaskId: string | null = null;
   let planMrIid: number | null = null;
+  const traceId = testIdFor("L-10-full");
+  logTraceStep(traceId, "project created", { projectId: project.id, marker, label });
 
   try {
+    // Контракт владения (P0.2): автоочередь включаем ДО импорта, иначе задача
+    // создаётся human-владельцем и не подхватывается координатором.
+    const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
+      data: { enabled: true },
+    });
+    expect(queueMode.ok()).toBe(true);
+    logTraceStep(traceId, "auto-queue enabled", { projectId: project.id });
+
     // Scenario 1-2: импорт задачи и автоочередь проекта (backlog → planning).
     const issue = await createIssue(request, label, `[L-10-full] issue ${marker}`);
     await connectGitLabViaApi(request, project.id, label);
@@ -658,13 +688,6 @@ test("L-10-full: полный AI-конвейер Issue → Accepted (LLM, ав�
     const link = await pollForTaskLink(request, project.id, issue.iid);
     linkedTaskId = link.taskId;
     if (!linkedTaskId) throw new Error("task not linked");
-
-    // Проект в режиме автоочереди: координатор сам двигает backlog → planning.
-    // (При включении autoQueueMode задача не требует ручных событий.)
-    const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
-      data: { enabled: true },
-    });
-    expect(queueMode.ok()).toBe(true);
 
     // Scenario 3: ждём публикации MR плана координатором (plan-publisher).
     // publish-plan выставляет mrMode=plan_review и кладёт план в description.
@@ -773,6 +796,8 @@ test("L-10-full: полный AI-конвейер Issue → Accepted (LLM, ав�
 // L-10j — US-pipeline.stage.done-to-implementing-rework (Sc.1 + Sc.3):
 // решение человека возвращает задачу из Done в Implementing с reworkRequested.
 // Детерминированный уровень (реальный GitLab shortcut-импорт + legacy-событие).
+// Primary e2e layer: API (rework state semantics + idempotency).
+// GUI smoke: same event via UI sync is covered by L-10c (GUI).
 //
 // Trace:
 //   - UC-pipeline.review-loop.iterate-review-feedback (Agent)
@@ -792,14 +817,14 @@ test("L-10j: done → implementing rework (request_changes) с reworkRequested �
 
   try {
     // Краткий путь: Issue со связанным открытым MR импортируется сразу в done.
-    await createGitLabBranchWithCommit(request, branchName, `l10j-${marker}`);
+    const createdBranch = await createGitLabBranchWithCommit(request, branchName, `l10j-${marker}`);
     const issue = await createIssue(request, label, `[L-10j] issue ${marker}`);
     await gitLabApi<GitLabMrResponse>(
       request,
       `/projects/${gitLabProjectPathEncoded()}/merge_requests`,
       "POST",
       {
-        source_branch: branchName,
+        source_branch: createdBranch,
         target_branch: "main",
         title: `[L-10j] mr ${marker}`,
         description: `Closes #${issue.iid}`,
@@ -844,7 +869,7 @@ test("L-10j: done → implementing rework (request_changes) с reworkRequested �
 // Здесь решение ревью применяется событием request_plan_changes → task переходит в improve,
 // затем improver (реальный LLM) дорабатывает план и возвращает задачу в plan_review.
 // ─────────────────────────────────────────────────────────────────────────────
-test("L-10k: plan_review → improve (доработка плана) → improver → plan_review (LLM)", async ({
+test("L-10k @requires-llm: plan_review → improve (доработка плана) → improver → plan_review (LLM)", async ({
   request,
 }) => {
   await ensureGitLabIssueMrFeature(request);
@@ -857,17 +882,18 @@ test("L-10k: plan_review → improve (доработка плана) → improve
   let linkedTaskId: string | null = null;
 
   try {
+    // Контракт владения (P0.2): автоочередь включаем ДО импорта.
+    const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
+      data: { enabled: true },
+    });
+    expect(queueMode.ok()).toBe(true);
+
     const issue = await createIssue(request, label, `[L-10k] issue ${marker}`);
     await connectGitLabViaApi(request, project.id, label);
     await syncGitLabViaApi(request, project.id);
     const link = await pollForTaskLink(request, project.id, issue.iid);
     linkedTaskId = link.taskId;
     if (!linkedTaskId) throw new Error("task not linked");
-
-    const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
-      data: { enabled: true },
-    });
-    expect(queueMode.ok()).toBe(true);
 
     // Публикация plan-MR координатором (plan-publisher): задача в plan_review.
     await expect

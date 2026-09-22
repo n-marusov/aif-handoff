@@ -140,8 +140,8 @@ coverage: ## Полный прогон тестов с покрытием (FG-CO
 	@echo coverage: OK, coverage report generated
 
 .PHONY: e2e
-e2e: e2e-gui e2e-api ## E2E-тесты Playwright: GUI + API против стека docker-compose (api+web+agent+mcp+gitlab; стек поднимается автоматически)
-	@echo e2e: OK, all e2e tests passed
+e2e: e2e-gui e2e-api ## E2E-тесты Playwright (core-контур): GUI + API против стека docker-compose (api+web+agent+mcp+gitlab; стек поднимается автоматически)
+	@echo e2e: OK, all e2e core-lane tests passed
 
 .PHONY: e2e-docker
 e2e-docker: ## Поднять E2E-стек docker-compose (включая тестовый GitLab) и подготовить его без прогона спектров
@@ -149,14 +149,19 @@ e2e-docker: ## Поднять E2E-стек docker-compose (включая тес
 	@echo e2e-docker: OK, docker-compose stack prepared for e2e
 
 .PHONY: e2e-gui
-e2e-gui: ## E2E GUI-спектры против стека docker-compose (npm run e2e:gui --workspace=@aif/web)
+e2e-gui: ## E2E GUI-спектры (core-контур) против стека docker-compose — LLM-зависимые сценарии пропускаются с причиной
 	@$(NPM_CMD) run e2e:docker -- --gui
-	@echo e2e-gui: OK, all GUI e2e tests passed
+	@echo e2e-gui: OK, all GUI e2e core tests passed
 
 .PHONY: e2e-api
-e2e-api: ## E2E API-спектры: REST+WS напрямую в сервис api против стека docker-compose (npm run e2e:api --workspace=@aif/web)
+e2e-api: ## E2E API-спектры (core-контур): REST+WS напрямую в сервис api против стека docker-compose — LLM-зависимые сценарии пропускаются с причиной
 	@$(NPM_CMD) run e2e:docker -- --api
-	@echo e2e-api: OK, all API e2e tests passed
+	@echo e2e-api: OK, all API e2e core tests passed
+
+.PHONY: e2e-llm
+e2e-llm: ## E2E LLM-контур (интеграционный): AIF_LLM_INTEGRATION=1 + runtime-профиль; fail-fast preflight перед спектрами
+	@$(NPM_CMD) run e2e:docker -- --llm
+	@echo e2e-llm: OK, all e2e llm-lane tests passed
 
 .PHONY: e2e-full
 e2e-full: ## Полный Playwright-набор с perf-бюджетами (npm run perf --workspace=@aif/web)

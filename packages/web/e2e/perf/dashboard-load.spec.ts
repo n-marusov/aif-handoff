@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { PERF_BUDGETS, readNavigationTiming, readWebVitals, recordNetwork } from "./utils";
+import {
+  PERF_BUDGETS,
+  PERF_API_ORIGIN,
+  readNavigationTiming,
+  readWebVitals,
+  recordNetwork,
+} from "./utils";
 
 // Явное исключение §4 (docs/qa/e2e-gui-testing.md): perf-бюджет холодной
 // загрузки дашборда — техническое поведение без UC/US, инфраструктурная
@@ -11,7 +17,7 @@ import { PERF_BUDGETS, readNavigationTiming, readWebVitals, recordNetwork } from
 test.describe("dashboard cold load", () => {
   test("renders kanban shell within LCP/DOM-ready budgets", async ({ page, context }) => {
     await context.clearCookies();
-    const network = recordNetwork(page, (url) => url.includes("localhost:3009"));
+    const network = recordNetwork(page, (url) => url.startsWith(PERF_API_ORIGIN));
 
     const nav = page.goto("/", { waitUntil: "domcontentloaded" });
     const response = await nav;
@@ -36,7 +42,7 @@ test.describe("dashboard cold load", () => {
       nav: timing,
       vitals,
       apiCalls: apiCalls.map(({ url, durationMs, status }) => ({
-        url: url.replace("http://localhost:3009", ""),
+        url: url.replace(PERF_API_ORIGIN, ""),
         durationMs,
         status,
       })),

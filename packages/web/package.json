@@ -18,8 +18,12 @@
     "perf:ui": "playwright test --config=playwright.config.ts --ui",
     "perf:report": "playwright show-report playwright-report",
     "perf:install": "playwright install chromium",
-    "e2e:gui": "playwright test --config=playwright.config.ts e2e/gui",
-    "e2e:api": "playwright test --config=playwright.config.ts e2e/api"
+    "e2e:gui": "playwright test --config=playwright.config.ts e2e/gui --grep-invert @requires-llm",
+    "e2e:api": "playwright test --config=playwright.config.ts e2e/api --grep-invert @requires-llm",
+    "e2e:core": "npm run e2e:gui && npm run e2e:api",
+    "e2e:gui:llm": "playwright test --config=playwright.config.ts e2e/gui --grep @requires-llm",
+    "e2e:api:llm": "playwright test --config=playwright.config.ts e2e/api --grep @requires-llm",
+    "e2e:llm": "node scripts/e2e-llm-preflight.mjs && npm run e2e:gui:llm && npm run e2e:api:llm"
   },
   "dependencies": {
     "@aif/shared": "*",

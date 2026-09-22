@@ -10,6 +10,7 @@ import {
   isRetryableMergeReadinessDelay,
 } from "../shared/gitlab.js";
 import { API_URL, runId } from "./common";
+import { logTraceStep, testIdFor } from "../shared/trace.js";
 
 interface ApiSettings {
   gitProvider?: "github" | "gitlab";
@@ -119,10 +120,13 @@ async function ensureLlmRuntime(request: APIRequestContext): Promise<void> {
   expect(response.ok()).toBe(true);
   const settings = (await response.json()) as ApiSettings;
 
-  expect(
-    LLM_INTEGRATION_ENABLED,
-    "full-LLM pipeline requires AIF_LLM_INTEGRATION=1 (real runtime profile + coordinator)",
-  ).toBe(true);
+  // Capability-условие оформлено как условная применимость, а не жёсткий assert:
+  // в core-контуре (e2e:core) LLM-сценарии пропускаются с явной причиной, а не падают;
+  // в llm-контуре (e2e:llm) fail-fast preflight уже проверил флаг и профиль.
+  test.skip(
+    !LLM_INTEGRATION_ENABLED,
+    "full-LLM pipeline requires AIF_LLM_INTEGRATION=1 (real runtime profile + coordinator) — run the llm lane (e2e:llm)",
+  );
   expect(
     settings.runtimeReadiness?.enabledRuntimeProfileCount ?? 0,
     "no enabled runtime profile configured in the stack",
@@ -436,7 +440,7 @@ async function mergeMrWithRetries(request: APIRequestContext, mrIid: number): Pr
   throw lastError;
 }
 
-// US-integration.pr-mr.gitlab-issue-to-accepted — полный AI-контур Scenario 1..9 (STRICT).
+// US-integration.pr-mr.gitlab-pipeline-run — полный AI-контур Scenario 1..9 (STRICT).
 // Trace: UC-integration.issues.bootstrap-project-sync-and-create-task,
 // UC-pipeline.stage.auto-advance-task, UC-pipeline.plan.generate-change-plan,
 // UC-integration.pr-mr.resolve-review-decision,
@@ -446,7 +450,9 @@ async function mergeMrWithRetries(request: APIRequestContext, mrIid: number): Pr
 // UC-vcs-auto.mr.publish-atomic-merge-request.
 // HF: HF11.1/HF11.2/HF1.1/HF1.2/HF1.4/HF1.5/HF1.6/HF4.3/HF4.4/HF5.1/HF5.3/HF5.4.
 // Oracle: contract-aif-rest-api + contract-aif-gitlab (mandatory external oracle).
-test("L-10-full: full AI pipeline Issue → Accepted (single MR, real LLM)", async ({
+// Primary e2e layer: API (state machine/ownership); GUI = smoke (UI connect/sync triggers).
+// Capability: @requires-llm — runs only in e2e:llm lane.
+test("L-10-full @requires-llm: full AI pipeline Issue → Accepted (single MR, real LLM)", async ({
   page,
   request,
 }) => {
@@ -458,11 +464,22 @@ test("L-10-full: full AI pipeline Issue → Accepted (single MR, real LLM)", asy
   const marker = runId();
   const label = `aif-e2e-full-loop-${marker}`;
   const project = await createIsolatedProject(request, marker);
+  const traceId = testIdFor("L-10-full");
+  logTraceStep(traceId, "project created", { projectId: project.id, marker, label });
 
   // Background (US): для planning/implementing/verify/review должен быть
   // настроен effective runtime profile на уровне проекта.
   const runtimeProfileId = await ensureEffectiveLlmRuntimeProfile(request);
   await setProjectRuntimeDefaults(request, project, runtimeProfileId);
+  logTraceStep(traceId, "runtime defaults set", { runtimeProfileId });
+
+  // Автоочередь включаем ДО первого sync: контракт владения (P0.2) назначает
+  // владельца импортированной задачи по проекту НА МОМЕНТ импорта. Без auto-queue
+  // задача импортируется human-владельцем и не подхватывается координатором.
+  const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
+    data: { enabled: true },
+  });
+  expect(queueMode.ok()).toBe(true);
 
   let linkedTaskId: string | null = null;
   let planMrIid: number | null = null;
@@ -492,6 +509,7 @@ test("L-10-full: full AI pipeline Issue → Accepted (single MR, real LLM)", asy
         ].join("\n"),
       },
     );
+    logTraceStep(traceId, "issue created", { iid: issue.iid, taskId: linkedTaskId });
 
     // Подключение через UI (как требует GUI-контур), затем sync.
     await openBoardForProject(page, project.id);
@@ -509,12 +527,7 @@ test("L-10-full: full AI pipeline Issue → Accepted (single MR, real LLM)", asy
       .toBe("backlog");
     observedStatuses.add("backlog");
 
-    // Scenario 2: auto-queue backlog → planning.
-    const queueMode = await request.patch(`${API_URL}/projects/${project.id}/auto-queue-mode`, {
-      data: { enabled: true },
-    });
-    expect(queueMode.ok()).toBe(true);
-
+    // Scenario 2: auto-queue backlog → planning (auto-queue уже включён до sync).
     await pollWithBlockedFailFast(
       request,
       linkedTaskId,
@@ -661,11 +674,13 @@ test("L-10-full: full AI pipeline Issue → Accepted (single MR, real LLM)", asy
   }
 });
 
-// US-integration.pr-mr.gitlab-issue-to-accepted — Scenario 10 + 11 (краткий контур):
+// US-integration.pr-mr.gitlab-issue-shortcut-accept — Scenario 10 + 11 (краткий контур):
 //   Issue с уже существующим MR → импорт сразу в done → merge/sync → accepted.
 // UC-integration.issues.bootstrap-project-sync-and-create-task + UC-integration.pr-mr.resolve-review-decision.
 // HF11.1/HF11.2/HF1.6; BR-fact.git.vcs-workflow + BR-trigger.automation.done-to-accepted-approval.
 // Oracle: contract-aif-rest-api (GET /tasks/:id, GET /projects/:id/gitlab) + contract-aif-gitlab (MR state).
+// Primary e2e layer: GUI (UI connect/sync flow + user-visible shortcut acceptance).
+// Secondary smoke/trace: API L-10g covers the same transition deterministically (state semantics).
 test("L-10: shortcut path Issue+MR → Done, Merge → Accepted (single MR, UI sync)", async ({
   page,
   request,
@@ -675,7 +690,7 @@ test("L-10: shortcut path Issue+MR → Done, Merge → Accepted (single MR, UI s
   const marker = runId();
   const label = `aif-e2e-l10-${marker}`;
   const issueTitle = `[L-10] issue ${marker}`;
-  const branchName = `e2e-l10-${marker}`;
+  let branchName = `e2e-l10-${marker}`;
 
   // Изолированный проект: у VNC (c1de80b3) на диске уже есть git-remote на
   // gitlab.com/atol-cross-platform/vnc, и prepareRepository оставил бы его —
@@ -683,7 +698,8 @@ test("L-10: shortcut path Issue+MR → Done, Merge → Accepted (single MR, UI s
   const project = await createIsolatedProject(request, marker);
 
   try {
-    await createGitLabBranchWithCommit(request, branchName, `l10-${marker}`);
+    const createdBranch = await createGitLabBranchWithCommit(request, branchName, `l10-${marker}`);
+    branchName = createdBranch;
 
     const issue = await gitLabApi<GitLabIssueResponse>(
       request,
@@ -780,10 +796,11 @@ test("L-10: shortcut path Issue+MR → Done, Merge → Accepted (single MR, UI s
   }
 });
 
-// US-integration.pr-mr.gitlab-issue-to-accepted — подготовительный negative (валидность подключения):
-// не входит в numbered-сценарии 1..11/A1..A13, но обязателен как guardrail окружения.
+// US-integration.issues.bootstrap-project-sync-and-create-task — negative (валидность подключения):
+// не входит в numbered-сценарии, но обязателен как guardrail окружения.
 // UC-integration.issues.bootstrap-project-sync-and-create-task; HF11.1.
 // Oracle: contract-aif-rest-api (PUT /projects/:id/gitlab не должен создавать connection на invalid repo).
+// Primary e2e layer: GUI (form + error rendering). API duplicates the negative validation logic.
 test("L-10b: connect GitLab с невалидным URL отклоняется и не создаёт connection (negative)", async ({
   page,
   request,
@@ -814,11 +831,13 @@ test("L-10b: connect GitLab с невалидным URL отклоняется �
   }
 });
 
-// US-integration.pr-mr.gitlab-issue-to-accepted — негативные ветки MR:
+// US-integration.pr-mr.gitlab-issue-shortcut-accept — негативные ветки MR:
 //   A8 done → implementing (request_changes),
 //   A9 close MR без merge/approve: не accepted + paused.
 // UC-integration.pr-mr.resolve-review-decision; HF11.2/HF5.3; BR-inference.git.review-decision-precedence.
 // Oracle: contract-aif-rest-api (POST /tasks/:id/events, GET /tasks/:id), contract-aif-gitlab (MR state=closed).
+// Primary e2e layer: API (state semantics — API L-10j/L-10c/Negative A run the same assertions).
+// Secondary smoke/trace: GUI keeps UI sync triggers; deep state assertions stay in API lane.
 test("L-10c: negative MR decisions (A8/A9) keep flow safe", async ({ page, request }) => {
   await ensureGitLabIssueMrFeature(request);
 
@@ -833,7 +852,11 @@ test("L-10c: negative MR decisions (A8/A9) keep flow safe", async ({ page, reque
 
     // A8: краткий путь (Issue+MR) импортирует в done; request_changes возвращает в implementing.
     const branchA8 = `e2e-neg-a8-${marker}`;
-    await createGitLabBranchWithCommit(request, branchA8, `neg-a8-${marker}`);
+    const createdBranchA8 = await createGitLabBranchWithCommit(
+      request,
+      branchA8,
+      `neg-a8-${marker}`,
+    );
     const issueA8 = await gitLabApi<GitLabIssueResponse>(
       request,
       `/projects/${gitLabProjectPathEncoded()}/issues`,
@@ -849,7 +872,7 @@ test("L-10c: negative MR decisions (A8/A9) keep flow safe", async ({ page, reque
       `/projects/${gitLabProjectPathEncoded()}/merge_requests`,
       "POST",
       {
-        source_branch: branchA8,
+        source_branch: createdBranchA8,
         target_branch: "main",
         title: `[L-10c] A8 mr ${marker}`,
         description: `Closes #${issueA8.iid}`,
@@ -879,7 +902,11 @@ test("L-10c: negative MR decisions (A8/A9) keep flow safe", async ({ page, reque
 
     // A9: close MR без merge/approve не должен переводить задачу в accepted.
     const branchA9 = `e2e-neg-a9-${marker}`;
-    await createGitLabBranchWithCommit(request, branchA9, `neg-a9-${marker}`);
+    const createdBranchA9 = await createGitLabBranchWithCommit(
+      request,
+      branchA9,
+      `neg-a9-${marker}`,
+    );
     const issueA9 = await gitLabApi<GitLabIssueResponse>(
       request,
       `/projects/${gitLabProjectPathEncoded()}/issues`,
@@ -895,7 +922,7 @@ test("L-10c: negative MR decisions (A8/A9) keep flow safe", async ({ page, reque
       `/projects/${gitLabProjectPathEncoded()}/merge_requests`,
       "POST",
       {
-        source_branch: branchA9,
+        source_branch: createdBranchA9,
         target_branch: "main",
         title: `[L-10c] A9 mr ${marker}`,
         description: `Closes #${issueA9.iid}`,
@@ -924,7 +951,7 @@ test("L-10c: negative MR decisions (A8/A9) keep flow safe", async ({ page, reque
     expect(a9Task.status).not.toBe("accepted");
     expect(a9Task.paused).toBe(true);
 
-    const mrsForBranchA9 = await listMergeRequestsForBranch(request, branchA9);
+    const mrsForBranchA9 = await listMergeRequestsForBranch(request, createdBranchA9);
     expect(mrsForBranchA9.length).toBe(1);
     expect(mrsForBranchA9[0]?.state).toBe("closed");
 

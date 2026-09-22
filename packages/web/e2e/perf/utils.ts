@@ -1,5 +1,12 @@
 import type { Page, Request, Response } from "@playwright/test";
 
+export const PERF_API_URL =
+  process.env.AIF_PERF_API_URL ??
+  process.env.AIF_E2E_API_URL ??
+  process.env.API_BASE_URL ??
+  "http://localhost:39009";
+export const PERF_API_ORIGIN = new URL(PERF_API_URL).origin;
+
 export interface NavigationTimingMetrics {
   dnsMs: number;
   connectMs: number;

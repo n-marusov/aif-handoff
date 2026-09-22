@@ -17,8 +17,8 @@ if (existsSync(rootEnvLocal)) dotenvConfig({ path: rootEnvLocal, override: true 
 
 const WEB_PORT = Number(process.env.WEB_PORT) || 5180;
 const WEB_HOST = process.env.WEB_HOST?.trim() || "localhost";
-const API_PORT = Number(process.env.PORT) || 3009;
-const apiTarget = `http://localhost:${API_PORT}`;
+const API_PORT = Number(process.env.AIF_API_PORT ?? process.env.PORT) || 3009;
+const apiTarget = process.env.API_BASE_URL?.trim() || `http://localhost:${API_PORT}`;
 
 export default defineConfig(async () => {
   let tailwindcss: typeof import("@tailwindcss/vite").default;

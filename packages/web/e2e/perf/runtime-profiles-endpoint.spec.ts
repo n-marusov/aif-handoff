@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { PERF_BUDGETS, recordNetwork } from "./utils";
+import { PERF_API_URL, PERF_BUDGETS, recordNetwork } from "./utils";
 
 // Явное исключение §4 (docs/qa/e2e-gui-testing.md): perf-бюджет эндпоинта
 // runtime-профилей — техническое поведение без UC/US, инфраструктурная
@@ -54,7 +54,7 @@ test.describe("runtime-profiles endpoint timing", () => {
 
     // Базовая проверка через request API Node ходит напрямую в API (без прокси),
     // чтобы поломка dev-прокси Vite проявлялась как разница между измерениями.
-    const baseline = await request.get("http://localhost:3009/runtime-profiles?includeGlobal=true");
+    const baseline = await request.get(`${PERF_API_URL}/runtime-profiles?includeGlobal=true`);
     expect(baseline.ok()).toBeTruthy();
   });
 });
