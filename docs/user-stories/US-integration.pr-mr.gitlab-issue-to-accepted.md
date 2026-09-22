@@ -2,6 +2,12 @@
 
 # US-integration.pr-mr.gitlab-issue-to-accepted: Сквозной путь GitLab Issue → Accepted (единый MR, полный и краткий контуры)
 
+> **Алиас (superseded, 2026-09-21).** История декомпозирована на три фокусированные
+> истории (план «US + E2E Refactor»): `US-integration.pr-mr.gitlab-issue-shortcut-accept`,
+> `US-integration.pr-mr.gitlab-plan-review`, `US-integration.pr-mr.gitlab-pipeline-run`.
+> Прежние сценарии 1–11, A1–A13 остаются валидными якорями для совместимости;
+> маппинг — в секциях «Совместимость с прежней US» новых файлов и в `README.md` (Migration).
+
 ```gherkin
 @US-integration.pr-mr.gitlab-issue-to-accepted @HF11.1 @HF11.2 @HF1.1 @HF1.2 @HF1.3 @HF1.4 @HF1.5 @HF1.6 @HF3.1 @HF4.1 @HF4.3 @HF4.4 @HF5.1 @HF5.3 @HF5.4 @UC-integration.issues.bootstrap-project-sync-and-create-task @P0 @integration @issues @pr-mr
 Feature: US-integration.pr-mr.gitlab-issue-to-accepted Сквозной путь GitLab Issue → Accepted

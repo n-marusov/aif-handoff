@@ -370,9 +370,14 @@ curl -s -X PATCH http://localhost:3009/projects/<project-id>/auto-queue-mode \
   -d '{ "enabled": true }'
 ```
 
-**Смысл.** Импортированная из Issue задача попадает в статус `backlog` с `autoMode=true`,
-но координатор **двигает дальше только проекты с `autoQueueMode=true`**. Без этого шага
-задача навсегда останется в `backlog`. (В RESEARCH.md этот шаг пропущен — см. Приложение А.)
+**Смысл.** Контракт импорта зависит от `autoQueueMode` на момент sync:
+
+- `autoQueueMode=true` → задача импортируется как `executionOwner="ai"`, `autoMode=true`;
+- `autoQueueMode=false` → задача импортируется как `executionOwner="human"`, `autoMode=false`.
+
+Поэтому для автономного контура auto-queue нужно включить **до первого sync**. Если
+импорт выполнен при выключенном `autoQueueMode`, задача останется human-owned в `backlog`
+и не будет подхвачена авто-очередью, пока владелец не будет изменён/переимпорт синхронизирован.
 
 **Проверяемый результат.**
 
@@ -401,9 +406,10 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync \
 ```
 
 **Смысл.** Синхронизация забирает все открытые Issues репозитория, прошедшие
-`eligibility`, и импортирует их как задачи:
-`autoMode=true`, `executionOwner="ai"`, статус `backlog`, в заголовке карточки — `#<iid> <title>`.
-Синхронизация идемпотентна: повторный запуск не создаёт дубликатов (в ответе `imported: 0`).
+`eligibility`, и импортирует их как задачи в `backlog` (заголовок `#<iid> <title>`).
+Поля владения (`executionOwner`, `autoMode`) вычисляются из `autoQueueMode` проекта на
+момент синхронизации. Синхронизация идемпотентна: повторный запуск не создаёт дубликатов
+(в ответе `imported: 0`).
 
 **Проверяемый результат.**
 
@@ -536,11 +542,11 @@ curl -s -X POST http://localhost:3009/projects/<project-id>/gitlab/sync -H "Cont
    Реальная проверка готовности LLM — `POST /runtime-profiles/validate`
    (`routes/runtimeProfiles.ts`, `{ ok: boolean, message, details, profile }`),
    а состояние системы — `GET /settings` (блок `runtimeReadiness`).
-2. **Пропущен обязательный шаг: включение авто-очереди.**
-   Импортированная задача приходит с `autoMode=true`, но координатор продвигает из
-   `backlog` только проекты с `autoQueueMode=true` (`listAutoQueueProjects` фильтрует по
-   `projects.autoQueueMode`). Без `PATCH /projects/:id/auto-queue-mode {"enabled":true}`
-   задача застревает в backlog. → Шаг 6.
+2. **Пропущен обязательный шаг: включение авто-очереди до первого sync.**
+   Контракт импорта задаёт owner/autoMode по `projects.autoQueueMode` в момент синхронизации:
+   при `autoQueueMode=false` задача импортируется human-owned (`autoMode=false`) и не
+   продвигается авто-очередью. Поэтому `PATCH /projects/:id/auto-queue-mode {"enabled":true}`
+   должен быть выполнен до первого `.../gitlab/sync` для автономного контура. → Шаг 6.
 3. **Локальный репозиторий — не клон.** `POST /projects` создаёт `/home/www/demo` как
    пустой git-репозиторий с коммитом `"init: project scaffold"` и скаффолдом `.ai-factory/`
    (`initProject` → `initBaseProjectDirectory` + `ai-factory init`). Содержимое `main` с

@@ -85,7 +85,7 @@ Feature: US-<domain>.<subdomain>.<action> <краткое название>
 
 ## Текущее состояние
 
-На дату актуализации (2026-09-21) каталог содержит **23 пользовательские истории** — E2E-релевантный срез для подтверждения бизнес-пользы в сквозных GUI/API/Agent-путях.
+На дату актуализации (2026-09-21) каталог содержит **26 файлов пользовательских историй** — E2E-релевантный срез для подтверждения бизнес-пользы в сквозных GUI/API/Agent-путях (25 активных + 1 алиас после декомпозиции GitLab-истории).
 
 Оставленные US:
 
@@ -107,13 +107,31 @@ Feature: US-<domain>.<subdomain>.<action> <краткое название>
 - `US-integration.issues.sync-github-issue`
 - `US-integration.issues.bootstrap-project-sync-and-create-task`
 - `US-integration.pr-mr.resolve-review-decision`
-- `US-integration.pr-mr.gitlab-issue-to-accepted`
+- `US-integration.pr-mr.gitlab-issue-to-accepted` _(алиас — декомпозирован, см. Migration ниже)_
+- `US-integration.pr-mr.gitlab-issue-shortcut-accept` _(новый, декомпозиция прежней 10/11/A8/A9)_
+- `US-integration.pr-mr.gitlab-plan-review` _(новый, декомпозиция прежней 3/4/A1–A4)_
+- `US-integration.pr-mr.gitlab-pipeline-run` _(новый, декомпозиция прежней 1/2/5–9/A5–A7/A10–A13)_
 - `US-integration.pr-mr.rework-plan-on-mr-comment`
 - `US-vcs-auto.mr.publish-atomic-merge-request`
 - `US-chat.project-context.consult-ai-assistant`
 - `US-chat.task-context.discuss-task-with-ai`
 
 Критерий включения: у истории есть прямой trace в каталоге E2E-сценариев (`docs/qa/e2e-gui-testing.md` §12 и/или `docs/qa/e2e-api-testing.md` §12).
+
+### Migration (2026-09-21)
+
+`US-integration.pr-mr.gitlab-issue-to-accepted` декомпозирована на три фокусированные
+истории (план «US + E2E Refactor», P2.2):
+
+- `US-integration.pr-mr.gitlab-issue-shortcut-accept` — краткий путь Issue+MR → Accepted
+  (прежние сценарии 10, 11, A8, A9);
+- `US-integration.pr-mr.gitlab-plan-review` — Plan Review решения (прежние 3, 4, A1–A4);
+- `US-integration.pr-mr.gitlab-pipeline-run` — полный конвейер (прежние 1, 2, 5–9, A5–A7, A10–A13).
+
+Прежний файл сохранён как **алиас** (якоря и Gherkin-сценарии остаются валидными для
+совместимости исторических ссылок); в его шапке добавлена ссылка на новые истории.
+Каждая новая история содержит секцию «Совместимость с прежней US» с маппингом
+старых номеров сценариев.
 
 ### Сознательно непокрытые HF
 
